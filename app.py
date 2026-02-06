@@ -57,16 +57,12 @@ os.makedirs(app.config['TEMP_FOLDER'], exist_ok=True)
 
 # For Render deployment - read credentials from environment
 print("🔍 Checking for Google credentials...")
+# Don't write to file - load directly from env
 GOOGLE_CREDS = os.environ.get('GOOGLE_CREDENTIALS_JSON')
-
 if GOOGLE_CREDS:
-    print(f"✅ GOOGLE_CREDENTIALS_JSON found in environment ({len(GOOGLE_CREDS)} chars)")
-    # Don't write to file - will be loaded directly in get_google_service()
-elif os.path.exists('google.json'):
-    print("✅ Using local google.json file")
+    print("✅ Google credentials found in environment")
 else:
-    print("⚠️ No Google credentials found!")
-
+    print("⚠️ GOOGLE_CREDENTIALS_JSON not found")
 
 
 # Google Sheets configuration
@@ -78,48 +74,32 @@ PIKIPIKI_SHEET_ID = '1XFwPITQgZmzZ8lbg8MKD9S4rwHyk2cDOKrcxO7SAjHA'
 def get_google_service():
     """Create Google Sheets service using Service Account"""
     try:
-        print("🔄 Attempting to load Google credentials...")
-        
-        # First try environment variable
         GOOGLE_CREDS = os.environ.get('GOOGLE_CREDENTIALS_JSON')
-        if GOOGLE_CREDS:
-            print("📄 Loading credentials from environment variable...")
-            try:
-                creds_dict = json.loads(GOOGLE_CREDS)
-                credentials = service_account.Credentials.from_service_account_info(
-                    creds_dict,
-                    scopes=SCOPES
-                )
-                print("✅ Google credentials loaded successfully from env")
-                service = build('sheets', 'v4', credentials=credentials)
-                return service
-            except json.JSONDecodeError as e:
-                print(f"❌ JSON decode error: {e}")
-                print(f"First 200 chars of credentials: {GOOGLE_CREDS[:200] if GOOGLE_CREDS else 'None'}")
-                raise
-            except Exception as e:
-                print(f"❌ Error loading from env: {e}")
-                raise
+        if not GOOGLE_CREDS:
+            raise ValueError("GOOGLE_CREDENTIALS_JSON not found")
         
-        # Fallback to file
-        elif os.path.exists('google.json'):
-            print("📄 Loading credentials from google.json file...")
-            credentials = service_account.Credentials.from_service_account_file(
-                'google.json',
-                scopes=SCOPES
-            )
-            service = build('sheets', 'v4', credentials=credentials)
-            return service
+        # Parse JSON
+        creds_dict = json.loads(GOOGLE_CREDS)
         
-        else:
-            raise ValueError("No Google credentials found. Set GOOGLE_CREDENTIALS_JSON environment variable or create google.json file.")
-            
+        # Fix private key newlines
+        if 'private_key' in creds_dict:
+            pk = creds_dict['private_key']
+            # Ensure proper newline format
+            if '\\n' in pk:
+                creds_dict['private_key'] = pk.replace('\\n', '\n')
+        
+        # Load credentials
+        credentials = service_account.Credentials.from_service_account_info(
+            creds_dict,
+            scopes=SCOPES
+        )
+        
+        service = build('sheets', 'v4', credentials=credentials)
+        return service
+        
     except Exception as e:
-        print(f"❌ Error creating Google service: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Error creating service: {e}")
         raise
-
 
 
 
