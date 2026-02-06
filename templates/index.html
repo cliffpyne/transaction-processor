@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CRDB Transaction Processor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 900px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f8f9ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .upload-icon {
+            font-size: 3em;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.1em;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #f0f0f0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 20px 0;
+            display: none;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+
+        /* 🔥 NEW: Review Modal Styles */
+        .review-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        .review-content {
+            background: white;
+            max-width: 1000px;
+            margin: 50px auto;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .review-header {
+            margin-bottom: 30px;
+        }
+
+        .review-header h2 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .review-item {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .review-item.accepted {
+            background: #d4edda;
+            border-left-color: #28a745;
+        }
+
+        .review-item.rejected {
+            background: #f8d7da;
+            border-left-color: #dc3545;
+        }
+
+        .review-details {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 10px;
+            margin-bottom: 15px;
+            font-size: 0.9em;
+        }
+
+        .review-label {
+            font-weight: bold;
+            color: #666;
+        }
+
+        .review-value {
+            color: #333;
+        }
+
+        .suggestion-box {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border: 2px solid #ffc107;
+        }
+
+        .suggestion-arrow {
+            font-size: 1.5em;
+            color: #667eea;
+            margin: 0 10px;
+        }
+
+        .review-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn-accept {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .btn-reject {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .btn-accept:hover {
+            background: #218838;
+        }
+
+        .btn-reject:hover {
+            background: #c82333;
+        }
+
+        .review-footer {
+            margin-top: 30px;
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+
+        .confidence-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+
+        .confidence-high {
+            background: #28a745;
+            color: white;
+        }
+
+        .confidence-medium {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .confidence-low {
+            background: #dc3545;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏦 CRDB Transaction Processor</h1>
+        <p class="subtitle">Upload your CRDB bank statement (Excel format)</p>
+
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <p>Click to browse or drag & drop your file here</p>
+            <p style="color: #999; margin-top: 10px; font-size: 0.9em;">Supported: .xlsx files only</p>
+            <input type="file" id="fileInput" accept=".xlsx">
+        </div>
+
+        <button class="btn" id="processBtn" disabled>Process Transactions</button>
+
+        <div class="progress-bar" id="progressBar">
+            <div class="progress-fill" id="progressFill">0%</div>
+        </div>
+
+        <div class="status" id="status"></div>
+
+        <div class="stats" id="stats" style="display: none;">
+            <div class="stat-card">
+                <div class="stat-number" id="totalCount">0</div>
+                <div class="stat-label">Total</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="passedCount" style="color: #28a745;">0</div>
+                <div class="stat-label">Passed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="passedSavCount" style="color: #17a2b8;">0</div>
+                <div class="stat-label">Passed (SAV)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="failedCount" style="color: #dc3545;">0</div>
+                <div class="stat-label">Failed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="skippedCount" style="color: #ffc107;">0</div>
+                <div class="stat-label">Skipped</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🔥 NEW: Review Modal -->
+    <div class="review-modal" id="reviewModal">
+        <div class="review-content">
+            <div class="review-header">
+                <h2>🔍 Review Suggested Matches</h2>
+                <p>The following records have potential matches. Please review and accept or reject each one.</p>
+            </div>
+            <div id="reviewItems"></div>
+            <div class="review-footer">
+                <button class="btn" onclick="submitReviews()">Submit All Decisions</button>
+                <button class="btn" onclick="closeReviewModal()" style="background: #6c757d;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const processBtn = document.getElementById('processBtn');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const status = document.getElementById('status');
+        const statsDiv = document.getElementById('stats');
+        const reviewModal = document.getElementById('reviewModal');
+        const reviewItems = document.getElementById('reviewItems');
+
+        let selectedFile = null;
+        let reviewData = [];
+        let reviewDecisions = {};
+
+        // Upload area click
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+
+        // File input change
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+
+        function handleFileSelect(file) {
+            if (!file.name.endsWith('.xlsx')) {
+                showStatus('Please select an Excel file (.xlsx)', 'error');
+                return;
+            }
+
+            selectedFile = file;
+            uploadArea.innerHTML = `
+                <div class="upload-icon">✅</div>
+                <p><strong>${file.name}</strong></p>
+                <p style="color: #999; margin-top: 10px; font-size: 0.9em;">Click to change file</p>
+            `;
+            processBtn.disabled = false;
+            showStatus('File ready to process', 'success');
+        }
+
+        // Process button
+        processBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            processBtn.disabled = true;
+            showProgress(0);
+
+            try {
+                // Upload file
+                showStatus('Uploading file...', 'info');
+                showProgress(20);
+
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+
+                const uploadResponse = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!uploadResponse.ok) {
+                    throw new Error('Upload failed');
+                }
+
+                // Process transactions
+                showStatus('Processing transactions...', 'info');
+                showProgress(50);
+
+                const processResponse = await fetch('/process', {
+                    method: 'POST'
+                });
+
+                const result = await processResponse.json();
+
+                if (result.needs_review) {
+                    // Show review modal
+                    showProgress(100);
+                    hideProgress();
+                    reviewData = result.review_data;
+                    showReviewModal(result.review_data);
+                } else if (result.success) {
+                    // Process complete
+                    showProgress(100);
+                    showStatus(result.message, 'success');
+                    displayStats(result.stats);
+                    hideProgress();
+                } else {
+                    throw new Error(result.error || 'Processing failed');
+                }
+
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+                hideProgress();
+            } finally {
+                processBtn.disabled = false;
+            }
+        });
+
+        function showReviewModal(data) {
+            reviewItems.innerHTML = '';
+            reviewDecisions = {};
+
+            data.forEach((item, index) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'review-item';
+                itemDiv.id = `review-item-${index}`;
+                
+                itemDiv.innerHTML = `
+                    <div class="review-details">
+                        <span class="review-label">Date:</span>
+                        <span class="review-value">${item.posting_date}</span>
+                        
+                        <span class="review-label">Amount:</span>
+                        <span class="review-value">${item.credit_amount.toLocaleString()} TZS</span>
+                        
+                        <span class="review-label">Message:</span>
+                        <span class="review-value">${item.details}</span>
+                        
+                        <span class="review-label">Confidence:</span>
+                        <span class="review-value">
+                            <span class="confidence-badge confidence-${item.confidence}">${item.confidence.toUpperCase()}</span>
+                        </span>
+                    </div>
+                    
+                    <div class="suggestion-box">
+                        <strong>Found in message:</strong> "${item.original_text}"
+                        <span class="suggestion-arrow">→</span>
+                        <strong>Suggested plate:</strong> ${item.suggested_plate}
+                        <span class="suggestion-arrow">→</span>
+                        <strong>Customer:</strong> ${item.customer_name}
+                        <br><small style="color: #666; margin-top: 5px; display: block;">Reason: ${item.reason}</small>
+                    </div>
+                    
+                    <div class="review-actions">
+                        <button class="btn-accept" onclick="setDecision(${index}, true)">
+                            ✓ Accept (Add to ${item.target_sheet})
+                        </button>
+                        <button class="btn-reject" onclick="setDecision(${index}, false)">
+                            ✗ Reject (Send to FAILED)
+                        </button>
+                    </div>
+                `;
+                
+                reviewItems.appendChild(itemDiv);
+            });
+
+            reviewModal.style.display = 'block';
+        }
+
+        function setDecision(index, accept) {
+            reviewDecisions[index] = accept;
+            const item = document.getElementById(`review-item-${index}`);
+            item.className = accept ? 'review-item accepted' : 'review-item rejected';
+        }
+
+        function closeReviewModal() {
+            reviewModal.style.display = 'none';
+        }
+
+        async function submitReviews() {
+            // Build confirmations array
+            const confirmations = Object.keys(reviewDecisions).map(index => ({
+                index: parseInt(index),
+                accept: reviewDecisions[index]
+            }));
+
+            if (confirmations.length === 0) {
+                alert('Please make a decision for at least one record');
+                return;
+            }
+
+            try {
+                showStatus('Processing your decisions...', 'info');
+                
+                const response = await fetch('/confirm-reviews', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ confirmations })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    closeReviewModal();
+                    showStatus(result.message, 'success');
+                    displayStats(result.stats);
+                } else {
+                    throw new Error(result.error || 'Failed to process reviews');
+                }
+
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function showProgress(percent) {
+            progressBar.style.display = 'block';
+            progressFill.style.width = percent + '%';
+            progressFill.textContent = percent + '%';
+        }
+
+        function hideProgress() {
+            setTimeout(() => {
+                progressBar.style.display = 'none';
+            }, 1000);
+        }
+
+        function showStatus(message, type) {
+            status.textContent = message;
+            status.className = 'status ' + type;
+            status.style.display = 'block';
+        }
+
+        function displayStats(stats) {
+            document.getElementById('totalCount').textContent = stats.total || 0;
+            document.getElementById('passedCount').textContent = stats.passed || 0;
+            document.getElementById('passedSavCount').textContent = stats.passed_sav || 0;
+            document.getElementById('failedCount').textContent = stats.failed || 0;
+            document.getElementById('skippedCount').textContent = stats.skipped || 0;
+            statsDiv.style.display = 'grid';
+        }
+    </script>
+</body>
+</html>
