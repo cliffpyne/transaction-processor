@@ -4,9 +4,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-venv/
-ENV/
 build/
 develop-eggs/
 dist/
@@ -19,48 +16,38 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Flask
-instance/
-.webassets-cache
-
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Google credentials (NEVER commit this!)
-google.json
-*.json
-
-# Uploads folder
-uploads/
-*.xlsx
-*.xls
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Logs
-*.log
-
+# Project specific
 uploads/
 temp_reviews/
-*.pkl
 google.json
-__pycache__/
-*.pyc
+*.pkl
 .env
-venv/
-.vscode/
+*.env
