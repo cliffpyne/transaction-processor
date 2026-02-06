@@ -71,6 +71,8 @@ PASSED_SHEET_ID = '1rdSRNLdZPT5xXLRgV7wSn1beYwWZp41ZpYoLkbGmt0o'
 PIKIPIKI_SHEET_ID = '1XFwPITQgZmzZ8lbg8MKD9S4rwHyk2cDOKrcxO7SAjHA'
 
 
+
+
 def get_google_service():
     """Create Google Sheets service using Service Account"""
     try:
@@ -78,13 +80,20 @@ def get_google_service():
         if not GOOGLE_CREDS:
             raise ValueError("GOOGLE_CREDENTIALS_JSON not found")
         
-        # Parse JSON - json.loads() AUTOMATICALLY handles \n conversion!
-        # When you store {"private_key": "-----BEGIN...\\n...\\n-----END..."} in env var,
-        # json.loads() converts \\n to actual newline characters.
-        # DO NOT replace them again or you'll corrupt the key!
+        # 🔍 DEBUG: Check what we're getting
+        print(f"📏 Raw env var length: {len(GOOGLE_CREDS)} characters")
+        
         creds_dict = json.loads(GOOGLE_CREDS)
         
-        # Load credentials directly - no modification needed
+        # 🔍 DEBUG: Check the private key
+        pk = creds_dict.get('private_key', '')
+        print(f"🔑 Private key length: {len(pk)} characters")
+        print(f"🔑 First 60 chars: {pk[:60]}")
+        print(f"🔑 Last 60 chars: {pk[-60:]}")
+        print(f"🔑 Contains \\n (literal): {'\\n' in pk}")
+        print(f"🔑 Contains actual newlines: {chr(10) in pk}")
+        
+        # Load credentials
         credentials = service_account.Credentials.from_service_account_info(
             creds_dict,
             scopes=SCOPES
@@ -98,6 +107,7 @@ def get_google_service():
         import traceback
         traceback.print_exc()
         raise
+
 
 
 
