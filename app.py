@@ -78,17 +78,13 @@ def get_google_service():
         if not GOOGLE_CREDS:
             raise ValueError("GOOGLE_CREDENTIALS_JSON not found")
         
-        # Parse JSON
+        # Parse JSON - json.loads() AUTOMATICALLY handles \n conversion!
+        # When you store {"private_key": "-----BEGIN...\\n...\\n-----END..."} in env var,
+        # json.loads() converts \\n to actual newline characters.
+        # DO NOT replace them again or you'll corrupt the key!
         creds_dict = json.loads(GOOGLE_CREDS)
         
-        # Fix private key newlines
-        if 'private_key' in creds_dict:
-            pk = creds_dict['private_key']
-            # Ensure proper newline format
-            if '\\n' in pk:
-                creds_dict['private_key'] = pk.replace('\\n', '\n')
-        
-        # Load credentials
+        # Load credentials directly - no modification needed
         credentials = service_account.Credentials.from_service_account_info(
             creds_dict,
             scopes=SCOPES
@@ -98,7 +94,9 @@ def get_google_service():
         return service
         
     except Exception as e:
-        print(f"Error creating service: {e}")
+        print(f"❌ Error creating service: {e}")
+        import traceback
+        traceback.print_exc()
         raise
 
 
