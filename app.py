@@ -37,40 +37,91 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['TEMP_FOLDER'], exist_ok=True)
 
+# # For Render deployment - read credentials from environment
+# GOOGLE_CREDS = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+# if GOOGLE_CREDS:
+#     try:
+#         # Parse JSON string from environment variable
+#         creds_dict = json.loads(GOOGLE_CREDS)
+#         with open('google.json', 'w') as f:
+#             json.dump(creds_dict, f, indent=2)
+#         print("✅ Google credentials loaded from environment")
+#     except json.JSONDecodeError as e:
+#         print(f"❌ Error parsing GOOGLE_CREDENTIALS_JSON: {e}")
+#         raise
+# elif os.path.exists('google.json'):
+#     print("✅ Using local google.json file")
+# else:
+#     print("⚠️ No Google credentials found!")
+
+
 # For Render deployment - read credentials from environment
+print("🔍 Checking for Google credentials...")
 GOOGLE_CREDS = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+
 if GOOGLE_CREDS:
-    try:
-        # Parse JSON string from environment variable
-        creds_dict = json.loads(GOOGLE_CREDS)
-        with open('google.json', 'w') as f:
-            json.dump(creds_dict, f, indent=2)
-        print("✅ Google credentials loaded from environment")
-    except json.JSONDecodeError as e:
-        print(f"❌ Error parsing GOOGLE_CREDENTIALS_JSON: {e}")
-        raise
+    print(f"✅ GOOGLE_CREDENTIALS_JSON found in environment ({len(GOOGLE_CREDS)} chars)")
+    # Don't write to file - will be loaded directly in get_google_service()
 elif os.path.exists('google.json'):
     print("✅ Using local google.json file")
 else:
     print("⚠️ No Google credentials found!")
+
+
 
 # Google Sheets configuration
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 PASSED_SHEET_ID = '1rdSRNLdZPT5xXLRgV7wSn1beYwWZp41ZpYoLkbGmt0o'
 PIKIPIKI_SHEET_ID = '1XFwPITQgZmzZ8lbg8MKD9S4rwHyk2cDOKrcxO7SAjHA'
 
+
 def get_google_service():
     """Create Google Sheets service using Service Account"""
     try:
-        credentials = service_account.Credentials.from_service_account_file(
-            'google.json',
-            scopes=SCOPES
-        )
-        service = build('sheets', 'v4', credentials=credentials)
-        return service
+        print("🔄 Attempting to load Google credentials...")
+        
+        # First try environment variable
+        GOOGLE_CREDS = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+        if GOOGLE_CREDS:
+            print("📄 Loading credentials from environment variable...")
+            try:
+                creds_dict = json.loads(GOOGLE_CREDS)
+                credentials = service_account.Credentials.from_service_account_info(
+                    creds_dict,
+                    scopes=SCOPES
+                )
+                print("✅ Google credentials loaded successfully from env")
+                service = build('sheets', 'v4', credentials=credentials)
+                return service
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON decode error: {e}")
+                print(f"First 200 chars of credentials: {GOOGLE_CREDS[:200] if GOOGLE_CREDS else 'None'}")
+                raise
+            except Exception as e:
+                print(f"❌ Error loading from env: {e}")
+                raise
+        
+        # Fallback to file
+        elif os.path.exists('google.json'):
+            print("📄 Loading credentials from google.json file...")
+            credentials = service_account.Credentials.from_service_account_file(
+                'google.json',
+                scopes=SCOPES
+            )
+            service = build('sheets', 'v4', credentials=credentials)
+            return service
+        
+        else:
+            raise ValueError("No Google credentials found. Set GOOGLE_CREDENTIALS_JSON environment variable or create google.json file.")
+            
     except Exception as e:
-        print(f"Error creating service: {e}")
+        print(f"❌ Error creating Google service: {e}")
+        import traceback
+        traceback.print_exc()
         raise
+
+
+
 
 def extract_phone_number(text):
     """
