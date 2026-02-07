@@ -456,9 +456,14 @@
                     body: formData
                 });
 
+                // 🔥 IMPROVED: Better error handling
                 if (!uploadResponse.ok) {
-                    throw new Error('Upload failed');
+                    const errorData = await uploadResponse.json();
+                    throw new Error(errorData.error || 'Upload failed');
                 }
+
+                const uploadResult = await uploadResponse.json();
+                console.log('Upload success:', uploadResult);
 
                 // Process transactions
                 showStatus('Processing transactions...', 'info');
@@ -487,6 +492,7 @@
                 }
 
             } catch (error) {
+                console.error('Error details:', error);
                 showStatus(`Error: ${error.message}`, 'error');
                 hideProgress();
             } finally {
