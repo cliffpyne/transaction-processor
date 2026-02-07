@@ -416,8 +416,9 @@
         });
 
         function handleFileSelect(file) {
-            // 🔥 UPDATED: Accept both .xlsx and .pdf files
-            if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.pdf')) {
+            // 🔥 UPDATED: Accept both .xlsx and .pdf files (case-insensitive)
+            const fileName = file.name.toLowerCase();
+            if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.pdf')) {
                 showStatus('Please select an Excel file (.xlsx) or PDF file (.pdf)', 'error');
                 return;
             }
@@ -425,7 +426,7 @@
             selectedFile = file;
             
             // 🔥 UPDATED: Show file icon based on type
-            const fileIcon = file.name.endsWith('.pdf') ? '📄' : '📊';
+            const fileIcon = fileName.endsWith('.pdf') ? '📄' : '📊';
             
             uploadArea.innerHTML = `
                 <div class="upload-icon">${fileIcon} ✅</div>
