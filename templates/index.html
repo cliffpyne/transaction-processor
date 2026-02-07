@@ -314,13 +314,14 @@
 <body>
     <div class="container">
         <h1>🏦 CRDB Transaction Processor</h1>
-        <p class="subtitle">Upload your CRDB bank statement (Excel format)</p>
+        <p class="subtitle">Upload your CRDB bank statement (Excel or PDF format)</p>
 
         <div class="upload-area" id="uploadArea">
             <div class="upload-icon">📁</div>
             <p>Click to browse or drag & drop your file here</p>
-            <p style="color: #999; margin-top: 10px; font-size: 0.9em;">Supported: .xlsx files only</p>
-            <input type="file" id="fileInput" accept=".xlsx">
+            <p style="color: #999; margin-top: 10px; font-size: 0.9em;">Supported: .xlsx and .pdf files</p>
+            <!-- 🔥 UPDATED: Accept both .xlsx and .pdf -->
+            <input type="file" id="fileInput" accept=".xlsx,.pdf">
         </div>
 
         <button class="btn" id="processBtn" disabled>Process Transactions</button>
@@ -415,14 +416,19 @@
         });
 
         function handleFileSelect(file) {
-            if (!file.name.endsWith('.xlsx')) {
-                showStatus('Please select an Excel file (.xlsx)', 'error');
+            // 🔥 UPDATED: Accept both .xlsx and .pdf files
+            if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.pdf')) {
+                showStatus('Please select an Excel file (.xlsx) or PDF file (.pdf)', 'error');
                 return;
             }
 
             selectedFile = file;
+            
+            // 🔥 UPDATED: Show file icon based on type
+            const fileIcon = file.name.endsWith('.pdf') ? '📄' : '📊';
+            
             uploadArea.innerHTML = `
-                <div class="upload-icon">✅</div>
+                <div class="upload-icon">${fileIcon} ✅</div>
                 <p><strong>${file.name}</strong></p>
                 <p style="color: #999; margin-top: 10px; font-size: 0.9em;">Click to change file</p>
             `;
