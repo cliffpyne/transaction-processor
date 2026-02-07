@@ -39,150 +39,153 @@ PIKIPIKI_SHEET_ID = '1XFwPITQgZmzZ8lbg8MKD9S4rwHyk2cDOKrcxO7SAjHA'
 
 def extract_data_from_pdf(filepath):
     """
-    🔥 OPTIMIZED: Extract transaction data from PDF with memory management
-    PDF format: SN | TRANS DATE | DETAILS | CHANNEL ID | VALUE DATE | DEBIT | CREDIT | BOOK BALANCE
-    Returns DataFrame with columns: Posting Date, Details, Credit
+    🔥 ULTRA-OPTIMIZED: Extract transaction data from PDF with minimal memory usage
+    Strategy: Process one page at a time, write to temp CSV immediately, never store all in memory
     """
+    import csv
+    import tempfile
+    
     try:
         print(f"📄 Opening PDF: {filepath}")
-        transactions = []
         
+        # Create temporary CSV file to store results progressively
+        temp_csv = tempfile.NamedTemporaryFile(mode='w', delete=False, newline='', suffix='.csv')
+        csv_writer = csv.DictWriter(temp_csv, fieldnames=['Posting Date', 'Details', 'Credit', 'Debit'])
+        csv_writer.writeheader()
+        
+        transaction_count = 0
+        
+        # 🔥 CRITICAL: Process ONE page at a time, close immediately
         with pdfplumber.open(filepath) as pdf:
             total_pages = len(pdf.pages)
             print(f"📚 Total pages: {total_pages}")
             
-            # 🔥 MEMORY OPTIMIZATION: Process in batches of 5 pages
-            batch_size = 5
-            for batch_start in range(0, total_pages, batch_size):
-                batch_end = min(batch_start + batch_size, total_pages)
-                print(f"🔄 Processing batch: pages {batch_start + 1} to {batch_end}")
+            # 🔥 HARD LIMIT: Reject large PDFs immediately
+            MAX_PAGES = 100
+            if total_pages > MAX_PAGES:
+                temp_csv.close()
+                os.unlink(temp_csv.name)
+                raise ValueError(f"PDF too large ({total_pages} pages). Maximum allowed: {MAX_PAGES} pages. Please split into smaller files or use Excel format.")
+            
+            for page_num in range(total_pages):
+                print(f"📖 Processing page {page_num + 1}/{total_pages}...")
                 
-                for page_num in range(batch_start, batch_end):
-                    page = pdf.pages[page_num]
-                    print(f"📖 Processing page {page_num + 1}/{total_pages}...")
-                    
-                    # Extract tables from the page
-                    tables = page.extract_tables()
-                    
-                    if not tables:
-                        print(f"⚠️ No tables found on page {page_num + 1}")
+                page = pdf.pages[page_num]
+                tables = page.extract_tables()
+                
+                if not tables:
+                    continue
+                
+                for table in tables:
+                    if not table:
                         continue
                     
-                    for table_idx, table in enumerate(tables):
-                        if not table:
+                    # Find header row
+                    header_row_idx = None
+                    for idx, row in enumerate(table):
+                        if row and any(cell and ('TRANS DATE' in str(cell).upper() or 
+                                                   'VALUE DATE' in str(cell).upper() or
+                                                   'DETAILS' in str(cell).upper()) for cell in row):
+                            header_row_idx = idx
+                            break
+                    
+                    if header_row_idx is None:
+                        continue
+                    
+                    headers = table[header_row_idx]
+                    
+                    # Map columns
+                    col_map = {}
+                    for idx, header in enumerate(headers):
+                        if not header:
+                            continue
+                        header_upper = str(header).upper().strip()
+                        
+                        if 'VALUE DATE' in header_upper:
+                            col_map['trans_date'] = idx
+                        elif 'TRANS DATE' in header_upper and 'trans_date' not in col_map:
+                            col_map['trans_date'] = idx
+                        elif 'DETAILS' in header_upper:
+                            col_map['details'] = idx
+                        elif 'CREDIT' in header_upper:
+                            col_map['credit'] = idx
+                        elif 'DEBIT' in header_upper:
+                            col_map['debit'] = idx
+                    
+                    if 'trans_date' not in col_map or 'details' not in col_map or 'credit' not in col_map:
+                        continue
+                    
+                    # Process rows - write immediately to CSV
+                    for row_idx in range(header_row_idx + 1, len(table)):
+                        row = table[row_idx]
+                        
+                        if not row or len(row) <= max(col_map.values()):
                             continue
                         
-                        print(f"  📊 Table {table_idx + 1}: {len(table)} rows")
-                        
-                        # Find header row (contains "TRANS DATE" or "SN")
-                        header_row_idx = None
-                        for idx, row in enumerate(table):
-                            if row and any(cell and ('TRANS DATE' in str(cell).upper() or 
-                                                       'VALUE DATE' in str(cell).upper() or
-                                                       'SN' in str(cell).upper() or 
-                                                       'DETAILS' in str(cell).upper()) for cell in row):
-                                header_row_idx = idx
-                                print(f"  ✓ Found header at row {idx}")
-                                break
-                        
-                        if header_row_idx is None:
-                            print(f"  ⚠️ No header found in table {table_idx + 1}")
+                        if all(not cell or str(cell).strip() == '' for cell in row):
                             continue
                         
-                        headers = table[header_row_idx]
+                        trans_date = str(row[col_map['trans_date']]).strip() if col_map.get('trans_date') is not None and row[col_map['trans_date']] else ''
+                        details = str(row[col_map['details']]).strip() if col_map.get('details') is not None and row[col_map['details']] else ''
+                        credit_str = str(row[col_map['credit']]).strip() if col_map.get('credit') is not None and row[col_map['credit']] else ''
+                        debit_str = str(row[col_map.get('debit', -1)]).strip() if col_map.get('debit') is not None and col_map['debit'] < len(row) and row[col_map['debit']] else ''
                         
-                        # Map column indices (handle variations in header names)
-                        col_map = {}
-                        for idx, header in enumerate(headers):
-                            if not header:
-                                continue
-                            header_upper = str(header).upper().strip()
-                            
-                            # Prioritize VALUE DATE over TRANS DATE
-                            if 'VALUE DATE' in header_upper:
-                                col_map['trans_date'] = idx
-                            elif 'TRANS DATE' in header_upper and 'trans_date' not in col_map:
-                                col_map['trans_date'] = idx
-                            elif 'DETAILS' in header_upper:
-                                col_map['details'] = idx
-                            elif 'CREDIT' in header_upper:
-                                col_map['credit'] = idx
-                            elif 'DEBIT' in header_upper:
-                                col_map['debit'] = idx
-                        
-                        print(f"  📍 Column mapping: {col_map}")
-                        
-                        if 'trans_date' not in col_map or 'details' not in col_map or 'credit' not in col_map:
-                            print(f"  ⚠️ Missing required columns in table {table_idx + 1}")
+                        if not details or not trans_date:
                             continue
                         
-                        # Process data rows
-                        for row_idx in range(header_row_idx + 1, len(table)):
-                            row = table[row_idx]
-                            
-                            if not row or len(row) <= max(col_map.values()):
-                                continue
-                            
-                            # Skip empty rows
-                            if all(not cell or str(cell).strip() == '' for cell in row):
-                                continue
-                            
-                            trans_date = row[col_map['trans_date']] if 'trans_date' in col_map else ''
-                            details = row[col_map['details']] if 'details' in col_map else ''
-                            credit = row[col_map['credit']] if 'credit' in col_map else ''
-                            debit = row[col_map.get('debit', -1)] if 'debit' in col_map else ''
-                            
-                            # Clean up values
-                            trans_date = str(trans_date).strip() if trans_date else ''
-                            details = str(details).strip() if details else ''
-                            credit_str = str(credit).strip() if credit else ''
-                            debit_str = str(debit).strip() if debit else ''
-                            
-                            # Skip if no details or date
-                            if not details or not trans_date:
-                                continue
-                            
-                            # Skip header repetitions
-                            if 'DETAILS' in details.upper() or 'TRANS DATE' in trans_date.upper():
-                                continue
-                            
-                            # Parse credit amount
-                            credit_val = 0.0
-                            if credit_str:
-                                try:
-                                    credit_val = float(credit_str.replace(',', '').replace(' ', ''))
-                                except ValueError:
-                                    credit_val = 0.0
-                            
-                            # Parse debit amount
-                            debit_val = 0.0
-                            if debit_str:
-                                try:
-                                    debit_val = float(debit_str.replace(',', '').replace(' ', ''))
-                                except ValueError:
-                                    debit_val = 0.0
-                            
-                            # Only include credit transactions (credit > 0 and debit is 0 or empty)
-                            if credit_val > 0 and debit_val == 0:
-                                transactions.append({
-                                    'Posting Date': trans_date,
-                                    'Details': details,
-                                    'Credit': credit_val,
-                                    'Debit': debit_val
-                                })
+                        if 'DETAILS' in details.upper() or 'TRANS DATE' in trans_date.upper():
+                            continue
+                        
+                        # Parse amounts
+                        credit_val = 0.0
+                        if credit_str:
+                            try:
+                                credit_val = float(credit_str.replace(',', '').replace(' ', ''))
+                            except ValueError:
+                                credit_val = 0.0
+                        
+                        debit_val = 0.0
+                        if debit_str:
+                            try:
+                                debit_val = float(debit_str.replace(',', '').replace(' ', ''))
+                            except ValueError:
+                                debit_val = 0.0
+                        
+                        # Only credit transactions
+                        if credit_val > 0 and debit_val == 0:
+                            csv_writer.writerow({
+                                'Posting Date': trans_date,
+                                'Details': details,
+                                'Credit': credit_val,
+                                'Debit': debit_val
+                            })
+                            transaction_count += 1
                 
-                # 🔥 MEMORY OPTIMIZATION: Clear memory after each batch
-                gc.collect()
-                print(f"✅ Batch complete. Total transactions so far: {len(transactions)}")
+                # 🔥 CRITICAL: Force garbage collection every 5 pages
+                if (page_num + 1) % 5 == 0:
+                    gc.collect()
+                    print(f"✅ Progress: {transaction_count} transactions extracted so far...")
         
-        if not transactions:
+        temp_csv.close()
+        
+        if transaction_count == 0:
+            os.unlink(temp_csv.name)
             print("❌ No transactions found in PDF")
             return None
         
-        df = pd.DataFrame(transactions)
+        # 🔥 Now read the CSV into DataFrame (much more memory efficient)
+        print(f"📊 Reading {transaction_count} transactions from temp file...")
+        df = pd.read_csv(temp_csv.name)
+        
+        # Clean up temp file
+        os.unlink(temp_csv.name)
+        
         print(f"✅ Extracted {len(df)} credit transactions from PDF")
         return df
     
+    except ValueError as ve:
+        print(f"❌ Validation error: {ve}")
+        raise
     except Exception as e:
         print(f"❌ Error extracting PDF data: {e}")
         import traceback
@@ -618,14 +621,15 @@ def upload_file():
             print(f"❌ Invalid file type: {file.filename}")
             return jsonify({'error': f'Please upload an Excel file (.xlsx) or PDF file (.pdf). Got: {file.filename}'}), 400
         
-        # 🔥 FILE SIZE CHECK: Limit PDF to 5MB
+        # 🔥 FILE SIZE CHECK: Strict limit for PDFs (free tier memory constraints)
         file.seek(0, os.SEEK_END)
         file_size = file.tell()
         file.seek(0)
         
-        if filename_lower.endswith('.pdf') and file_size > 5 * 1024 * 1024:  # 5MB limit for PDFs
-            print(f"❌ PDF file too large: {file_size} bytes")
-            return jsonify({'error': 'PDF file too large. Please upload PDFs under 5MB or split into smaller files.'}), 400
+        if filename_lower.endswith('.pdf') and file_size > 3 * 1024 * 1024:  # 3MB limit
+            size_mb = file_size / (1024 * 1024)
+            print(f"❌ PDF file too large: {size_mb:.1f}MB")
+            return jsonify({'error': f'PDF file too large ({size_mb:.1f}MB). Maximum: 3MB.\n\nFor large bank statements:\n• Split PDF into smaller files (30-50 pages each)\n• Export as Excel (.xlsx) format instead\n• Use a paid hosting plan for larger files'}), 400
         
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
