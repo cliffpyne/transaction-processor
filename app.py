@@ -61,14 +61,16 @@ def extract_data_from_pdf(filepath):
             print(f"📚 Total pages: {total_pages}")
             
             # 🔥 HARD LIMIT: Reject large PDFs immediately
-            MAX_PAGES = 100
+            MAX_PAGES = 50  # Reduced for free tier reliability
             if total_pages > MAX_PAGES:
                 temp_csv.close()
                 os.unlink(temp_csv.name)
                 raise ValueError(f"PDF too large ({total_pages} pages). Maximum allowed: {MAX_PAGES} pages. Please split into smaller files or use Excel format.")
             
             for page_num in range(total_pages):
-                print(f"📖 Processing page {page_num + 1}/{total_pages}...")
+                # Only log every 10 pages to reduce I/O overhead
+                if page_num % 10 == 0 or page_num == total_pages - 1:
+                    print(f"📖 Processing page {page_num + 1}/{total_pages}...")
                 
                 page = pdf.pages[page_num]
                 tables = page.extract_tables()
@@ -161,10 +163,11 @@ def extract_data_from_pdf(filepath):
                             })
                             transaction_count += 1
                 
-                # 🔥 CRITICAL: Force garbage collection every 5 pages
-                if (page_num + 1) % 5 == 0:
+                # 🔥 CRITICAL: Force garbage collection every 2 pages
+                if (page_num + 1) % 2 == 0:
                     gc.collect()
-                    print(f"✅ Progress: {transaction_count} transactions extracted so far...")
+                    if (page_num + 1) % 10 == 0:
+                        print(f"✅ Progress: {transaction_count} transactions extracted...")
         
         temp_csv.close()
         

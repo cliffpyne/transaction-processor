@@ -1,14 +1,13 @@
 services:
   - type: web
     name: transaction-processor
-    runtime: python
-    plan: free
-    buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app -c gunicorn_config.py
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
       - key: SECRET_KEY
         generateValue: true
-      - key: GOOGLE_CREDENTIALS_JSON
-        sync: false
+      - key: WEB_CONCURRENCY
+        value: 1
