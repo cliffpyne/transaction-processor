@@ -343,77 +343,96 @@ def _clean_nmb_message(text):
 
 def _extract_plate_from_text(text):
     """
-    🔥 NEW: Core plate extraction logic (used by extract_plate_number)
-    Tries all 6 patterns and filters out "NMB", "TER", "TRX", "AGD" as invalid letters
+    🔥 IMPROVED: Core plate extraction logic with ALL patterns
+    Handles: MC808FLM, MC 808 FLM, mc808flm, mc 808 fll, 808FLM, mc175flm, MC 870 FLL, etc.
     """
     if not text or pd.isna(text):
         return None
     
-    text = str(text).upper()
+    # Convert to uppercase for matching
+    text_upper = str(text).upper()
     
     # List of invalid letter combinations (not real plates)
-    INVALID_LETTERS = {'NMB', 'TER', 'TRX', 'AGD', 'TPS', 'ACC'}
+    INVALID_LETTERS = {'NMB', 'TER', 'TRX', 'AGD', 'TPS', 'ACC', 'TPS', 'FRO', 'LTD'}
     
-    # Pattern 1: Standard MC###XXX (with optional spaces/dots/hyphens)
-    pattern1 = r'MC[\s\.\-]*(\d{3})[\s\.\-]*([A-Z]{3})'
-    match = re.search(pattern1, text)
+    # Try all patterns in order of specificity
+    
+    # Pattern 1: MC###XXX or MC ### XXX (standard format with MC prefix)
+    # Matches: MC808FLM, MC 808 FLM, MC-808-FLM, MC.808.FLM
+    pattern1 = r'\bMC[\s\.\-]*(\d{3})[\s\.\-]*([A-Z]{3})\b'
+    match = re.search(pattern1, text_upper)
     if match:
         letters = match.group(2)
         if letters not in INVALID_LETTERS:
             plate = f"MC{match.group(1)}{letters}"
-            print(f"  ✓ Extracted plate (Pattern 1 - MC###XXX): {plate} from: {text[:80]}")
+            print(f"  ✓ Pattern 1 (MC###XXX): {plate} from: {text[:80]}")
             return plate
     
-    # 🔥 NEW Pattern 2: MC XXX ### (letters first, then numbers: MC 870 FLL, MC EFL 567)
-    pattern2 = r'MC[\s\.\-]*([A-Z]{3})[\s\.\-]*(\d{3})'
-    match = re.search(pattern2, text)
+    # Pattern 2: MCXXX### or MC XXX ### (letters before numbers)
+    # Matches: MC FLL 870, MCFLL870, MC-FLL-870
+    pattern2 = r'\bMC[\s\.\-]*([A-Z]{3})[\s\.\-]*(\d{3})\b'
+    match = re.search(pattern2, text_upper)
     if match:
         letters = match.group(1)
         if letters not in INVALID_LETTERS:
-            # Standard format is MC###XXX, so swap to get MC + numbers + letters
+            # Convert to standard format MC###XXX
             plate = f"MC{match.group(2)}{letters}"
-            print(f"  ✓ Extracted plate (Pattern 2 - MC XXX ###): {plate} from: {text[:80]}")
+            print(f"  ✓ Pattern 2 (MCXXX###): {plate} from: {text[:80]}")
             return plate
     
-    # Pattern 3: ###XXX without MC prefix (must have exactly 3 digits + 3 letters)
-    pattern3 = r'(?<!MC)(?<![A-Z])(\d{3})[\s\.\-]*([A-Z]{3})(?![A-Z0-9])'
-    match = re.search(pattern3, text)
+    # Pattern 3: ###XXX (no MC prefix, numbers then letters)
+    # Matches: 808FLM, 808 FLM, 808-FLM
+    # Must NOT be preceded by MC or letters
+    pattern3 = r'(?<![A-Z])\b(\d{3})[\s\.\-]*([A-Z]{3})(?:\b|!!)'
+    matches = re.finditer(pattern3, text_upper)
+    for match in matches:
+        letters = match.group(2)
+        # Skip if this is actually part of "MC###XXX" pattern
+        start_pos = match.start()
+        if start_pos >= 2 and text_upper[start_pos-2:start_pos] == 'MC':
+            continue
+        if letters not in INVALID_LETTERS:
+            plate = f"MC{match.group(1)}{letters}"
+            print(f"  ✓ Pattern 3 (###XXX): {plate} from: {text[:80]}")
+            return plate
+    
+    # Pattern 4: XXX### (no MC prefix, letters then numbers)
+    # Matches: FLM175, fll886, FLL 870
+    # This handles mc175flm, mc886fll, etc.
+    pattern4 = r'(?<![A-Z])\b([A-Z]{3})[\s\.\-]*(\d{3})(?:\b|!!)'
+    matches = re.finditer(pattern4, text_upper)
+    for match in matches:
+        letters = match.group(1)
+        # Skip if this is actually part of "MCXXX###" pattern
+        start_pos = match.start()
+        if start_pos >= 2 and text_upper[start_pos-2:start_pos] == 'MC':
+            continue
+        if letters not in INVALID_LETTERS:
+            # Convert to standard format MC###XXX
+            plate = f"MC{match.group(2)}{letters}"
+            print(f"  ✓ Pattern 4 (XXX###): {plate} from: {text[:80]}")
+            return plate
+    
+    # Pattern 5: XXX MC ### (MC in middle, letters first)
+    # Matches: FLL MC 870, EFL MC 567
+    pattern5 = r'\b([A-Z]{3})[\s\.\-]+MC[\s\.\-]+(\d{3})\b'
+    match = re.search(pattern5, text_upper)
+    if match:
+        letters = match.group(1)
+        if letters not in INVALID_LETTERS:
+            plate = f"MC{match.group(2)}{letters}"
+            print(f"  ✓ Pattern 5 (XXX MC ###): {plate} from: {text[:80]}")
+            return plate
+    
+    # Pattern 6: ### MC XXX (MC in middle, numbers first)
+    # Matches: 870 MC FLL, 567 MC EFL
+    pattern6 = r'\b(\d{3})[\s\.\-]+MC[\s\.\-]+([A-Z]{3})\b'
+    match = re.search(pattern6, text_upper)
     if match:
         letters = match.group(2)
         if letters not in INVALID_LETTERS:
             plate = f"MC{match.group(1)}{letters}"
-            print(f"  ✓ Extracted plate (Pattern 3 - ###XXX, added MC): {plate} from: {text[:80]}")
-            return plate
-    
-    # 🔥 NEW Pattern 4: XXX### (letters first, then numbers, no MC) - handle mc175flm format
-    pattern4 = r'(?<!MC)(?<![A-Z])([A-Z]{3})[\s\.\-]*(\d{3})(?![A-Z0-9])'
-    match = re.search(pattern4, text)
-    if match:
-        letters = match.group(1)
-        if letters not in INVALID_LETTERS:
-            # Swap to correct format: MC###XXX
-            plate = f"MC{match.group(2)}{letters}"
-            print(f"  ✓ Extracted plate (Pattern 4 - XXX### reversed, added MC): {plate} from: {text[:80]}")
-            return plate
-    
-    # 🔥 NEW Pattern 5: XXX MC ### (MC in the middle: EFL MC 567, FLL MC 870)
-    pattern5 = r'([A-Z]{3})[\s\.\-]*MC[\s\.\-]*(\d{3})'
-    match = re.search(pattern5, text)
-    if match:
-        letters = match.group(1)
-        if letters not in INVALID_LETTERS:
-            plate = f"MC{match.group(2)}{letters}"
-            print(f"  ✓ Extracted plate (Pattern 5 - XXX MC ###): {plate} from: {text[:80]}")
-            return plate
-    
-    # 🔥 NEW Pattern 6: ### MC XXX (MC in the middle: 567 MC EFL)
-    pattern6 = r'(\d{3})[\s\.\-]*MC[\s\.\-]*([A-Z]{3})'
-    match = re.search(pattern6, text)
-    if match:
-        letters = match.group(2)
-        if letters not in INVALID_LETTERS:
-            plate = f"MC{match.group(1)}{letters}"
-            print(f"  ✓ Extracted plate (Pattern 6 - ### MC XXX): {plate} from: {text[:80]}")
+            print(f"  ✓ Pattern 6 (### MC XXX): {plate} from: {text[:80]}")
             return plate
     
     return None
