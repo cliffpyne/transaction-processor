@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CRDB Transaction Processor</title>
+    <title>Bank Transaction Processor</title>
     <style>
         * {
             margin: 0;
@@ -25,7 +25,7 @@
             background: white;
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 900px;
+            max-width: 1100px;
             width: 100%;
             padding: 40px;
         }
@@ -34,22 +34,71 @@
             color: #333;
             margin-bottom: 10px;
             font-size: 2em;
+            text-align: center;
         }
 
         .subtitle {
             color: #666;
             margin-bottom: 30px;
             font-size: 1.1em;
+            text-align: center;
+        }
+
+        /* 🔥 NEW: Two-column layout for bank selection */
+        .upload-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .bank-section {
+            border: 2px solid #e0e0e0;
+            border-radius: 15px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+
+        .bank-section:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
+        }
+
+        .bank-section.active {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .bank-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .bank-logo {
+            font-size: 2em;
+        }
+
+        .bank-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
         }
 
         .upload-area {
             border: 3px dashed #667eea;
             border-radius: 15px;
-            padding: 40px;
+            padding: 30px;
             text-align: center;
-            margin-bottom: 30px;
             transition: all 0.3s;
             cursor: pointer;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
 
         .upload-area:hover {
@@ -62,13 +111,24 @@
             background: #f0f2ff;
         }
 
-        #fileInput {
+        .file-input {
             display: none;
         }
 
         .upload-icon {
-            font-size: 3em;
-            margin-bottom: 20px;
+            font-size: 2.5em;
+            margin-bottom: 15px;
+        }
+
+        .upload-text {
+            font-size: 1em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            color: #999;
+            font-size: 0.85em;
         }
 
         .btn {
@@ -81,6 +141,8 @@
             cursor: pointer;
             transition: all 0.3s;
             box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            width: 100%;
+            margin-top: 20px;
         }
 
         .btn:hover {
@@ -92,6 +154,7 @@
             background: #ccc;
             cursor: not-allowed;
             box-shadow: none;
+            transform: none;
         }
 
         .progress-bar {
@@ -164,9 +227,10 @@
         .stat-label {
             color: #666;
             margin-top: 5px;
+            font-size: 0.9em;
         }
 
-        /* 🔥 NEW: Review Modal Styles */
+        /* Review Modal Styles */
         .review-modal {
             display: none;
             position: fixed;
@@ -309,22 +373,51 @@
             background: #dc3545;
             color: white;
         }
+
+        @media (max-width: 768px) {
+            .upload-grid {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🏦 CRDB Transaction Processor</h1>
-        <p class="subtitle">Upload your CRDB bank statement (Excel or PDF format)</p>
+        <h1>🏦 Bank Transaction Processor</h1>
+        <p class="subtitle">Select your bank and upload statement (Excel or PDF format)</p>
 
-        <div class="upload-area" id="uploadArea">
-            <div class="upload-icon">📁</div>
-            <p>Click to browse or drag & drop your file here</p>
-            <p style="color: #999; margin-top: 10px; font-size: 0.9em;">Supported: .xlsx and .pdf files</p>
-            <!-- 🔥 UPDATED: Accept both .xlsx and .pdf -->
-            <input type="file" id="fileInput" accept=".xlsx,.pdf">
+        <!-- 🔥 NEW: Two bank upload areas -->
+        <div class="upload-grid">
+            <!-- CRDB Section -->
+            <div class="bank-section" id="crdbSection">
+                <div class="bank-header">
+                    <div class="bank-logo">🟢</div>
+                    <div class="bank-title">CRDB Bank</div>
+                </div>
+                <div class="upload-area" id="crdbUploadArea">
+                    <div class="upload-icon">📁</div>
+                    <p class="upload-text">Click or drag & drop</p>
+                    <p class="upload-hint">Excel (.xlsx) or PDF (.pdf)</p>
+                    <input type="file" class="file-input" id="crdbFileInput" accept=".xlsx,.pdf">
+                </div>
+                <button class="btn" id="crdbProcessBtn" disabled>Process CRDB Transactions</button>
+            </div>
+
+            <!-- NMB Section -->
+            <div class="bank-section" id="nmbSection">
+                <div class="bank-header">
+                    <div class="bank-logo">🔵</div>
+                    <div class="bank-title">NMB Bank</div>
+                </div>
+                <div class="upload-area" id="nmbUploadArea">
+                    <div class="upload-icon">📁</div>
+                    <p class="upload-text">Click or drag & drop</p>
+                    <p class="upload-hint">Excel (.xlsx) only</p>
+                    <input type="file" class="file-input" id="nmbFileInput" accept=".xlsx">
+                </div>
+                <button class="btn" id="nmbProcessBtn" disabled>Process NMB Transactions</button>
+            </div>
         </div>
-
-        <button class="btn" id="processBtn" disabled>Process Transactions</button>
 
         <div class="progress-bar" id="progressBar">
             <div class="progress-fill" id="progressFill">0%</div>
@@ -333,30 +426,11 @@
         <div class="status" id="status"></div>
 
         <div class="stats" id="stats" style="display: none;">
-            <div class="stat-card">
-                <div class="stat-number" id="totalCount">0</div>
-                <div class="stat-label">Total</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="passedCount" style="color: #28a745;">0</div>
-                <div class="stat-label">Passed</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="passedSavCount" style="color: #17a2b8;">0</div>
-                <div class="stat-label">Passed (SAV)</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="failedCount" style="color: #dc3545;">0</div>
-                <div class="stat-label">Failed</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="skippedCount" style="color: #ffc107;">0</div>
-                <div class="stat-label">Skipped</div>
-            </div>
+            <!-- Stats will be dynamically populated -->
         </div>
     </div>
 
-    <!-- 🔥 NEW: Review Modal -->
+    <!-- Review Modal -->
     <div class="review-modal" id="reviewModal">
         <div class="review-content">
             <div class="review-header">
@@ -372,9 +446,19 @@
     </div>
 
     <script>
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('fileInput');
-        const processBtn = document.getElementById('processBtn');
+        // CRDB Elements
+        const crdbSection = document.getElementById('crdbSection');
+        const crdbUploadArea = document.getElementById('crdbUploadArea');
+        const crdbFileInput = document.getElementById('crdbFileInput');
+        const crdbProcessBtn = document.getElementById('crdbProcessBtn');
+
+        // NMB Elements
+        const nmbSection = document.getElementById('nmbSection');
+        const nmbUploadArea = document.getElementById('nmbUploadArea');
+        const nmbFileInput = document.getElementById('nmbFileInput');
+        const nmbProcessBtn = document.getElementById('nmbProcessBtn');
+
+        // Common Elements
         const progressBar = document.getElementById('progressBar');
         const progressFill = document.getElementById('progressFill');
         const status = document.getElementById('status');
@@ -383,49 +467,91 @@
         const reviewItems = document.getElementById('reviewItems');
 
         let selectedFile = null;
+        let selectedBank = null;
         let reviewData = [];
         let reviewDecisions = {};
 
-        // Upload area click
-        uploadArea.addEventListener('click', () => fileInput.click());
+        // Setup CRDB upload
+        setupUploadArea(crdbUploadArea, crdbFileInput, crdbProcessBtn, 'CRDB');
+        
+        // Setup NMB upload
+        setupUploadArea(nmbUploadArea, nmbFileInput, nmbProcessBtn, 'NMB');
 
-        // Drag and drop
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
+        function setupUploadArea(uploadArea, fileInput, processBtn, bankType) {
+            // Upload area click
+            uploadArea.addEventListener('click', () => fileInput.click());
 
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
+            // Drag and drop
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
 
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFileSelect(files[0]);
-            }
-        });
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
 
-        // File input change
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleFileSelect(e.target.files[0]);
-            }
-        });
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFileSelect(files[0], uploadArea, processBtn, bankType);
+                }
+            });
 
-        function handleFileSelect(file) {
-            // 🔥 UPDATED: Accept both .xlsx and .pdf files (case-insensitive)
+            // File input change
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFileSelect(e.target.files[0], uploadArea, processBtn, bankType);
+                }
+            });
+
+            // Process button
+            processBtn.addEventListener('click', async () => {
+                if (!selectedFile || selectedBank !== bankType) return;
+                await processTransactions(bankType);
+            });
+        }
+
+        function handleFileSelect(file, uploadArea, processBtn, bankType) {
             const fileName = file.name.toLowerCase();
+            
+            // Validate file type
+            if (bankType === 'NMB' && !fileName.endsWith('.xlsx')) {
+                showStatus('NMB statements must be Excel files (.xlsx)', 'error');
+                return;
+            }
+            
             if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.pdf')) {
                 showStatus('Please select an Excel file (.xlsx) or PDF file (.pdf)', 'error');
                 return;
             }
 
             selectedFile = file;
+            selectedBank = bankType;
             
-            // 🔥 UPDATED: Show file icon based on type
+            // Clear other bank's selection
+            if (bankType === 'CRDB') {
+                nmbProcessBtn.disabled = true;
+                nmbUploadArea.innerHTML = `
+                    <div class="upload-icon">📁</div>
+                    <p class="upload-text">Click or drag & drop</p>
+                    <p class="upload-hint">Excel (.xlsx) only</p>
+                `;
+                crdbSection.classList.add('active');
+                nmbSection.classList.remove('active');
+            } else {
+                crdbProcessBtn.disabled = true;
+                crdbUploadArea.innerHTML = `
+                    <div class="upload-icon">📁</div>
+                    <p class="upload-text">Click or drag & drop</p>
+                    <p class="upload-hint">Excel (.xlsx) or PDF (.pdf)</p>
+                `;
+                nmbSection.classList.add('active');
+                crdbSection.classList.remove('active');
+            }
+            
             const fileIcon = fileName.endsWith('.pdf') ? '📄' : '📊';
             
             uploadArea.innerHTML = `
@@ -434,30 +560,30 @@
                 <p style="color: #999; margin-top: 10px; font-size: 0.9em;">Click to change file</p>
             `;
             processBtn.disabled = false;
-            showStatus('File ready to process', 'success');
+            showStatus(`${bankType} file ready to process`, 'success');
         }
 
-        // Process button
-        processBtn.addEventListener('click', async () => {
+        async function processTransactions(bankType) {
             if (!selectedFile) return;
 
+            const processBtn = bankType === 'CRDB' ? crdbProcessBtn : nmbProcessBtn;
             processBtn.disabled = true;
             showProgress(0);
 
             try {
                 // Upload file
-                showStatus('Uploading file...', 'info');
+                showStatus(`Uploading ${bankType} file...`, 'info');
                 showProgress(20);
 
                 const formData = new FormData();
                 formData.append('file', selectedFile);
+                formData.append('bank_type', bankType);
 
                 const uploadResponse = await fetch('/upload', {
                     method: 'POST',
                     body: formData
                 });
 
-                // 🔥 IMPROVED: Better error handling
                 if (!uploadResponse.ok) {
                     const errorData = await uploadResponse.json();
                     throw new Error(errorData.error || 'Upload failed');
@@ -467,7 +593,7 @@
                 console.log('Upload success:', uploadResult);
 
                 // Process transactions
-                showStatus('Processing transactions...', 'info');
+                showStatus(`Processing ${bankType} transactions...`, 'info');
                 showProgress(50);
 
                 const processResponse = await fetch('/process', {
@@ -477,16 +603,14 @@
                 const result = await processResponse.json();
 
                 if (result.needs_review) {
-                    // Show review modal
                     showProgress(100);
                     hideProgress();
                     reviewData = result.review_data;
                     showReviewModal(result.review_data);
                 } else if (result.success) {
-                    // Process complete
                     showProgress(100);
                     showStatus(result.message, 'success');
-                    displayStats(result.stats);
+                    displayStats(result.stats, bankType);
                     hideProgress();
                 } else {
                     throw new Error(result.error || 'Processing failed');
@@ -499,7 +623,7 @@
             } finally {
                 processBtn.disabled = false;
             }
-        });
+        }
 
         function showReviewModal(data) {
             reviewItems.innerHTML = '';
@@ -563,7 +687,6 @@
         }
 
         async function submitReviews() {
-            // Build confirmations array
             const confirmations = Object.keys(reviewDecisions).map(index => ({
                 index: parseInt(index),
                 accept: reviewDecisions[index]
@@ -590,7 +713,7 @@
                 if (result.success) {
                     closeReviewModal();
                     showStatus(result.message, 'success');
-                    displayStats(result.stats);
+                    displayStats(result.stats, selectedBank);
                 } else {
                     throw new Error(result.error || 'Failed to process reviews');
                 }
@@ -618,12 +741,55 @@
             status.style.display = 'block';
         }
 
-        function displayStats(stats) {
-            document.getElementById('totalCount').textContent = stats.total || 0;
-            document.getElementById('passedCount').textContent = stats.passed || 0;
-            document.getElementById('passedSavCount').textContent = stats.passed_sav || 0;
-            document.getElementById('failedCount').textContent = stats.failed || 0;
-            document.getElementById('skippedCount').textContent = stats.skipped || 0;
+        function displayStats(stats, bankType) {
+            statsDiv.innerHTML = '';
+            
+            if (bankType === 'NMB') {
+                // NMB stats
+                statsDiv.innerHTML = `
+                    <div class="stat-card">
+                        <div class="stat-number">${stats.total || 0}</div>
+                        <div class="stat-label">Total</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #17a2b8;">${stats.passed_sav_nmb || 0}</div>
+                        <div class="stat-label">Passed (NMB)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #dc3545;">${stats.failed_nmb || 0}</div>
+                        <div class="stat-label">Failed (NMB)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #ffc107;">${stats.skipped || 0}</div>
+                        <div class="stat-label">Skipped</div>
+                    </div>
+                `;
+            } else {
+                // CRDB stats
+                statsDiv.innerHTML = `
+                    <div class="stat-card">
+                        <div class="stat-number">${stats.total || 0}</div>
+                        <div class="stat-label">Total</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #28a745;">${stats.passed || 0}</div>
+                        <div class="stat-label">Passed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #17a2b8;">${stats.passed_sav || 0}</div>
+                        <div class="stat-label">Passed (SAV)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #dc3545;">${stats.failed || 0}</div>
+                        <div class="stat-label">Failed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #ffc107;">${stats.skipped || 0}</div>
+                        <div class="stat-label">Skipped</div>
+                    </div>
+                `;
+            }
+            
             statsDiv.style.display = 'grid';
         }
     </script>
