@@ -209,15 +209,38 @@ def get_google_service():
 
 def extract_phone_number(text):
     """
-    Extract phone number from text - IMPROVED to avoid account numbers
+    Extract phone number from text - IMPROVED to avoid account numbers and agency numbers
     Formats: 255XXXXXXXXX, 07XXXXXXXX, 06XXXXXXXX
     
-    CRITICAL: Must NOT extract from account numbers like FRANKAB17701296648323397750
+    CRITICAL: 
+    - Must NOT extract from account numbers like FRANKAB17701296648323397750
+    - Must NOT extract from NMB agency numbers like "agency @22410128509@"
+    - For NMB: Prioritize phone numbers AFTER "Description" keyword
     """
     if not text or pd.isna(text):
         return None
     
-    text = str(text).replace(' ', '').replace('-', '')
+    original_text = str(text)
+    text = original_text.replace(' ', '').replace('-', '')
+    
+    # 🔥 NEW: For NMB messages, avoid agency numbers and prioritize after Description
+    if 'AGENCY' in text.upper() and '@' in text:
+        # Remove agency numbers pattern (e.g., "agency @22410128509@")
+        text_cleaned = re.sub(r'AGENCY\s*@\d+@', '', text, flags=re.IGNORECASE)
+        
+        # Try to extract from Description section first (NMB specific)
+        description_match = re.search(r'DESCRIPTION\s+(.+?)(?:FROM|!!|\Z)', original_text, re.IGNORECASE)
+        if description_match:
+            description_text = description_match.group(1).strip()
+            phone = _extract_phone_from_clean_text(description_text.replace(' ', '').replace('-', ''))
+            if phone:
+                print(f"  ✓ Found phone in Description: {phone}")
+                return phone
+        
+        # If not in description, search cleaned text (without agency numbers)
+        phone = _extract_phone_from_clean_text(text_cleaned.replace(' ', '').replace('-', ''))
+        if phone:
+            return phone
     
     # 🔥 IMPROVED: Exclude account numbers - they contain FRANKAB followed by long numbers
     if 'FRANKAB' in text.upper() or 'TOFRANKAB' in text.upper():
@@ -264,40 +287,89 @@ def extract_plate_number(text):
     - mc175flm (lowercase mixed)  🔥 NEW
     
     CRITICAL: Must have EXACTLY 3 digits AND 3 letters to be valid
+    
+    🔥 NMB PRIORITY: For NMB statements, plates appear after "Description" keyword
     """
     if not text or pd.isna(text):
         return None
     
     text = str(text).upper()
     
-    # 🔥 NEW: Filter out NMB bank default message format (e.g., "101 - NMB Head Office")
-    # Remove any instances of "###-NMB" or "### - NMB" before processing
-    text_cleaned = re.sub(r'\d{3}\s*-?\s*NMB\s+(HEAD\s+OFFICE|BANK)?', '', text, flags=re.IGNORECASE)
+    # 🔥 NEW: For NMB messages, PRIORITIZE extraction after "Description" keyword
+    # This avoids false matches from "Ter ID", "agency @", etc.
+    description_match = re.search(r'DESCRIPTION\s+(.+?)(?:FROM|!!|\Z)', text, re.IGNORECASE)
+    if description_match:
+        # Extract from the Description section FIRST
+        description_text = description_match.group(1).strip()
+        print(f"  🔍 Found Description section: {description_text[:60]}...")
+        
+        # Try to extract plate from description section
+        plate = _extract_plate_from_text(description_text)
+        if plate:
+            print(f"  ✅ Extracted plate from Description: {plate}")
+            return plate
+    
+    # 🔥 If no Description section or no plate found in Description, search entire text
+    # But clean it first to avoid false matches
+    text_cleaned = _clean_nmb_message(text)
+    plate = _extract_plate_from_text(text_cleaned)
+    
+    return plate
+
+
+def _clean_nmb_message(text):
+    """
+    🔥 NEW: Clean NMB message text to remove false positive patterns
+    Removes:
+    - "101 - NMB" bank identifier
+    - "Ter ID ###XXX" patterns (e.g., "Ter ID 2245105627")
+    - "agency @###" patterns
+    - "Trx ID" patterns
+    """
+    # Remove NMB bank identifier
+    text = re.sub(r'\d{3}\s*-?\s*NMB\s+(HEAD\s+OFFICE|BANK)?', '', text, flags=re.IGNORECASE)
+    
+    # 🔥 Remove "Ter ID" followed by any numbers (these create false XXX### patterns)
+    text = re.sub(r'TER\s+ID\s+\d+', '', text, flags=re.IGNORECASE)
+    
+    # 🔥 Remove "agency @" patterns (these create false phone numbers)
+    text = re.sub(r'AGENCY\s+@\d+@', '', text, flags=re.IGNORECASE)
+    
+    # 🔥 Remove "Trx ID" patterns
+    text = re.sub(r'TRX\s+ID\s+\w+', '', text, flags=re.IGNORECASE)
+    
+    return text
+
+
+def _extract_plate_from_text(text):
+    """
+    🔥 NEW: Core plate extraction logic (used by extract_plate_number)
+    Tries all 6 patterns and filters out "NMB", "TER", "TRX", "AGD" as invalid letters
+    """
+    if not text or pd.isna(text):
+        return None
+    
+    text = str(text).upper()
+    
+    # List of invalid letter combinations (not real plates)
+    INVALID_LETTERS = {'NMB', 'TER', 'TRX', 'AGD', 'TPS', 'ACC'}
     
     # Pattern 1: Standard MC###XXX (with optional spaces/dots/hyphens)
     pattern1 = r'MC[\s\.\-]*(\d{3})[\s\.\-]*([A-Z]{3})'
-    match = re.search(pattern1, text_cleaned)
+    match = re.search(pattern1, text)
     if match:
-        # 🔥 Verify the letters aren't "NMB" (bank name)
         letters = match.group(2)
-        if letters == 'NMB':
-            # Skip this match, it's the bank name
-            pass
-        else:
+        if letters not in INVALID_LETTERS:
             plate = f"MC{match.group(1)}{letters}"
             print(f"  ✓ Extracted plate (Pattern 1 - MC###XXX): {plate} from: {text[:80]}")
             return plate
     
     # 🔥 NEW Pattern 2: MC XXX ### (letters first, then numbers: MC 870 FLL, MC EFL 567)
     pattern2 = r'MC[\s\.\-]*([A-Z]{3})[\s\.\-]*(\d{3})'
-    match = re.search(pattern2, text_cleaned)
+    match = re.search(pattern2, text)
     if match:
-        # 🔥 Verify the letters aren't "NMB" (bank name)
         letters = match.group(1)
-        if letters == 'NMB':
-            # Skip this match, it's the bank name
-            pass
-        else:
+        if letters not in INVALID_LETTERS:
             # Standard format is MC###XXX, so swap to get MC + numbers + letters
             plate = f"MC{match.group(2)}{letters}"
             print(f"  ✓ Extracted plate (Pattern 2 - MC XXX ###): {plate} from: {text[:80]}")
@@ -305,28 +377,20 @@ def extract_plate_number(text):
     
     # Pattern 3: ###XXX without MC prefix (must have exactly 3 digits + 3 letters)
     pattern3 = r'(?<!MC)(?<![A-Z])(\d{3})[\s\.\-]*([A-Z]{3})(?![A-Z0-9])'
-    match = re.search(pattern3, text_cleaned)
+    match = re.search(pattern3, text)
     if match:
-        # 🔥 Verify the letters aren't "NMB" (bank name)
         letters = match.group(2)
-        if letters == 'NMB':
-            # Skip this match, it's the bank name
-            pass
-        else:
+        if letters not in INVALID_LETTERS:
             plate = f"MC{match.group(1)}{letters}"
             print(f"  ✓ Extracted plate (Pattern 3 - ###XXX, added MC): {plate} from: {text[:80]}")
             return plate
     
     # 🔥 NEW Pattern 4: XXX### (letters first, then numbers, no MC) - handle mc175flm format
     pattern4 = r'(?<!MC)(?<![A-Z])([A-Z]{3})[\s\.\-]*(\d{3})(?![A-Z0-9])'
-    match = re.search(pattern4, text_cleaned)
+    match = re.search(pattern4, text)
     if match:
-        # 🔥 Verify the letters aren't "NMB" (bank name)
         letters = match.group(1)
-        if letters == 'NMB':
-            # Skip this match, it's the bank name
-            pass
-        else:
+        if letters not in INVALID_LETTERS:
             # Swap to correct format: MC###XXX
             plate = f"MC{match.group(2)}{letters}"
             print(f"  ✓ Extracted plate (Pattern 4 - XXX### reversed, added MC): {plate} from: {text[:80]}")
@@ -334,28 +398,20 @@ def extract_plate_number(text):
     
     # 🔥 NEW Pattern 5: XXX MC ### (MC in the middle: EFL MC 567, FLL MC 870)
     pattern5 = r'([A-Z]{3})[\s\.\-]*MC[\s\.\-]*(\d{3})'
-    match = re.search(pattern5, text_cleaned)
+    match = re.search(pattern5, text)
     if match:
-        # 🔥 Verify the letters aren't "NMB" (bank name)
         letters = match.group(1)
-        if letters == 'NMB':
-            # Skip this match, it's the bank name
-            pass
-        else:
+        if letters not in INVALID_LETTERS:
             plate = f"MC{match.group(2)}{letters}"
             print(f"  ✓ Extracted plate (Pattern 5 - XXX MC ###): {plate} from: {text[:80]}")
             return plate
     
     # 🔥 NEW Pattern 6: ### MC XXX (MC in the middle: 567 MC EFL)
     pattern6 = r'(\d{3})[\s\.\-]*MC[\s\.\-]*([A-Z]{3})'
-    match = re.search(pattern6, text_cleaned)
+    match = re.search(pattern6, text)
     if match:
-        # 🔥 Verify the letters aren't "NMB" (bank name)
         letters = match.group(2)
-        if letters == 'NMB':
-            # Skip this match, it's the bank name
-            pass
-        else:
+        if letters not in INVALID_LETTERS:
             plate = f"MC{match.group(1)}{letters}"
             print(f"  ✓ Extracted plate (Pattern 6 - ### MC XXX): {plate} from: {text[:80]}")
             return plate
