@@ -209,43 +209,47 @@ def get_google_service():
 
 def extract_phone_number(text):
     """
-    Extract phone number from text - IMPROVED to avoid account numbers and agency numbers
-    Formats: 255XXXXXXXXX, 07XXXXXXXX, 06XXXXXXXX
+    🔥 FIXED: Extract phone number from text
     
-    CRITICAL: 
-    - Must NOT extract from account numbers like FRANKAB17701296648323397750
-    - Must NOT extract from NMB agency numbers like "agency @22410128509@"
-    - For NMB: Prioritize phone numbers AFTER "Description" keyword
+    CRITICAL FOR NMB:
+    - Skip agency numbers (numbers in "agency @XXXXXXXXXX@" format)
+    - ONLY extract numbers that appear AFTER the "Description" keyword
+    - This ensures we get the customer's phone, NOT the agent's phone
+    - If agency pattern exists but no phone in Description, return None to force plate lookup
     """
     if not text or pd.isna(text):
         return None
     
     original_text = str(text)
-    text = original_text.replace(' ', '').replace('-', '')
     
-    # 🔥 NEW: For NMB messages, avoid agency numbers and prioritize after Description
-    if 'AGENCY' in text.upper() and '@' in text:
-        # Remove agency numbers pattern (e.g., "agency @22410128509@")
-        text_cleaned = re.sub(r'AGENCY\s*@\d+@', '', text, flags=re.IGNORECASE)
-        
-        # Try to extract from Description section first (NMB specific)
+    # 🔥 CRITICAL FIX: For NMB messages with "agency @", extract ONLY from Description section
+    if 'AGENCY' in original_text.upper() and '@' in original_text:
+        # Find the Description section
         description_match = re.search(r'DESCRIPTION\s+(.+?)(?:FROM|!!|\Z)', original_text, re.IGNORECASE)
         if description_match:
             description_text = description_match.group(1).strip()
+            print(f"  🔍 Searching for phone in Description: {description_text[:60]}...")
+            
+            # Extract phone from Description section ONLY
             phone = _extract_phone_from_clean_text(description_text.replace(' ', '').replace('-', ''))
             if phone:
-                print(f"  ✓ Found phone in Description: {phone}")
+                print(f"  ✅ Found customer phone in Description: {phone}")
                 return phone
+            else:
+                print(f"  ⚠️ No phone found in Description section")
+        else:
+            print(f"  ⚠️ No Description section found in message")
         
-        # If not in description, search cleaned text (without agency numbers)
-        phone = _extract_phone_from_clean_text(text_cleaned.replace(' ', '').replace('-', ''))
-        if phone:
-            return phone
+        # 🔥 KEY FIX: If we have an agency number pattern, do NOT extract from the full text
+        # Return None to force plate lookup instead of using the agency number
+        return None
     
-    # 🔥 IMPROVED: Exclude account numbers - they contain FRANKAB followed by long numbers
-    if 'FRANKAB' in text.upper() or 'TOFRANKAB' in text.upper():
-        # Split by common separators and only check parts that don't contain FRANKAB
-        parts = re.split(r'[:\s]+', text)
+    # For non-agency messages, extract normally
+    text_cleaned = original_text.replace(' ', '').replace('-', '')
+    
+    # 🔥 IMPROVED: Exclude account numbers
+    if 'FRANKAB' in text_cleaned.upper() or 'TOFRANKAB' in text_cleaned.upper():
+        parts = re.split(r'[:\s]+', text_cleaned)
         for part in parts:
             if 'FRANKAB' not in part.upper() and 'FRANK' not in part.upper():
                 phone = _extract_phone_from_clean_text(part)
@@ -253,7 +257,7 @@ def extract_phone_number(text):
                     return phone
         return None
     
-    return _extract_phone_from_clean_text(text)
+    return _extract_phone_from_clean_text(text_cleaned)
 
 def _extract_phone_from_clean_text(text):
     """Helper to extract phone from text without account numbers"""
@@ -273,46 +277,53 @@ def _extract_phone_from_clean_text(text):
 
 def extract_plate_number(text):
     """
-    🔥 IMPROVED: Extract plate number with ULTRA flexible matching
+    🔥 FIXED: Extract plate number with PRIORITY on Description section
+    
+    CRITICAL FOR NMB:
+    - ALWAYS extract from the Description section FIRST
+    - The Description section comes after "Description" keyword and before "FROM" or "!!"
+    - This avoids false matches from "Ter ID", "101 NMB", agency numbers, etc.
+    - Only search full text if Description section doesn't have a plate
+    
     Valid formats:
     - MC###XXX (standard: MC567EFL)
     - MC ### XXX (with spaces: MC 567 EFL)
-    - mc###xxx (lowercase: mc567efl)
+    - mc###xxx (lowercase: mc567efl, mc808flm)
     - MC.###.XXX (with dots: MC.567.EFL)
     - MC-###-XXX (with hyphens: MC-567-EFL)
     - ###XXX (missing MC: 567EFL)
-    - MC XXX ### (letters first: MC EFL 567, MC 870 FLL)  🔥 NEW
-    - XXX MC ### (MC in middle: EFL MC 567)  🔥 NEW
-    - XXX ### MC (MC at end: EFL 567 MC)  🔥 NEW
-    - mc175flm (lowercase mixed)  🔥 NEW
-    
-    CRITICAL: Must have EXACTLY 3 digits AND 3 letters to be valid
-    
-    🔥 NMB PRIORITY: For NMB statements, plates appear after "Description" keyword
+    - MC XXX ### (letters first: MC EFL 567, MC 870 FLL)
+    - XXX ### MC (MC at end: EFL 567 MC)
+    - pikipiki MC874FLL
     """
     if not text or pd.isna(text):
         return None
     
-    text = str(text).upper()
+    original_text = str(text)
+    text_upper = original_text.upper()
     
-    # 🔥 NEW: For NMB messages, PRIORITIZE extraction after "Description" keyword
-    # This avoids false matches from "Ter ID", "agency @", etc.
-    description_match = re.search(r'DESCRIPTION\s+(.+?)(?:FROM|!!|\Z)', text, re.IGNORECASE)
+    # 🔥 CRITICAL: For NMB messages, extract from Description section FIRST
+    # Pattern matches: "Description <CONTENT> FROM" or "Description <CONTENT> !!"
+    description_match = re.search(r'DESCRIPTION\s+(.+?)(?:FROM|!!|\Z)', original_text, re.IGNORECASE)
     if description_match:
-        # Extract from the Description section FIRST
         description_text = description_match.group(1).strip()
-        print(f"  🔍 Found Description section: {description_text[:60]}...")
+        print(f"  🔍 Found Description section: {description_text[:80]}...")
         
         # Try to extract plate from description section
         plate = _extract_plate_from_text(description_text)
         if plate:
             print(f"  ✅ Extracted plate from Description: {plate}")
             return plate
+        else:
+            print(f"  ⚠️ No plate found in Description section: {description_text}")
     
-    # 🔥 If no Description section or no plate found in Description, search entire text
-    # But clean it first to avoid false matches
-    text_cleaned = _clean_nmb_message(text)
+    # If no Description section or no plate found, try entire text (cleaned)
+    # But clean it first to avoid false matches from Ter ID, agency numbers, etc.
+    text_cleaned = _clean_nmb_message(text_upper)
     plate = _extract_plate_from_text(text_cleaned)
+    
+    if plate:
+        print(f"  ⚠️ Plate extracted from full text (not Description): {plate}")
     
     return plate
 
