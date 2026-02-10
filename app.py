@@ -10,7 +10,6 @@ import json
 import pickle
 from datetime import datetime
 import pdfplumber  # For PDF extraction
-import gc  # For garbage collection
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -39,73 +38,55 @@ PIKIPIKI_SHEET_ID = '1XFwPITQgZmzZ8lbg8MKD9S4rwHyk2cDOKrcxO7SAjHA'
 
 def extract_data_from_pdf(filepath):
     """
-    🔥 ULTRA-OPTIMIZED: Extract transaction data from PDF with minimal memory usage
-    Strategy: Process one page at a time, write to temp CSV immediately, never store all in memory
+    🔥 NEW: Extract transaction data from PDF bank statement
+    PDF format: SN | TRANS DATE | DETAILS | CHANNEL ID | VALUE DATE | DEBIT | CREDIT | BOOK BALANCE
+    Returns DataFrame with columns: Posting Date, Details, Credit
     """
-    import csv
-    import tempfile
-    
     try:
         print(f"📄 Opening PDF: {filepath}")
+        transactions = []
         
-        # Create temporary CSV file to store results progressively
-        temp_csv = tempfile.NamedTemporaryFile(mode='w', delete=False, newline='', suffix='.csv')
-        csv_writer = csv.DictWriter(temp_csv, fieldnames=['Posting Date', 'Details', 'Credit', 'Debit'])
-        csv_writer.writeheader()
-        
-        transaction_count = 0
-        
-        # 🔥 CRITICAL: Process ONE page at a time, close immediately
         with pdfplumber.open(filepath) as pdf:
-            total_pages = len(pdf.pages)
-            print(f"📚 Total pages: {total_pages}")
-            
-            # 🔥 HARD LIMIT: Reject large PDFs immediately
-            MAX_PAGES = 50  # Reduced for free tier reliability
-            if total_pages > MAX_PAGES:
-                temp_csv.close()
-                os.unlink(temp_csv.name)
-                raise ValueError(f"PDF too large ({total_pages} pages). Maximum allowed: {MAX_PAGES} pages. Please split into smaller files or use Excel format.")
-            
-            for page_num in range(total_pages):
-                # Only log every 10 pages to reduce I/O overhead
-                if page_num % 10 == 0 or page_num == total_pages - 1:
-                    print(f"📖 Processing page {page_num + 1}/{total_pages}...")
+            for page_num, page in enumerate(pdf.pages, 1):
+                print(f"📖 Processing page {page_num}...")
                 
-                page = pdf.pages[page_num]
+                # Extract tables from the page
                 tables = page.extract_tables()
                 
                 if not tables:
+                    print(f"⚠️ No tables found on page {page_num}")
                     continue
                 
-                for table in tables:
+                for table_idx, table in enumerate(tables):
                     if not table:
                         continue
                     
-                    # Find header row
+                    print(f"  📊 Table {table_idx + 1}: {len(table)} rows")
+                    
+                    # Find header row (contains "TRANS DATE" or "SN")
                     header_row_idx = None
                     for idx, row in enumerate(table):
                         if row and any(cell and ('TRANS DATE' in str(cell).upper() or 
-                                                   'VALUE DATE' in str(cell).upper() or
+                                                   'SN' in str(cell).upper() or 
                                                    'DETAILS' in str(cell).upper()) for cell in row):
                             header_row_idx = idx
+                            print(f"  ✓ Found header at row {idx}: {row}")
                             break
                     
                     if header_row_idx is None:
+                        print(f"  ⚠️ No header found in table {table_idx + 1}")
                         continue
                     
                     headers = table[header_row_idx]
                     
-                    # Map columns
+                    # Map column indices (handle variations in header names)
                     col_map = {}
                     for idx, header in enumerate(headers):
                         if not header:
                             continue
                         header_upper = str(header).upper().strip()
                         
-                        if 'VALUE DATE' in header_upper:
-                            col_map['trans_date'] = idx
-                        elif 'TRANS DATE' in header_upper and 'trans_date' not in col_map:
+                        if 'TRANS DATE' in header_upper or 'DATE' in header_upper:
                             col_map['trans_date'] = idx
                         elif 'DETAILS' in header_upper:
                             col_map['details'] = idx
@@ -114,31 +95,43 @@ def extract_data_from_pdf(filepath):
                         elif 'DEBIT' in header_upper:
                             col_map['debit'] = idx
                     
+                    print(f"  📍 Column mapping: {col_map}")
+                    
                     if 'trans_date' not in col_map or 'details' not in col_map or 'credit' not in col_map:
+                        print(f"  ⚠️ Missing required columns in table {table_idx + 1}")
                         continue
                     
-                    # Process rows - write immediately to CSV
+                    # Process data rows
                     for row_idx in range(header_row_idx + 1, len(table)):
                         row = table[row_idx]
                         
                         if not row or len(row) <= max(col_map.values()):
                             continue
                         
+                        # Skip empty rows
                         if all(not cell or str(cell).strip() == '' for cell in row):
                             continue
                         
-                        trans_date = str(row[col_map['trans_date']]).strip() if col_map.get('trans_date') is not None and row[col_map['trans_date']] else ''
-                        details = str(row[col_map['details']]).strip() if col_map.get('details') is not None and row[col_map['details']] else ''
-                        credit_str = str(row[col_map['credit']]).strip() if col_map.get('credit') is not None and row[col_map['credit']] else ''
-                        debit_str = str(row[col_map.get('debit', -1)]).strip() if col_map.get('debit') is not None and col_map['debit'] < len(row) and row[col_map['debit']] else ''
+                        trans_date = row[col_map['trans_date']] if 'trans_date' in col_map else ''
+                        details = row[col_map['details']] if 'details' in col_map else ''
+                        credit = row[col_map['credit']] if 'credit' in col_map else ''
+                        debit = row[col_map.get('debit', -1)] if 'debit' in col_map else ''
                         
+                        # Clean up values
+                        trans_date = str(trans_date).strip() if trans_date else ''
+                        details = str(details).strip() if details else ''
+                        credit_str = str(credit).strip() if credit else ''
+                        debit_str = str(debit).strip() if debit else ''
+                        
+                        # Skip if no details or date
                         if not details or not trans_date:
                             continue
                         
+                        # Skip header repetitions
                         if 'DETAILS' in details.upper() or 'TRANS DATE' in trans_date.upper():
                             continue
                         
-                        # Parse amounts
+                        # Parse credit amount
                         credit_val = 0.0
                         if credit_str:
                             try:
@@ -146,6 +139,7 @@ def extract_data_from_pdf(filepath):
                             except ValueError:
                                 credit_val = 0.0
                         
+                        # Parse debit amount
                         debit_val = 0.0
                         if debit_str:
                             try:
@@ -153,42 +147,24 @@ def extract_data_from_pdf(filepath):
                             except ValueError:
                                 debit_val = 0.0
                         
-                        # Only credit transactions
+                        # Only include credit transactions (credit > 0 and debit is 0 or empty)
                         if credit_val > 0 and debit_val == 0:
-                            csv_writer.writerow({
+                            transactions.append({
                                 'Posting Date': trans_date,
                                 'Details': details,
                                 'Credit': credit_val,
                                 'Debit': debit_val
                             })
-                            transaction_count += 1
-                
-                # 🔥 CRITICAL: Force garbage collection every 2 pages
-                if (page_num + 1) % 2 == 0:
-                    gc.collect()
-                    if (page_num + 1) % 10 == 0:
-                        print(f"✅ Progress: {transaction_count} transactions extracted...")
+                            print(f"  ✓ Transaction: {trans_date} | {details[:50]}... | Credit: {credit_val}")
         
-        temp_csv.close()
-        
-        if transaction_count == 0:
-            os.unlink(temp_csv.name)
+        if not transactions:
             print("❌ No transactions found in PDF")
             return None
         
-        # 🔥 Now read the CSV into DataFrame (much more memory efficient)
-        print(f"📊 Reading {transaction_count} transactions from temp file...")
-        df = pd.read_csv(temp_csv.name)
-        
-        # Clean up temp file
-        os.unlink(temp_csv.name)
-        
+        df = pd.DataFrame(transactions)
         print(f"✅ Extracted {len(df)} credit transactions from PDF")
         return df
     
-    except ValueError as ve:
-        print(f"❌ Validation error: {ve}")
-        raise
     except Exception as e:
         print(f"❌ Error extracting PDF data: {e}")
         import traceback
@@ -406,7 +382,7 @@ def load_all_customers(service):
         return {}, {}
 
 def load_all_customers_sav(service):
-    """Load all customers from pikipiki records2 sheet (for PASSED_SAV)"""
+    """🔥 UPDATED: Load all customers from pikipiki records2 sheet (for PASSED_SAV) - includes customer IDs"""
     try:
         sheet = service.spreadsheets()
         result = sheet.values().get(
@@ -417,15 +393,17 @@ def load_all_customers_sav(service):
         values = result.get('values', [])
         if not values:
             print("⚠️ No data found in pikipiki records2")
-            return {}, {}
+            return {}, {}, {}
         
         phone_lookup_sav = {}
         plate_lookup_sav = {}
+        id_lookup_sav = {}  # 🔥 NEW: Maps phone/plate to customer ID
         
         for row in values[1:]:
             plate_col = row[1] if len(row) > 1 else ''
             phone_col = row[3] if len(row) > 3 else ''
             name_col = row[2] if len(row) > 2 else ''
+            customer_id_col = row[4] if len(row) > 4 else ''  # 🔥 NEW: Customer ID from column E (index 4)
             
             if not plate_col and not phone_col:
                 continue
@@ -434,18 +412,21 @@ def load_all_customers_sav(service):
                 plate_clean = str(plate_col).replace(' ', '').upper()
                 if plate_clean:
                     plate_lookup_sav[plate_clean] = name_col
+                    id_lookup_sav[plate_clean] = str(customer_id_col).strip()  # 🔥 NEW: Store customer ID
             
             if phone_col:
                 phone_clean = str(phone_col).replace(' ', '').replace('-', '')
                 if phone_clean:
                     phone_lookup_sav[phone_clean] = name_col
+                    id_lookup_sav[phone_clean] = str(customer_id_col).strip()  # 🔥 NEW: Store customer ID
         
         print(f"✅ Loaded {len(phone_lookup_sav)} phone numbers and {len(plate_lookup_sav)} plates from pikipiki records2 (SAV)")
-        return phone_lookup_sav, plate_lookup_sav
+        print(f"✅ Loaded {len(id_lookup_sav)} customer IDs from pikipiki records2")
+        return phone_lookup_sav, plate_lookup_sav, id_lookup_sav
         
     except Exception as e:
         print(f"⚠️ Error loading pikipiki records2 (SAV): {e}")
-        return {}, {}
+        return {}, {}, {}
 
 def lookup_customer_from_cache(identifier, lookup_type, phone_lookup, plate_lookup):
     """Look up customer from cached data"""
@@ -471,6 +452,33 @@ def lookup_customer_from_cache(identifier, lookup_type, phone_lookup, plate_look
     elif lookup_type == 'plate':
         return plate_lookup.get(identifier)
     return None
+
+def lookup_customer_id_from_cache(identifier, lookup_type, id_lookup_sav):
+    """🔥 NEW: Look up customer ID from cached SAV data"""
+    if lookup_type == 'phone':
+        customer_id = id_lookup_sav.get(identifier)
+        if customer_id:
+            return customer_id
+        
+        # Try alternative phone formats
+        if identifier.startswith('255'):
+            alt_format = '0' + identifier[3:]
+            customer_id = id_lookup_sav.get(alt_format)
+            if customer_id:
+                return customer_id
+        
+        elif identifier.startswith('07') or identifier.startswith('06'):
+            alt_format = '255' + identifier[1:]
+            customer_id = id_lookup_sav.get(alt_format)
+            if customer_id:
+                return customer_id
+        
+        return ''
+        
+    elif lookup_type == 'plate':
+        return id_lookup_sav.get(identifier, '')
+    
+    return ''
 
 def get_existing_refs(service, sheet_name='PASSED'):
     """Get existing reference numbers AND messages for duplicate detection"""
@@ -624,16 +632,6 @@ def upload_file():
             print(f"❌ Invalid file type: {file.filename}")
             return jsonify({'error': f'Please upload an Excel file (.xlsx) or PDF file (.pdf). Got: {file.filename}'}), 400
         
-        # 🔥 FILE SIZE CHECK: Strict limit for PDFs (free tier memory constraints)
-        file.seek(0, os.SEEK_END)
-        file_size = file.tell()
-        file.seek(0)
-        
-        if filename_lower.endswith('.pdf') and file_size > 3 * 1024 * 1024:  # 3MB limit
-            size_mb = file_size / (1024 * 1024)
-            print(f"❌ PDF file too large: {size_mb:.1f}MB")
-            return jsonify({'error': f'PDF file too large ({size_mb:.1f}MB). Maximum: 3MB.\n\nFor large bank statements:\n• Split PDF into smaller files (30-50 pages each)\n• Export as Excel (.xlsx) format instead\n• Use a paid hosting plan for larger files'}), 400
-        
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         
@@ -645,6 +643,7 @@ def upload_file():
             print(f"❌ File not saved: {filepath}")
             return jsonify({'error': 'Failed to save file'}), 500
         
+        file_size = os.path.getsize(filepath)
         print(f"✅ File saved successfully: {filename} ({file_size} bytes)")
         
         session['filepath'] = filepath
@@ -711,7 +710,7 @@ def process_transactions():
         phone_lookup, plate_lookup = load_all_customers(service)
         
         print("\nLoading customer database from pikipiki records2 (SAV)...")
-        phone_lookup_sav, plate_lookup_sav = load_all_customers_sav(service)
+        phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)  # 🔥 UPDATED: Now returns 3 values
         
         # Get existing refs
         print("Loading existing references from PASSED sheet...")
@@ -796,6 +795,7 @@ def process_transactions():
                 customer_name = lookup_customer_from_cache(identifier, lookup_type, phone_lookup, plate_lookup)
                 
                 if customer_name:
+                    # 🔥 UPDATED: Add empty customer_id for PASSED records
                     last_passed_id += 1
                     passed_row = [
                         last_passed_id,
@@ -805,7 +805,8 @@ def process_transactions():
                         credit_amount,
                         identifier,
                         customer_name,
-                        ref_number or ''
+                        ref_number or '',
+                        ''  # 🔥 NEW: Empty customer_id for PASSED (pikipiki records has no IDs)
                     ]
                     passed_data.append(passed_row)
                     stats['passed'] += 1
@@ -815,6 +816,9 @@ def process_transactions():
                     customer_name_sav = lookup_customer_from_cache(identifier, lookup_type, phone_lookup_sav, plate_lookup_sav)
                     
                     if customer_name_sav:
+                        # 🔥 UPDATED: Get customer ID for PASSED_SAV records
+                        customer_id = lookup_customer_id_from_cache(identifier, lookup_type, id_lookup_sav)
+                        
                         last_passed_sav_id += 1
                         passed_sav_row = [
                             last_passed_sav_id,
@@ -824,11 +828,12 @@ def process_transactions():
                             credit_amount,
                             identifier,
                             customer_name_sav,
-                            ref_number or ''
+                            ref_number or '',
+                            customer_id  # 🔥 NEW: Customer ID from pikipiki records2
                         ]
                         passed_sav_data.append(passed_sav_row)
                         stats['passed_sav'] += 1
-                        print(f"✅ PASSED_SAV: {customer_name_sav} - {identifier} - {credit_amount}")
+                        print(f"✅ PASSED_SAV: {customer_name_sav} - {identifier} - {credit_amount} - ID: {customer_id}")
                     else:
                         # Not found - add to FAILED
                         last_failed_id += 1
@@ -865,9 +870,13 @@ def process_transactions():
                         
                         customer_name = lookup_customer_from_cache(suggested_plate, 'plate', phone_lookup, plate_lookup)
                         customer_name_sav = None
+                        customer_id = ''
                         
                         if not customer_name:
                             customer_name_sav = lookup_customer_from_cache(suggested_plate, 'plate', phone_lookup_sav, plate_lookup_sav)
+                            if customer_name_sav:
+                                # 🔥 NEW: Get customer ID for SAV suggestions
+                                customer_id = lookup_customer_id_from_cache(suggested_plate, 'plate', id_lookup_sav)
                         
                         if customer_name or customer_name_sav:
                             needs_review_data.append({
@@ -878,6 +887,7 @@ def process_transactions():
                                 'original_text': suggestion['original'],
                                 'suggested_plate': suggested_plate,
                                 'customer_name': customer_name or customer_name_sav,
+                                'customer_id': customer_id,  # 🔥 NEW: Include customer ID
                                 'target_sheet': 'PASSED' if customer_name else 'PASSED_SAV',
                                 'confidence': suggestion['confidence'],
                                 'reason': suggestion['reason']
@@ -1004,6 +1014,7 @@ def confirm_reviews():
             
             if accept:
                 if review_item['target_sheet'] == 'PASSED':
+                    # 🔥 UPDATED: Add empty customer_id for PASSED
                     last_ids['passed'] += 1
                     row = [
                         last_ids['passed'],
@@ -1013,11 +1024,13 @@ def confirm_reviews():
                         review_item['credit_amount'],
                         review_item['suggested_plate'],
                         review_item['customer_name'],
-                        review_item['ref_number']
+                        review_item['ref_number'],
+                        ''  # 🔥 NEW: Empty customer_id for PASSED
                     ]
                     passed_data.append(row)
                     stats['passed'] += 1
                 else:
+                    # 🔥 UPDATED: Add customer_id for PASSED_SAV
                     last_ids['passed_sav'] += 1
                     row = [
                         last_ids['passed_sav'],
@@ -1027,7 +1040,8 @@ def confirm_reviews():
                         review_item['credit_amount'],
                         review_item['suggested_plate'],
                         review_item['customer_name'],
-                        review_item['ref_number']
+                        review_item['ref_number'],
+                        review_item.get('customer_id', '')  # 🔥 NEW: Customer ID from pikipiki records2
                     ]
                     passed_sav_data.append(row)
                     stats['passed_sav'] += 1
