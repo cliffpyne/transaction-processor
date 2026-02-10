@@ -270,55 +270,95 @@ def extract_plate_number(text):
     
     text = str(text).upper()
     
+    # 🔥 NEW: Filter out NMB bank default message format (e.g., "101 - NMB Head Office")
+    # Remove any instances of "###-NMB" or "### - NMB" before processing
+    text_cleaned = re.sub(r'\d{3}\s*-?\s*NMB\s+(HEAD\s+OFFICE|BANK)?', '', text, flags=re.IGNORECASE)
+    
     # Pattern 1: Standard MC###XXX (with optional spaces/dots/hyphens)
     pattern1 = r'MC[\s\.\-]*(\d{3})[\s\.\-]*([A-Z]{3})'
-    match = re.search(pattern1, text)
+    match = re.search(pattern1, text_cleaned)
     if match:
-        plate = f"MC{match.group(1)}{match.group(2)}"
-        print(f"  ✓ Extracted plate (Pattern 1 - MC###XXX): {plate} from: {text[:80]}")
-        return plate
+        # 🔥 Verify the letters aren't "NMB" (bank name)
+        letters = match.group(2)
+        if letters == 'NMB':
+            # Skip this match, it's the bank name
+            pass
+        else:
+            plate = f"MC{match.group(1)}{letters}"
+            print(f"  ✓ Extracted plate (Pattern 1 - MC###XXX): {plate} from: {text[:80]}")
+            return plate
     
     # 🔥 NEW Pattern 2: MC XXX ### (letters first, then numbers: MC 870 FLL, MC EFL 567)
     pattern2 = r'MC[\s\.\-]*([A-Z]{3})[\s\.\-]*(\d{3})'
-    match = re.search(pattern2, text)
+    match = re.search(pattern2, text_cleaned)
     if match:
-        # Standard format is MC###XXX, so swap to get MC + numbers + letters
-        plate = f"MC{match.group(2)}{match.group(1)}"
-        print(f"  ✓ Extracted plate (Pattern 2 - MC XXX ###): {plate} from: {text[:80]}")
-        return plate
+        # 🔥 Verify the letters aren't "NMB" (bank name)
+        letters = match.group(1)
+        if letters == 'NMB':
+            # Skip this match, it's the bank name
+            pass
+        else:
+            # Standard format is MC###XXX, so swap to get MC + numbers + letters
+            plate = f"MC{match.group(2)}{letters}"
+            print(f"  ✓ Extracted plate (Pattern 2 - MC XXX ###): {plate} from: {text[:80]}")
+            return plate
     
     # Pattern 3: ###XXX without MC prefix (must have exactly 3 digits + 3 letters)
     pattern3 = r'(?<!MC)(?<![A-Z])(\d{3})[\s\.\-]*([A-Z]{3})(?![A-Z0-9])'
-    match = re.search(pattern3, text)
+    match = re.search(pattern3, text_cleaned)
     if match:
-        plate = f"MC{match.group(1)}{match.group(2)}"
-        print(f"  ✓ Extracted plate (Pattern 3 - ###XXX, added MC): {plate} from: {text[:80]}")
-        return plate
+        # 🔥 Verify the letters aren't "NMB" (bank name)
+        letters = match.group(2)
+        if letters == 'NMB':
+            # Skip this match, it's the bank name
+            pass
+        else:
+            plate = f"MC{match.group(1)}{letters}"
+            print(f"  ✓ Extracted plate (Pattern 3 - ###XXX, added MC): {plate} from: {text[:80]}")
+            return plate
     
     # 🔥 NEW Pattern 4: XXX### (letters first, then numbers, no MC) - handle mc175flm format
     pattern4 = r'(?<!MC)(?<![A-Z])([A-Z]{3})[\s\.\-]*(\d{3})(?![A-Z0-9])'
-    match = re.search(pattern4, text)
+    match = re.search(pattern4, text_cleaned)
     if match:
-        # Swap to correct format: MC###XXX
-        plate = f"MC{match.group(2)}{match.group(1)}"
-        print(f"  ✓ Extracted plate (Pattern 4 - XXX### reversed, added MC): {plate} from: {text[:80]}")
-        return plate
+        # 🔥 Verify the letters aren't "NMB" (bank name)
+        letters = match.group(1)
+        if letters == 'NMB':
+            # Skip this match, it's the bank name
+            pass
+        else:
+            # Swap to correct format: MC###XXX
+            plate = f"MC{match.group(2)}{letters}"
+            print(f"  ✓ Extracted plate (Pattern 4 - XXX### reversed, added MC): {plate} from: {text[:80]}")
+            return plate
     
     # 🔥 NEW Pattern 5: XXX MC ### (MC in the middle: EFL MC 567, FLL MC 870)
     pattern5 = r'([A-Z]{3})[\s\.\-]*MC[\s\.\-]*(\d{3})'
-    match = re.search(pattern5, text)
+    match = re.search(pattern5, text_cleaned)
     if match:
-        plate = f"MC{match.group(2)}{match.group(1)}"
-        print(f"  ✓ Extracted plate (Pattern 5 - XXX MC ###): {plate} from: {text[:80]}")
-        return plate
+        # 🔥 Verify the letters aren't "NMB" (bank name)
+        letters = match.group(1)
+        if letters == 'NMB':
+            # Skip this match, it's the bank name
+            pass
+        else:
+            plate = f"MC{match.group(2)}{letters}"
+            print(f"  ✓ Extracted plate (Pattern 5 - XXX MC ###): {plate} from: {text[:80]}")
+            return plate
     
     # 🔥 NEW Pattern 6: ### MC XXX (MC in the middle: 567 MC EFL)
     pattern6 = r'(\d{3})[\s\.\-]*MC[\s\.\-]*([A-Z]{3})'
-    match = re.search(pattern6, text)
+    match = re.search(pattern6, text_cleaned)
     if match:
-        plate = f"MC{match.group(1)}{match.group(2)}"
-        print(f"  ✓ Extracted plate (Pattern 6 - ### MC XXX): {plate} from: {text[:80]}")
-        return plate
+        # 🔥 Verify the letters aren't "NMB" (bank name)
+        letters = match.group(2)
+        if letters == 'NMB':
+            # Skip this match, it's the bank name
+            pass
+        else:
+            plate = f"MC{match.group(1)}{letters}"
+            print(f"  ✓ Extracted plate (Pattern 6 - ### MC XXX): {plate} from: {text[:80]}")
+            return plate
     
     return None
 
