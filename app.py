@@ -1050,11 +1050,11 @@ def process_nmb_transactions(filepath):
             }), 400
         
         # Filter only CREDIT transactions
-        df['Credit'] = pd.to_numeric(df['Credit'].astype(str).str.replace(',', '').str.replace('TZS', '').strip(), errors='coerce')
+        df['Credit'] = pd.to_numeric(df['Credit'].astype(str).str.replace(',', '').str.replace('TZS', '').str.strip(), errors='coerce')
         
         # Get debit column if exists
         if 'Debit' in df.columns:
-            df['Debit'] = pd.to_numeric(df['Debit'].astype(str).str.replace(',', '').str.replace('TZS', '').strip(), errors='coerce')
+            df['Debit'] = pd.to_numeric(df['Debit'].astype(str).str.replace(',', '').str.replace('TZS', '').str.strip(), errors='coerce')
             credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) & 
                            ((df['Debit'].isna()) | (df['Debit'] == 0))].copy()
         else:
