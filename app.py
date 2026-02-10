@@ -250,7 +250,7 @@ def _extract_phone_from_clean_text(text):
 
 def extract_plate_number(text):
     """
-    🔥 IMPROVED: Extract plate number with flexible matching
+    🔥 IMPROVED: Extract plate number with ULTRA flexible matching
     Valid formats:
     - MC###XXX (standard: MC567EFL)
     - MC ### XXX (with spaces: MC 567 EFL)
@@ -258,6 +258,10 @@ def extract_plate_number(text):
     - MC.###.XXX (with dots: MC.567.EFL)
     - MC-###-XXX (with hyphens: MC-567-EFL)
     - ###XXX (missing MC: 567EFL)
+    - MC XXX ### (letters first: MC EFL 567, MC 870 FLL)  🔥 NEW
+    - XXX MC ### (MC in middle: EFL MC 567)  🔥 NEW
+    - XXX ### MC (MC at end: EFL 567 MC)  🔥 NEW
+    - mc175flm (lowercase mixed)  🔥 NEW
     
     CRITICAL: Must have EXACTLY 3 digits AND 3 letters to be valid
     """
@@ -271,24 +275,49 @@ def extract_plate_number(text):
     match = re.search(pattern1, text)
     if match:
         plate = f"MC{match.group(1)}{match.group(2)}"
-        print(f"  ✓ Extracted plate (Pattern 1): {plate} from: {text[:80]}")
+        print(f"  ✓ Extracted plate (Pattern 1 - MC###XXX): {plate} from: {text[:80]}")
         return plate
     
-    # Pattern 2: ###XXX without MC prefix (must have exactly 3 digits + 3 letters)
-    pattern2 = r'(?<!MC)(?<![A-Z])(\d{3})[\s\.\-]*([A-Z]{3})(?![A-Z0-9])'
+    # 🔥 NEW Pattern 2: MC XXX ### (letters first, then numbers: MC 870 FLL, MC EFL 567)
+    pattern2 = r'MC[\s\.\-]*([A-Z]{3})[\s\.\-]*(\d{3})'
     match = re.search(pattern2, text)
     if match:
-        plate = f"MC{match.group(1)}{match.group(2)}"
-        print(f"  ✓ Extracted plate (Pattern 2 - added MC): {plate} from: {text[:80]}")
+        # Standard format is MC###XXX, so swap to get MC + numbers + letters
+        plate = f"MC{match.group(2)}{match.group(1)}"
+        print(f"  ✓ Extracted plate (Pattern 2 - MC XXX ###): {plate} from: {text[:80]}")
         return plate
     
-    # Pattern 3: XXX### (letters first, then numbers) - uncommon but possible
-    pattern3 = r'(?<!MC)(?<![A-Z])([A-Z]{3})[\s\.\-]*(\d{3})(?![A-Z0-9])'
+    # Pattern 3: ###XXX without MC prefix (must have exactly 3 digits + 3 letters)
+    pattern3 = r'(?<!MC)(?<![A-Z])(\d{3})[\s\.\-]*([A-Z]{3})(?![A-Z0-9])'
     match = re.search(pattern3, text)
+    if match:
+        plate = f"MC{match.group(1)}{match.group(2)}"
+        print(f"  ✓ Extracted plate (Pattern 3 - ###XXX, added MC): {plate} from: {text[:80]}")
+        return plate
+    
+    # 🔥 NEW Pattern 4: XXX### (letters first, then numbers, no MC) - handle mc175flm format
+    pattern4 = r'(?<!MC)(?<![A-Z])([A-Z]{3})[\s\.\-]*(\d{3})(?![A-Z0-9])'
+    match = re.search(pattern4, text)
     if match:
         # Swap to correct format: MC###XXX
         plate = f"MC{match.group(2)}{match.group(1)}"
-        print(f"  ✓ Extracted plate (Pattern 3 - reversed): {plate} from: {text[:80]}")
+        print(f"  ✓ Extracted plate (Pattern 4 - XXX### reversed, added MC): {plate} from: {text[:80]}")
+        return plate
+    
+    # 🔥 NEW Pattern 5: XXX MC ### (MC in the middle: EFL MC 567, FLL MC 870)
+    pattern5 = r'([A-Z]{3})[\s\.\-]*MC[\s\.\-]*(\d{3})'
+    match = re.search(pattern5, text)
+    if match:
+        plate = f"MC{match.group(2)}{match.group(1)}"
+        print(f"  ✓ Extracted plate (Pattern 5 - XXX MC ###): {plate} from: {text[:80]}")
+        return plate
+    
+    # 🔥 NEW Pattern 6: ### MC XXX (MC in the middle: 567 MC EFL)
+    pattern6 = r'(\d{3})[\s\.\-]*MC[\s\.\-]*([A-Z]{3})'
+    match = re.search(pattern6, text)
+    if match:
+        plate = f"MC{match.group(1)}{match.group(2)}"
+        print(f"  ✓ Extracted plate (Pattern 6 - ### MC XXX): {plate} from: {text[:80]}")
         return plate
     
     return None
@@ -487,8 +516,10 @@ def get_existing_refs(service, sheet_name='PASSED'):
         
         if sheet_name == 'FAILED':
             ref_column = 'I'
-        elif sheet_name == 'PASSED_SAV':
+        elif sheet_name in ['PASSED_SAV', 'PASSED_SAV_NMB']:
             ref_column = 'H'
+        elif sheet_name == 'FAILED_NMB':
+            ref_column = 'I'
         else:  # PASSED
             ref_column = 'H'
         
@@ -620,7 +651,9 @@ def upload_file():
             return jsonify({'error': 'No file uploaded'}), 400
         
         file = request.files['file']
-        print(f"📁 File received: {file.filename}")
+        bank_type = request.form.get('bank_type', 'CRDB')  # 🔥 NEW: Get bank type
+        
+        print(f"📁 File received: {file.filename}, Bank: {bank_type}")
         
         if file.filename == '':
             print("❌ Empty filename")
@@ -647,6 +680,7 @@ def upload_file():
         print(f"✅ File saved successfully: {filename} ({file_size} bytes)")
         
         session['filepath'] = filepath
+        session['bank_type'] = bank_type  # 🔥 NEW: Store bank type
         
         return jsonify({'success': True, 'message': 'File uploaded successfully'})
     
@@ -660,12 +694,31 @@ def upload_file():
 def process_transactions():
     try:
         filepath = session.get('filepath')
+        bank_type = session.get('bank_type', 'CRDB')  # 🔥 NEW: Get bank type
+        
         if not filepath or not os.path.exists(filepath):
             return jsonify({'error': 'No file uploaded'}), 400
         
-        # 🔥 NEW: Determine file type and read accordingly
+        print(f"🏦 Processing {bank_type} statement...")
+        
+        # 🔥 NEW: Route to appropriate processing function
+        if bank_type == 'NMB':
+            return process_nmb_transactions(filepath)
+        else:
+            return process_crdb_transactions(filepath)
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def process_crdb_transactions(filepath):
+    """Process CRDB bank statement (existing logic)"""
+    try:
+        # Determine file type and read accordingly
         if filepath.endswith('.pdf'):
-            print("📄 Processing PDF file...")
+            print("📄 Processing CRDB PDF file...")
             credit_df = extract_data_from_pdf(filepath)
             
             if credit_df is None or credit_df.empty:
@@ -674,7 +727,7 @@ def process_transactions():
             print(f"✅ PDF: Found {len(credit_df)} credit transactions")
         
         elif filepath.endswith('.xlsx'):
-            print("📊 Processing Excel file...")
+            print("📊 Processing CRDB Excel file...")
             # Read Excel file - CRDB format has headers at row 12
             df = pd.read_excel(filepath, header=12)
             df.columns = df.iloc[0]
@@ -710,7 +763,7 @@ def process_transactions():
         phone_lookup, plate_lookup = load_all_customers(service)
         
         print("\nLoading customer database from pikipiki records2 (SAV)...")
-        phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)  # 🔥 UPDATED: Now returns 3 values
+        phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)
         
         # Get existing refs
         print("Loading existing references from PASSED sheet...")
@@ -795,7 +848,7 @@ def process_transactions():
                 customer_name = lookup_customer_from_cache(identifier, lookup_type, phone_lookup, plate_lookup)
                 
                 if customer_name:
-                    # 🔥 UPDATED: Add empty customer_id for PASSED records
+                    # Add to PASSED
                     last_passed_id += 1
                     passed_row = [
                         last_passed_id,
@@ -806,7 +859,7 @@ def process_transactions():
                         identifier,
                         customer_name,
                         ref_number or '',
-                        ''  # 🔥 NEW: Empty customer_id for PASSED (pikipiki records has no IDs)
+                        ''  # Empty customer_id for PASSED
                     ]
                     passed_data.append(passed_row)
                     stats['passed'] += 1
@@ -816,7 +869,7 @@ def process_transactions():
                     customer_name_sav = lookup_customer_from_cache(identifier, lookup_type, phone_lookup_sav, plate_lookup_sav)
                     
                     if customer_name_sav:
-                        # 🔥 UPDATED: Get customer ID for PASSED_SAV records
+                        # Get customer ID for PASSED_SAV records
                         customer_id = lookup_customer_id_from_cache(identifier, lookup_type, id_lookup_sav)
                         
                         last_passed_sav_id += 1
@@ -829,7 +882,7 @@ def process_transactions():
                             identifier,
                             customer_name_sav,
                             ref_number or '',
-                            customer_id  # 🔥 NEW: Customer ID from pikipiki records2
+                            customer_id
                         ]
                         passed_sav_data.append(passed_sav_row)
                         stats['passed_sav'] += 1
@@ -875,7 +928,6 @@ def process_transactions():
                         if not customer_name:
                             customer_name_sav = lookup_customer_from_cache(suggested_plate, 'plate', phone_lookup_sav, plate_lookup_sav)
                             if customer_name_sav:
-                                # 🔥 NEW: Get customer ID for SAV suggestions
                                 customer_id = lookup_customer_id_from_cache(suggested_plate, 'plate', id_lookup_sav)
                         
                         if customer_name or customer_name_sav:
@@ -887,7 +939,7 @@ def process_transactions():
                                 'original_text': suggestion['original'],
                                 'suggested_plate': suggested_plate,
                                 'customer_name': customer_name or customer_name_sav,
-                                'customer_id': customer_id,  # 🔥 NEW: Include customer ID
+                                'customer_id': customer_id,
                                 'target_sheet': 'PASSED' if customer_name else 'PASSED_SAV',
                                 'confidence': suggestion['confidence'],
                                 'reason': suggestion['reason']
@@ -926,7 +978,7 @@ def process_transactions():
                     stats['failed'] += 1
                     print(f"❌ FAILED: No phone/plate found in: {details[:80]} (REF: {ref_number})")
         
-        # 🔥 FIX: Store review data in file instead of session
+        # Store review data in file instead of session
         if needs_review_data:
             review_file = os.path.join(app.config['TEMP_FOLDER'], f'review_{datetime.now().timestamp()}.pkl')
             with open(review_file, 'wb') as f:
@@ -943,7 +995,6 @@ def process_transactions():
                     }
                 }, f)
             
-            # Store only file path in session
             session['review_file'] = review_file
             
             return jsonify({
@@ -978,6 +1029,216 @@ def process_transactions():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+
+def process_nmb_transactions(filepath):
+    """🔥 NEW: Process NMB bank statement"""
+    try:
+        print("📊 Processing NMB Excel file...")
+        
+        # Read Excel file - NMB format has headers at row 23 (0-indexed)
+        df = pd.read_excel(filepath, header=23)
+        
+        print(f"Columns found: {list(df.columns)}")
+        
+        # NMB columns: Date, Value Date, Cheque Number/Control Number, Description, Reference Number, Credit, Debit, Balance
+        required_columns = ['Date', 'Description', 'Credit']
+        missing = [col for col in required_columns if col not in df.columns]
+        
+        if missing:
+            return jsonify({
+                'error': f'Missing required columns: {missing}. Found: {list(df.columns)}'
+            }), 400
+        
+        # Filter only CREDIT transactions
+        df['Credit'] = pd.to_numeric(df['Credit'].astype(str).str.replace(',', '').str.replace('TZS', '').strip(), errors='coerce')
+        
+        # Get debit column if exists
+        if 'Debit' in df.columns:
+            df['Debit'] = pd.to_numeric(df['Debit'].astype(str).str.replace(',', '').str.replace('TZS', '').strip(), errors='coerce')
+            credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) & 
+                           ((df['Debit'].isna()) | (df['Debit'] == 0))].copy()
+        else:
+            credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0)].copy()
+        
+        print(f"✅ NMB Excel: Found {len(credit_df)} credit transactions")
+        
+        # Initialize Google Sheets service
+        service = get_google_service()
+        
+        # Load customers from BOTH pikipiki records AND pikipiki records2
+        print("Loading customer database from pikipiki records...")
+        phone_lookup, plate_lookup = load_all_customers(service)
+        
+        print("\nLoading customer database from pikipiki records2 (SAV)...")
+        phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)
+        
+        # 🔥 MERGE lookups for NMB (check both sources, but save to NMB-specific tabs)
+        combined_phone_lookup = {**phone_lookup, **phone_lookup_sav}
+        combined_plate_lookup = {**plate_lookup, **plate_lookup_sav}
+        
+        # Get existing refs from NMB-specific tabs
+        print("Loading existing references from PASSED_SAV_NMB sheet...")
+        existing_passed_nmb_refs, existing_passed_nmb_messages = get_existing_refs(service, 'PASSED_SAV_NMB')
+        
+        print("Loading existing references from FAILED_NMB sheet...")
+        existing_failed_nmb_refs, existing_failed_nmb_messages = get_existing_refs(service, 'FAILED_NMB')
+        
+        all_existing_refs = existing_passed_nmb_refs.union(existing_failed_nmb_refs)
+        all_existing_messages = existing_passed_nmb_messages.union(existing_failed_nmb_messages)
+        print(f"Total unique NMB refs in system: {len(all_existing_refs)}")
+        
+        # Get last IDs from NMB tabs
+        last_passed_nmb_id = get_last_id(service, 'PASSED_SAV_NMB')
+        last_failed_nmb_id = get_last_id(service, 'FAILED_NMB')
+        
+        passed_nmb_data = []
+        failed_nmb_data = []
+        needs_review_data = []
+        
+        stats = {
+            'total': len(credit_df),
+            'passed_sav_nmb': 0,
+            'failed_nmb': 0,
+            'needs_review': 0,
+            'skipped': 0
+        }
+        
+        for idx, row in credit_df.iterrows():
+            date = str(row.get('Date', ''))
+            description = str(row.get('Description', ''))
+            credit_amount = row.get('Credit', 0)
+            
+            # 🔥 NMB: Reference number is in dedicated column
+            ref_number = str(row.get('Reference Number', '')).strip() if 'Reference Number' in row and pd.notna(row.get('Reference Number')) else ''
+            
+            # Check for duplicates
+            is_duplicate = False
+            
+            if ref_number and ref_number in all_existing_refs:
+                is_duplicate = True
+                stats['skipped'] += 1
+            elif description in all_existing_messages:
+                is_duplicate = True
+                stats['skipped'] += 1
+            
+            if is_duplicate:
+                continue
+            
+            # Extract phone and plate from Description
+            phone = extract_phone_number(description)
+            plate = extract_plate_number(description)
+            
+            identifier = None
+            lookup_type = None
+            
+            if phone:
+                identifier = phone
+                lookup_type = 'phone'
+                print(f"Found phone: {phone} in: {description[:80]}")
+            elif plate:
+                identifier = plate
+                lookup_type = 'plate'
+                print(f"Found plate: {plate} in: {description[:80]}")
+            
+            if identifier and lookup_type:
+                # Check combined lookup (both pikipiki records and records2)
+                customer_name = combined_phone_lookup.get(identifier) if lookup_type == 'phone' else combined_plate_lookup.get(identifier)
+                
+                # Try alternative formats for phone
+                if not customer_name and lookup_type == 'phone':
+                    if identifier.startswith('255'):
+                        alt_format = '0' + identifier[3:]
+                        customer_name = combined_phone_lookup.get(alt_format)
+                    elif identifier.startswith('07') or identifier.startswith('06'):
+                        alt_format = '255' + identifier[1:]
+                        customer_name = combined_phone_lookup.get(alt_format)
+                
+                if customer_name:
+                    # Get customer ID (will be empty if from pikipiki records, populated if from records2)
+                    customer_id = lookup_customer_id_from_cache(identifier, lookup_type, id_lookup_sav)
+                    
+                    # Add to PASSED_SAV_NMB
+                    last_passed_nmb_id += 1
+                    passed_nmb_row = [
+                        last_passed_nmb_id,
+                        date,
+                        'NMB',
+                        description,
+                        credit_amount,
+                        identifier,
+                        customer_name,
+                        ref_number,
+                        customer_id  # Will be empty string if not in records2
+                    ]
+                    passed_nmb_data.append(passed_nmb_row)
+                    stats['passed_sav_nmb'] += 1
+                    print(f"✅ PASSED_SAV_NMB: {customer_name} - {identifier} - {credit_amount} - ID: {customer_id}")
+                else:
+                    # Not found - add to FAILED_NMB
+                    last_failed_nmb_id += 1
+                    reason = f"{lookup_type.upper()}({identifier}) not found"
+                    
+                    final_identifier = identifier
+                    if lookup_type == 'phone':
+                        if not identifier.startswith('255'):
+                            if identifier.startswith('0'):
+                                final_identifier = '255' + identifier[1:]
+                            else:
+                                final_identifier = '255' + identifier
+                    
+                    failed_nmb_row = [
+                        last_failed_nmb_id,
+                        date,
+                        'NMB',
+                        description,
+                        credit_amount,
+                        final_identifier,
+                        reason,
+                        ref_number
+                    ]
+                    failed_nmb_data.append(failed_nmb_row)
+                    stats['failed_nmb'] += 1
+                    print(f"❌ FAILED_NMB: Customer not found for {final_identifier} (REF: {ref_number})")
+            else:
+                # No identifier found - add to FAILED_NMB
+                last_failed_nmb_id += 1
+                failed_nmb_row = [
+                    last_failed_nmb_id,
+                    date,
+                    'NMB',
+                    description,
+                    credit_amount,
+                    'No phone/plate',
+                    'No identifier',
+                    ref_number
+                ]
+                failed_nmb_data.append(failed_nmb_row)
+                stats['failed_nmb'] += 1
+                print(f"❌ FAILED_NMB: No phone/plate found in: {description[:80]} (REF: {ref_number})")
+        
+        # Append to NMB-specific sheets
+        if passed_nmb_data:
+            append_to_sheet(service, 'PASSED_SAV_NMB', passed_nmb_data)
+        
+        if failed_nmb_data:
+            append_to_sheet(service, 'FAILED_NMB', failed_nmb_data)
+        
+        # Clean up
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        
+        return jsonify({
+            'success': True,
+            'stats': stats,
+            'message': f"Processed {stats['total']} NMB transactions: {stats['passed_sav_nmb']} passed, {stats['failed_nmb']} failed"
+        })
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/confirm-reviews', methods=['POST'])
 def confirm_reviews():
     """🔥 FIXED: Process user confirmations with proper stats handling"""
@@ -985,7 +1246,7 @@ def confirm_reviews():
         data = request.get_json()
         confirmations = data.get('confirmations', [])
         
-        # 🔥 FIX: Load from file instead of session
+        # Load from file instead of session
         review_file = session.get('review_file')
         if not review_file or not os.path.exists(review_file):
             return jsonify({'error': 'Review data not found'}), 400
@@ -1014,7 +1275,6 @@ def confirm_reviews():
             
             if accept:
                 if review_item['target_sheet'] == 'PASSED':
-                    # 🔥 UPDATED: Add empty customer_id for PASSED
                     last_ids['passed'] += 1
                     row = [
                         last_ids['passed'],
@@ -1025,12 +1285,11 @@ def confirm_reviews():
                         review_item['suggested_plate'],
                         review_item['customer_name'],
                         review_item['ref_number'],
-                        ''  # 🔥 NEW: Empty customer_id for PASSED
+                        ''  # Empty customer_id for PASSED
                     ]
                     passed_data.append(row)
                     stats['passed'] += 1
                 else:
-                    # 🔥 UPDATED: Add customer_id for PASSED_SAV
                     last_ids['passed_sav'] += 1
                     row = [
                         last_ids['passed_sav'],
@@ -1041,7 +1300,7 @@ def confirm_reviews():
                         review_item['suggested_plate'],
                         review_item['customer_name'],
                         review_item['ref_number'],
-                        review_item.get('customer_id', '')  # 🔥 NEW: Customer ID from pikipiki records2
+                        review_item.get('customer_id', '')
                     ]
                     passed_sav_data.append(row)
                     stats['passed_sav'] += 1
