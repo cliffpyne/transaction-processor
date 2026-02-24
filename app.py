@@ -653,7 +653,11 @@ def get_existing_refs(service, sheet_name='PASSED'):
         
         result = service.spreadsheets().values().batchGet(
             spreadsheetId=PASSED_SHEET_ID,
-            ranges=[f'{sheet_name}!D1:D10000', f'{sheet_name}!{ref_column}1:{ref_column}10000']
+            # ranges=[f'{sheet_name}!D1:D10000', f'{sheet_name}!{ref_column}1:{ref_column}10000']
+ranges=[
+f'{sheet_name}!D:D',
+f'{sheet_name}!{ref_column}:{ref_column}'
+]
         ).execute()
         
         value_ranges = result.get('valueRanges', [])
