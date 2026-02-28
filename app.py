@@ -653,11 +653,10 @@ def get_existing_refs(service, sheet_name='PASSED'):
         
         result = service.spreadsheets().values().batchGet(
             spreadsheetId=PASSED_SHEET_ID,
-            # ranges=[f'{sheet_name}!D1:D10000', f'{sheet_name}!{ref_column}1:{ref_column}10000']
-ranges=[
-f'{sheet_name}!D:D',
-f'{sheet_name}!{ref_column}:{ref_column}'
-]
+            ranges=[
+                f'{sheet_name}!D:D',
+                f'{sheet_name}!{ref_column}:{ref_column}'
+            ]
         ).execute()
         
         value_ranges = result.get('valueRanges', [])
@@ -1072,7 +1071,8 @@ def process_crdb_transactions(filepath):
                                 'customer_id': customer_id,
                                 'target_sheet': 'PASSED' if customer_name else 'PASSED_SAV',
                                 'confidence': suggestion['confidence'],
-                                'reason': suggestion['reason']
+                                'reason': suggestion['reason'],
+                                'bank': 'CRDB'
                             })
                             stats['needs_review'] += 1
                             print(f"🔍 NEEDS REVIEW: {suggestion['original']} -> {suggested_plate} -> {customer_name or customer_name_sav}")
@@ -1122,7 +1122,8 @@ def process_crdb_transactions(filepath):
                         'passed': last_passed_id,
                         'passed_sav': last_passed_sav_id,
                         'failed': last_failed_id
-                    }
+                    },
+                    'bank': 'CRDB'
                 }, f)
             
             session['review_file'] = review_file
@@ -1161,7 +1162,13 @@ def process_crdb_transactions(filepath):
 
 
 def process_nmb_transactions(filepath):
-    """🔥 NEW: Process NMB bank statement"""
+    """
+    🔥 UPDATED: Process NMB bank statement with 3-tier routing:
+    1. Found in pikipiki records (sheet 1)  → PASSED       (shared with CRDB, shared ID)
+    2. Found in pikipiki records2 (SAV)     → PASSED_SAV_NMB
+    3. Not found                            → FAILED_NMB
+    Also includes needs_review / plate suggestion flow (same as CRDB).
+    """
     try:
         print("📊 Processing NMB Excel file...")
         
@@ -1182,7 +1189,6 @@ def process_nmb_transactions(filepath):
         # Filter only CREDIT transactions
         df['Credit'] = pd.to_numeric(df['Credit'].astype(str).str.replace(',', '').str.replace('TZS', '').str.strip(), errors='coerce')
         
-        # Get debit column if exists
         if 'Debit' in df.columns:
             df['Debit'] = pd.to_numeric(df['Debit'].astype(str).str.replace(',', '').str.replace('TZS', '').str.strip(), errors='coerce')
             credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) & 
@@ -1195,72 +1201,87 @@ def process_nmb_transactions(filepath):
         # Initialize Google Sheets service
         service = get_google_service()
         
-        # Load customers from BOTH pikipiki records AND pikipiki records2
-        print("Loading customer database from pikipiki records...")
+        # ── Load BOTH customer sources separately ──────────────────────────────
+        print("Loading customer database from pikipiki records (sheet 1)...")
         phone_lookup, plate_lookup = load_all_customers(service)
-        
-        print("\nLoading customer database from pikipiki records2 (SAV)...")
+
+        print("Loading customer database from pikipiki records2 (SAV)...")
         phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)
-        
-        # 🔥 MERGE lookups for NMB (check both sources, but save to NMB-specific tabs)
-        combined_phone_lookup = {**phone_lookup, **phone_lookup_sav}
-        combined_plate_lookup = {**plate_lookup, **plate_lookup_sav}
-        
-        # Get existing refs from NMB-specific tabs
+
+        # ── Duplicate-check refs across ALL relevant tabs ──────────────────────
+        # NMB transactions that already passed to PASSED must also be blocked
+        print("Loading existing references from PASSED sheet...")
+        existing_passed_refs, existing_passed_messages = get_existing_refs(service, 'PASSED')
+
         print("Loading existing references from PASSED_SAV_NMB sheet...")
         existing_passed_nmb_refs, existing_passed_nmb_messages = get_existing_refs(service, 'PASSED_SAV_NMB')
-        
+
         print("Loading existing references from FAILED_NMB sheet...")
         existing_failed_nmb_refs, existing_failed_nmb_messages = get_existing_refs(service, 'FAILED_NMB')
-        
-        all_existing_refs = existing_passed_nmb_refs.union(existing_failed_nmb_refs)
-        all_existing_messages = existing_passed_nmb_messages.union(existing_failed_nmb_messages)
+
+        all_existing_refs = (
+            existing_passed_refs
+            .union(existing_passed_nmb_refs)
+            .union(existing_failed_nmb_refs)
+        )
+        all_existing_messages = (
+            existing_passed_messages
+            .union(existing_passed_nmb_messages)
+            .union(existing_failed_nmb_messages)
+        )
         print(f"Total unique NMB refs in system: {len(all_existing_refs)}")
-        
-        # Get last IDs from NMB tabs
+
+        # ── Get last IDs ───────────────────────────────────────────────────────
+        # PASSED is shared with CRDB — continue from where it left off
+        last_passed_id = get_last_id(service, 'PASSED')
         last_passed_nmb_id = get_last_id(service, 'PASSED_SAV_NMB')
         last_failed_nmb_id = get_last_id(service, 'FAILED_NMB')
-        
-        passed_nmb_data = []
-        failed_nmb_data = []
-        needs_review_data = []
-        
+
+        passed_data = []          # → shared PASSED tab
+        passed_nmb_data = []      # → PASSED_SAV_NMB
+        failed_nmb_data = []      # → FAILED_NMB
+        needs_review_data = []    # → review modal
+
         stats = {
             'total': len(credit_df),
-            'passed_sav_nmb': 0,
+            'passed': 0,           # went to PASSED (pikipiki records match)
+            'passed_sav_nmb': 0,   # went to PASSED_SAV_NMB (records2 match)
             'failed_nmb': 0,
             'needs_review': 0,
             'skipped': 0
         }
-        
+
         for idx, row in credit_df.iterrows():
             date = str(row.get('Date', ''))
             description = str(row.get('Description', ''))
             credit_amount = row.get('Credit', 0)
-            
-            # 🔥 NMB: Reference number is in dedicated column
-            ref_number = str(row.get('Reference Number', '')).strip() if 'Reference Number' in row and pd.notna(row.get('Reference Number')) else ''
-            
-            # Check for duplicates
+
+            # NMB has a dedicated Reference Number column
+            ref_number = (
+                str(row.get('Reference Number', '')).strip()
+                if 'Reference Number' in row and pd.notna(row.get('Reference Number'))
+                else ''
+            )
+
+            # ── Duplicate check ────────────────────────────────────────────────
             is_duplicate = False
-            
             if ref_number and ref_number in all_existing_refs:
                 is_duplicate = True
                 stats['skipped'] += 1
             elif description in all_existing_messages:
                 is_duplicate = True
                 stats['skipped'] += 1
-            
+
             if is_duplicate:
                 continue
-            
-            # Extract phone and plate from Description
+
+            # ── Extract identifiers ────────────────────────────────────────────
             phone = extract_phone_number(description)
             plate = extract_plate_number(description)
-            
+
             identifier = None
             lookup_type = None
-            
+
             if phone:
                 identifier = phone
                 lookup_type = 'phone'
@@ -1269,100 +1290,212 @@ def process_nmb_transactions(filepath):
                 identifier = plate
                 lookup_type = 'plate'
                 print(f"Found plate: {plate} in: {description[:80]}")
-            
+
             if identifier and lookup_type:
-                # Check combined lookup (both pikipiki records and records2)
-                customer_name = combined_phone_lookup.get(identifier) if lookup_type == 'phone' else combined_plate_lookup.get(identifier)
-                
-                # Try alternative formats for phone
-                if not customer_name and lookup_type == 'phone':
-                    if identifier.startswith('255'):
-                        alt_format = '0' + identifier[3:]
-                        customer_name = combined_phone_lookup.get(alt_format)
-                    elif identifier.startswith('07') or identifier.startswith('06'):
-                        alt_format = '255' + identifier[1:]
-                        customer_name = combined_phone_lookup.get(alt_format)
-                
+                # ── Tier 1: pikipiki records → PASSED ─────────────────────────
+                customer_name = lookup_customer_from_cache(
+                    identifier, lookup_type, phone_lookup, plate_lookup
+                )
+
                 if customer_name:
-                    # Get customer ID (will be empty if from pikipiki records, populated if from records2)
-                    customer_id = lookup_customer_id_from_cache(identifier, lookup_type, id_lookup_sav)
-                    
-                    # Add to PASSED_SAV_NMB
-                    last_passed_nmb_id += 1
-                    passed_nmb_row = [
-                        last_passed_nmb_id,
+                    last_passed_id += 1
+                    passed_row = [
+                        last_passed_id,
                         date,
-                        'NMB',
+                        'NMB',          # bank column
                         description,
                         credit_amount,
                         identifier,
                         customer_name,
                         ref_number,
-                        customer_id  # Will be empty string if not in records2
+                        ''              # no customer_id for records-1 customers
                     ]
-                    passed_nmb_data.append(passed_nmb_row)
-                    stats['passed_sav_nmb'] += 1
-                    print(f"✅ PASSED_SAV_NMB: {customer_name} - {identifier} - {credit_amount} - ID: {customer_id}")
+                    passed_data.append(passed_row)
+                    stats['passed'] += 1
+                    print(f"✅ PASSED (NMB): {customer_name} - {identifier} - {credit_amount}")
+
                 else:
-                    # Not found - add to FAILED_NMB
-                    last_failed_nmb_id += 1
-                    reason = f"{lookup_type.upper()}({identifier}) not found"
-                    
-                    final_identifier = identifier
-                    if lookup_type == 'phone':
-                        if not identifier.startswith('255'):
+                    # ── Tier 2: pikipiki records2 → PASSED_SAV_NMB ────────────
+                    customer_name_sav = lookup_customer_from_cache(
+                        identifier, lookup_type, phone_lookup_sav, plate_lookup_sav
+                    )
+
+                    if customer_name_sav:
+                        customer_id = lookup_customer_id_from_cache(
+                            identifier, lookup_type, id_lookup_sav
+                        )
+                        last_passed_nmb_id += 1
+                        passed_nmb_row = [
+                            last_passed_nmb_id,
+                            date,
+                            'NMB',
+                            description,
+                            credit_amount,
+                            identifier,
+                            customer_name_sav,
+                            ref_number,
+                            customer_id
+                        ]
+                        passed_nmb_data.append(passed_nmb_row)
+                        stats['passed_sav_nmb'] += 1
+                        print(f"✅ PASSED_SAV_NMB: {customer_name_sav} - {identifier} - {credit_amount} - ID: {customer_id}")
+
+                    else:
+                        # ── Tier 3: not found → FAILED_NMB ────────────────────
+                        last_failed_nmb_id += 1
+                        reason = f"{lookup_type.upper()}({identifier}) not found"
+
+                        final_identifier = identifier
+                        if lookup_type == 'phone' and not identifier.startswith('255'):
                             if identifier.startswith('0'):
                                 final_identifier = '255' + identifier[1:]
                             else:
                                 final_identifier = '255' + identifier
-                    
-                    failed_nmb_row = [
+
+                        failed_nmb_row = [
+                            last_failed_nmb_id,
+                            date,
+                            'NMB',
+                            description,
+                            credit_amount,
+                            final_identifier,
+                            reason,
+                            ref_number
+                        ]
+                        failed_nmb_data.append(failed_nmb_row)
+                        stats['failed_nmb'] += 1
+                        print(f"❌ FAILED_NMB: Customer not found for {final_identifier} (REF: {ref_number})")
+
+            else:
+                # ── No clean identifier — try plate suggestions (review flow) ──
+                plate_suggestions = extract_plate_suggestions(description)
+
+                if plate_suggestions:
+                    added_to_review = False
+                    for suggestion in plate_suggestions:
+                        suggested_plate = suggestion['suggested']
+
+                        # Check records (tier 1) first
+                        customer_name = lookup_customer_from_cache(
+                            suggested_plate, 'plate', phone_lookup, plate_lookup
+                        )
+                        customer_name_sav = None
+                        customer_id = ''
+
+                        if not customer_name:
+                            customer_name_sav = lookup_customer_from_cache(
+                                suggested_plate, 'plate', phone_lookup_sav, plate_lookup_sav
+                            )
+                            if customer_name_sav:
+                                customer_id = lookup_customer_id_from_cache(
+                                    suggested_plate, 'plate', id_lookup_sav
+                                )
+
+                        if customer_name or customer_name_sav:
+                            # target_sheet drives where confirm-reviews sends it
+                            target_sheet = 'PASSED' if customer_name else 'PASSED_SAV_NMB'
+                            needs_review_data.append({
+                                'posting_date': date,
+                                'details': description,
+                                'credit_amount': credit_amount,
+                                'ref_number': ref_number,
+                                'original_text': suggestion['original'],
+                                'suggested_plate': suggested_plate,
+                                'customer_name': customer_name or customer_name_sav,
+                                'customer_id': customer_id,
+                                'target_sheet': target_sheet,
+                                'confidence': suggestion['confidence'],
+                                'reason': suggestion['reason'],
+                                'bank': 'NMB'
+                            })
+                            stats['needs_review'] += 1
+                            added_to_review = True
+                            print(f"🔍 NMB NEEDS REVIEW: {suggestion['original']} -> {suggested_plate} -> {customer_name or customer_name_sav}")
+                            break
+
+                    if not added_to_review:
+                        last_failed_nmb_id += 1
+                        failed_nmb_data.append([
+                            last_failed_nmb_id,
+                            date,
+                            'NMB',
+                            description,
+                            credit_amount,
+                            'No phone/plate',
+                            'No identifier',
+                            ref_number
+                        ])
+                        stats['failed_nmb'] += 1
+                else:
+                    last_failed_nmb_id += 1
+                    failed_nmb_data.append([
                         last_failed_nmb_id,
                         date,
                         'NMB',
                         description,
                         credit_amount,
-                        final_identifier,
-                        reason,
+                        'No phone/plate',
+                        'No identifier',
                         ref_number
-                    ]
-                    failed_nmb_data.append(failed_nmb_row)
+                    ])
                     stats['failed_nmb'] += 1
-                    print(f"❌ FAILED_NMB: Customer not found for {final_identifier} (REF: {ref_number})")
-            else:
-                # No identifier found - add to FAILED_NMB
-                last_failed_nmb_id += 1
-                failed_nmb_row = [
-                    last_failed_nmb_id,
-                    date,
-                    'NMB',
-                    description,
-                    credit_amount,
-                    'No phone/plate',
-                    'No identifier',
-                    ref_number
-                ]
-                failed_nmb_data.append(failed_nmb_row)
-                stats['failed_nmb'] += 1
-                print(f"❌ FAILED_NMB: No phone/plate found in: {description[:80]} (REF: {ref_number})")
-        
-        # Append to NMB-specific sheets
+                    print(f"❌ FAILED_NMB: No phone/plate found in: {description[:80]} (REF: {ref_number})")
+
+        # ── If review needed, save state and return to frontend ────────────────
+        if needs_review_data:
+            review_file = os.path.join(
+                app.config['TEMP_FOLDER'],
+                f'review_{datetime.now().timestamp()}.pkl'
+            )
+            with open(review_file, 'wb') as f:
+                pickle.dump({
+                    'needs_review': needs_review_data,
+                    'passed_data': passed_data,
+                    'passed_nmb_data': passed_nmb_data,
+                    'failed_nmb_data': failed_nmb_data,
+                    'stats': stats,
+                    'last_ids': {
+                        'passed': last_passed_id,
+                        'passed_nmb': last_passed_nmb_id,
+                        'failed_nmb': last_failed_nmb_id
+                    },
+                    'bank': 'NMB'
+                }, f)
+
+            session['review_file'] = review_file
+
+            return jsonify({
+                'needs_review': True,
+                'review_data': needs_review_data,
+                'stats': stats,
+                'message': f"Found {len(needs_review_data)} NMB records that need your review before processing"
+            })
+
+        # ── No reviews needed — write directly ────────────────────────────────
+        if passed_data:
+            append_to_sheet(service, 'PASSED', passed_data)
+
         if passed_nmb_data:
             append_to_sheet(service, 'PASSED_SAV_NMB', passed_nmb_data)
-        
+
         if failed_nmb_data:
             append_to_sheet(service, 'FAILED_NMB', failed_nmb_data)
-        
-        # Clean up
+
+        # Clean up uploaded file
         if os.path.exists(filepath):
             os.remove(filepath)
-        
+
         return jsonify({
             'success': True,
             'stats': stats,
-            'message': f"Processed {stats['total']} NMB transactions: {stats['passed_sav_nmb']} passed, {stats['failed_nmb']} failed"
+            'message': (
+                f"Processed {stats['total']} NMB transactions: "
+                f"{stats['passed']} passed (PASSED), "
+                f"{stats['passed_sav_nmb']} passed (PASSED_SAV_NMB), "
+                f"{stats['failed_nmb']} failed"
+            )
         })
-    
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1371,110 +1504,194 @@ def process_nmb_transactions(filepath):
 
 @app.route('/confirm-reviews', methods=['POST'])
 def confirm_reviews():
-    """🔥 FIXED: Process user confirmations with proper stats handling"""
+    """🔥 UPDATED: Handle review confirmations for both CRDB and NMB banks"""
     try:
         data = request.get_json()
         confirmations = data.get('confirmations', [])
-        
-        # Load from file instead of session
+
         review_file = session.get('review_file')
         if not review_file or not os.path.exists(review_file):
             return jsonify({'error': 'Review data not found'}), 400
-        
+
         with open(review_file, 'rb') as f:
             review_data = pickle.load(f)
-        
+
         needs_review = review_data['needs_review']
-        passed_data = review_data['passed_data']
-        passed_sav_data = review_data['passed_sav_data']
-        failed_data = review_data['failed_data']
         stats = review_data['stats']
         last_ids = review_data['last_ids']
-        
+        bank = review_data.get('bank', 'CRDB')
+
         service = get_google_service()
-        
-        # Process confirmations
-        for confirmation in confirmations:
-            idx = confirmation['index']
-            accept = confirmation['accept']
-            
-            if idx >= len(needs_review):
-                continue
-            
-            review_item = needs_review[idx]
-            
-            if accept:
-                if review_item['target_sheet'] == 'PASSED':
-                    last_ids['passed'] += 1
-                    row = [
-                        last_ids['passed'],
-                        review_item['posting_date'],
-                        'CRDB',
-                        review_item['details'],
-                        review_item['credit_amount'],
-                        review_item['suggested_plate'],
-                        review_item['customer_name'],
-                        review_item['ref_number'],
-                        ''  # Empty customer_id for PASSED
-                    ]
-                    passed_data.append(row)
-                    stats['passed'] += 1
+
+        if bank == 'NMB':
+            # ── NMB review processing ──────────────────────────────────────────
+            passed_data = review_data.get('passed_data', [])
+            passed_nmb_data = review_data.get('passed_nmb_data', [])
+            failed_nmb_data = review_data.get('failed_nmb_data', [])
+
+            for confirmation in confirmations:
+                idx = confirmation['index']
+                accept = confirmation['accept']
+
+                if idx >= len(needs_review):
+                    continue
+
+                review_item = needs_review[idx]
+
+                if accept:
+                    if review_item['target_sheet'] == 'PASSED':
+                        # Goes to shared PASSED tab
+                        last_ids['passed'] += 1
+                        row = [
+                            last_ids['passed'],
+                            review_item['posting_date'],
+                            'NMB',
+                            review_item['details'],
+                            review_item['credit_amount'],
+                            review_item['suggested_plate'],
+                            review_item['customer_name'],
+                            review_item['ref_number'],
+                            ''
+                        ]
+                        passed_data.append(row)
+                        stats['passed'] = stats.get('passed', 0) + 1
+                    else:
+                        # Goes to PASSED_SAV_NMB
+                        last_ids['passed_nmb'] += 1
+                        row = [
+                            last_ids['passed_nmb'],
+                            review_item['posting_date'],
+                            'NMB',
+                            review_item['details'],
+                            review_item['credit_amount'],
+                            review_item['suggested_plate'],
+                            review_item['customer_name'],
+                            review_item['ref_number'],
+                            review_item.get('customer_id', '')
+                        ]
+                        passed_nmb_data.append(row)
+                        stats['passed_sav_nmb'] = stats.get('passed_sav_nmb', 0) + 1
                 else:
-                    last_ids['passed_sav'] += 1
+                    # Rejected → FAILED_NMB
+                    last_ids['failed_nmb'] += 1
                     row = [
-                        last_ids['passed_sav'],
+                        last_ids['failed_nmb'],
+                        review_item['posting_date'],
+                        'NMB',
+                        review_item['details'],
+                        review_item['credit_amount'],
+                        review_item['suggested_plate'],
+                        'Rejected by user',
+                        review_item['ref_number']
+                    ]
+                    failed_nmb_data.append(row)
+                    stats['failed_nmb'] = stats.get('failed_nmb', 0) + 1
+
+            if passed_data:
+                append_to_sheet(service, 'PASSED', passed_data)
+            if passed_nmb_data:
+                append_to_sheet(service, 'PASSED_SAV_NMB', passed_nmb_data)
+            if failed_nmb_data:
+                append_to_sheet(service, 'FAILED_NMB', failed_nmb_data)
+
+            message = (
+                f"NMB processing complete: "
+                f"{stats.get('passed', 0)} passed (PASSED), "
+                f"{stats.get('passed_sav_nmb', 0)} passed (PASSED_SAV_NMB), "
+                f"{stats.get('failed_nmb', 0)} failed"
+            )
+
+        else:
+            # ── CRDB review processing (original logic) ────────────────────────
+            passed_data = review_data['passed_data']
+            passed_sav_data = review_data['passed_sav_data']
+            failed_data = review_data['failed_data']
+
+            for confirmation in confirmations:
+                idx = confirmation['index']
+                accept = confirmation['accept']
+
+                if idx >= len(needs_review):
+                    continue
+
+                review_item = needs_review[idx]
+
+                if accept:
+                    if review_item['target_sheet'] == 'PASSED':
+                        last_ids['passed'] += 1
+                        row = [
+                            last_ids['passed'],
+                            review_item['posting_date'],
+                            'CRDB',
+                            review_item['details'],
+                            review_item['credit_amount'],
+                            review_item['suggested_plate'],
+                            review_item['customer_name'],
+                            review_item['ref_number'],
+                            ''
+                        ]
+                        passed_data.append(row)
+                        stats['passed'] += 1
+                    else:
+                        last_ids['passed_sav'] += 1
+                        row = [
+                            last_ids['passed_sav'],
+                            review_item['posting_date'],
+                            'CRDB',
+                            review_item['details'],
+                            review_item['credit_amount'],
+                            review_item['suggested_plate'],
+                            review_item['customer_name'],
+                            review_item['ref_number'],
+                            review_item.get('customer_id', '')
+                        ]
+                        passed_sav_data.append(row)
+                        stats['passed_sav'] += 1
+                else:
+                    last_ids['failed'] += 1
+                    row = [
+                        last_ids['failed'],
                         review_item['posting_date'],
                         'CRDB',
                         review_item['details'],
                         review_item['credit_amount'],
                         review_item['suggested_plate'],
-                        review_item['customer_name'],
-                        review_item['ref_number'],
-                        review_item.get('customer_id', '')
+                        'Rejected by user',
+                        review_item['ref_number']
                     ]
-                    passed_sav_data.append(row)
-                    stats['passed_sav'] += 1
-            else:
-                last_ids['failed'] += 1
-                row = [
-                    last_ids['failed'],
-                    review_item['posting_date'],
-                    'CRDB',
-                    review_item['details'],
-                    review_item['credit_amount'],
-                    review_item['suggested_plate'],
-                    'Rejected by user',
-                    review_item['ref_number']
-                ]
-                failed_data.append(row)
-                stats['failed'] += 1
-        
-        # Append to sheets
-        if passed_data:
-            append_to_sheet(service, 'PASSED', passed_data)
-        
-        if passed_sav_data:
-            append_to_sheet(service, 'PASSED_SAV', passed_sav_data)
-        
-        if failed_data:
-            append_to_sheet(service, 'FAILED', failed_data)
-        
-        # Clean up
+                    failed_data.append(row)
+                    stats['failed'] += 1
+
+            if passed_data:
+                append_to_sheet(service, 'PASSED', passed_data)
+            if passed_sav_data:
+                append_to_sheet(service, 'PASSED_SAV', passed_sav_data)
+            if failed_data:
+                append_to_sheet(service, 'FAILED', failed_data)
+
+            message = (
+                f"Processing and update complete: "
+                f"{stats.get('passed', 0)} passed, "
+                f"{stats.get('passed_sav', 0)} passed (SAV), "
+                f"{stats.get('failed', 0)} failed"
+            )
+
+        # ── Clean up ───────────────────────────────────────────────────────────
         filepath = session.get('filepath')
         if filepath and os.path.exists(filepath):
             os.remove(filepath)
-        
+
         if os.path.exists(review_file):
             os.remove(review_file)
-        
+
         session.pop('review_file', None)
-        
+
         return jsonify({
             'success': True,
             'stats': stats,
-            'message': f"Processing and update complete: {stats.get('passed', 0)} passed, {stats.get('passed_sav', 0)} passed (SAV), {stats.get('failed', 0)} failed"
+            'message': message
         })
-    
+
     except Exception as e:
         import traceback
         traceback.print_exc()
