@@ -849,8 +849,9 @@ def get_existing_refs(service, sheet_name='PASSED'):
         
         print(f"📖 Reading {sheet_name}: MESSAGE from column D, REFNUMBER from column {ref_column}")
         
+        target_sheet_id = IPHONE_SHEET_ID if sheet_name in ('BANK_PASSED', 'BANK_FAILED') else PASSED_SHEET_ID
         result = service.spreadsheets().values().batchGet(
-            spreadsheetId=PASSED_SHEET_ID,
+            spreadsheetId=target_sheet_id,
             ranges=[
                 f'{sheet_name}!D:D',
                 f'{sheet_name}!{ref_column}:{ref_column}'
@@ -894,9 +895,10 @@ def get_existing_refs(service, sheet_name='PASSED'):
 def get_last_id(service, sheet_name):
     """Get the last ID from the sheet"""
     try:
+        target_sheet_id = IPHONE_SHEET_ID if sheet_name in ('BANK_PASSED', 'BANK_FAILED') else PASSED_SHEET_ID
         sheet = service.spreadsheets()
         result = sheet.values().get(
-            spreadsheetId=PASSED_SHEET_ID,
+            spreadsheetId=target_sheet_id,
             range=f'{sheet_name}!A:A'
         ).execute()
         
@@ -922,8 +924,9 @@ def get_last_id(service, sheet_name):
 def get_last_row_number(service, sheet_name):
     """Get the actual last row number (works even with filters)"""
     try:
+        target_sheet_id = IPHONE_SHEET_ID if sheet_name in ('BANK_PASSED', 'BANK_FAILED') else PASSED_SHEET_ID
         result = service.spreadsheets().values().get(
-            spreadsheetId=PASSED_SHEET_ID,
+            spreadsheetId=target_sheet_id,
             range=f'{sheet_name}!A:A'
         ).execute()
         
@@ -936,6 +939,7 @@ def get_last_row_number(service, sheet_name):
 def append_to_sheet(service, sheet_name, data):
     """Append data to Google Sheet - WORKS WITH FILTERS"""
     try:
+        target_sheet_id = IPHONE_SHEET_ID if sheet_name in ('BANK_PASSED', 'BANK_FAILED') else PASSED_SHEET_ID
         last_row = get_last_row_number(service, sheet_name)
         start_row = last_row + 1
         range_name = f'{sheet_name}!A{start_row}'
@@ -944,7 +948,7 @@ def append_to_sheet(service, sheet_name, data):
         print(f"Adding {len(data)} rows")
         
         result = service.spreadsheets().values().update(
-            spreadsheetId=PASSED_SHEET_ID,
+            spreadsheetId=target_sheet_id,
             range=range_name,
             valueInputOption='USER_ENTERED',
             body={'values': data}
