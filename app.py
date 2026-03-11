@@ -212,34 +212,29 @@ def get_google_service():
 
 def extract_phone_number(text):
     """
-    🔥 FIXED: Extract phone number from transaction description.
-
-    KEY CHANGES vs old version:
-    - No longer does text.replace(' ', '') on the full string.
-      That was merging adjacent numbers (e.g. a long account number followed
-      by a real phone) and breaking the lookbehind assertions.
-    - _extract_phone_from_clean_text is now token-based (splits on spaces first).
-    - The FRANKAB exclusion is kept but simplified — tokens that contain
-      'FRANK' are non-digits and are automatically skipped by the token loop.
-
+    🔥 FIXED: Extract phone number from text
+    
     CRITICAL FOR NMB:
-    - Skip agency numbers (numbers in "agency @XXXXXXXXXX@" format).
-    - ONLY extract numbers that appear AFTER the "Description" keyword.
-    - If agency pattern exists but no phone in Description, return None
-      to force plate lookup.
+    - Skip agency numbers (numbers in "agency @XXXXXXXXXX@" format)
+    - ONLY extract numbers that appear AFTER the "Description" keyword
+    - This ensures we get the customer's phone, NOT the agent's phone
+    - If agency pattern exists but no phone in Description, return None to force plate lookup
     """
     if not text or pd.isna(text):
         return None
-
+    
     original_text = str(text)
-
-    # 🔥 NMB: agency @...@ guard — extract ONLY from Description section
+    
+    # 🔥 CRITICAL FIX: For NMB messages with "agency @", extract ONLY from Description section
     if 'AGENCY' in original_text.upper() and '@' in original_text:
+        # Find the Description section
         description_match = re.search(r'DESCRIPTION\s+(.+?)(?:FROM|!!|\Z)', original_text, re.IGNORECASE)
         if description_match:
             description_text = description_match.group(1).strip()
             print(f"  🔍 Searching for phone in Description: {description_text[:60]}...")
-            phone = _extract_phone_from_clean_text(description_text)
+            
+            # Extract phone from Description section ONLY
+            phone = _extract_phone_from_clean_text(description_text.replace(' ', '').replace('-', ''))
             if phone:
                 print(f"  ✅ Found customer phone in Description: {phone}")
                 return phone
@@ -247,65 +242,40 @@ def extract_phone_number(text):
                 print(f"  ⚠️ No phone found in Description section")
         else:
             print(f"  ⚠️ No Description section found in message")
-
-        # Agency number present but no customer phone found — force plate lookup
+        
+        # 🔥 KEY FIX: If we have an agency number pattern, do NOT extract from the full text
+        # Return None to force plate lookup instead of using the agency number
         return None
-
-    # 🔥 FIXED: Pass original text (spaces intact) to the token-based extractor.
-    #    The extractor splits on whitespace internally so adjacent numbers never merge.
-    #    Pre-scrub only things that are definitely NOT phones:
-    #      - REF: hex strings
-    #      - Known account-number patterns (very long digit runs with dashes)
-    scrubbed = original_text
-    scrubbed = re.sub(r'REF:\s*\S+', '', scrubbed, flags=re.IGNORECASE)
-    # Remove "FRANK..." account name tokens so they don't confuse the splitter
-    # (they are non-digit so the token loop skips them anyway, but clean for safety)
-    scrubbed = re.sub(r'FRANK\w*', '', scrubbed, flags=re.IGNORECASE)
-
-    return _extract_phone_from_clean_text(scrubbed)
+    
+    # For non-agency messages, extract normally
+    text_cleaned = original_text.replace(' ', '').replace('-', '')
+    
+    # 🔥 IMPROVED: Exclude account numbers
+    if 'FRANKAB' in text_cleaned.upper() or 'TOFRANKAB' in text_cleaned.upper():
+        parts = re.split(r'[:\s]+', text_cleaned)
+        for part in parts:
+            if 'FRANKAB' not in part.upper() and 'FRANK' not in part.upper():
+                phone = _extract_phone_from_clean_text(part)
+                if phone:
+                    return phone
+        return None
+    
+    return _extract_phone_from_clean_text(text_cleaned)
 
 def _extract_phone_from_clean_text(text):
-    """
-    🔥 FIXED: Token-based phone extractor.
-
-    ROOT CAUSE OF OLD BUG:
-        Calling text.replace(' ', '') merges adjacent numbers — e.g.
-        '501-26592511761972 25577214342' becomes '5012659251176197225577214342'
-        so the '255' inside 25577214342 is now preceded by '2' (a digit),
-        making the (?<!\\d) lookbehind fail and the real phone is missed.
-
-    FIX:
-        Split on whitespace/slashes/colons FIRST so each token is tested
-        in isolation.  Numbers can never bleed into each other.
-
-    Valid Tanzanian formats accepted:
-        +255XXXXXXXXX  → normalised to 255XXXXXXXXX  (12 digits after stripping +)
-         255XXXXXXXXX  → kept as-is                  (12 digits)
-         0XXXXXXXXX   → kept as-is                  (10 digits: 0 + exactly 9)
-    """
-    if not text:
-        return None
-
-    # Split on whitespace, slashes, colons — keeps each numeric token isolated
-    tokens = re.split(r'[\s/:]', str(text))
-
-    for token in tokens:
-        # Strip leading/trailing punctuation from this token alone
-        token_clean = re.sub(r'^[\+\-\.,]+|[\+\-\.,]+$', '', token)
-        # Collapse internal dashes/dots (e.g. "07-55-123456")
-        token_clean = re.sub(r'[\-\.]', '', token_clean)
-
-        if not token_clean.isdigit():
-            continue  # not a pure numeric token — skip
-
-        # 255 + exactly 9 digits = 12 digits total
-        if len(token_clean) == 12 and token_clean.startswith('255'):
-            return f"255{token_clean[3:]}"
-
-        # 0 + exactly 9 digits = 10 digits total (any 0X prefix, not just 07/06)
-        if len(token_clean) == 10 and token_clean.startswith('0'):
-            return f"0{token_clean[1:]}"
-
+    """Helper to extract phone from text without account numbers"""
+    # Pattern for 255 followed by 9 digits (must not be part of longer number)
+    pattern_255 = r'(?<!\d)255(\d{9})(?!\d)'
+    match = re.search(pattern_255, text)
+    if match:
+        return f"255{match.group(1)}"
+    
+    # Pattern for 07 or 06 followed by 8 digits (must not be part of longer number)
+    pattern_07_06 = r'(?<!\d)0([67])(\d{8})(?!\d)'
+    match = re.search(pattern_07_06, text)
+    if match:
+        return f"0{match.group(1)}{match.group(2)}"
+    
     return None
 
 def extract_plate_number(text):
