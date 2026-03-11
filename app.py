@@ -32,8 +32,11 @@ else:
 
 # Google Sheets configuration
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-PASSED_SHEET_ID = '1rdSRNLdZPT5xXLRgV7wSn1beYwWZp41ZpYoLkbGmt0o'
+PASSED_SHEET_ID   = '1rdSRNLdZPT5xXLRgV7wSn1beYwWZp41ZpYoLkbGmt0o'
 PIKIPIKI_SHEET_ID = '1XFwPITQgZmzZ8lbg8MKD9S4rwHyk2cDOKrcxO7SAjHA'
+
+# 🔥 NEW: Separate Google Sheet for iPhone customer records
+IPHONE_SHEET_ID   = '1Y2cOyObQvP502kvEbC-uGDP-3Sf5X9JKnDDYmR0BPRQ'
 
 
 def extract_data_from_pdf(filepath):
@@ -209,29 +212,34 @@ def get_google_service():
 
 def extract_phone_number(text):
     """
-    🔥 FIXED: Extract phone number from text
-    
+    🔥 FIXED: Extract phone number from transaction description.
+
+    KEY CHANGES vs old version:
+    - No longer does text.replace(' ', '') on the full string.
+      That was merging adjacent numbers (e.g. a long account number followed
+      by a real phone) and breaking the lookbehind assertions.
+    - _extract_phone_from_clean_text is now token-based (splits on spaces first).
+    - The FRANKAB exclusion is kept but simplified — tokens that contain
+      'FRANK' are non-digits and are automatically skipped by the token loop.
+
     CRITICAL FOR NMB:
-    - Skip agency numbers (numbers in "agency @XXXXXXXXXX@" format)
-    - ONLY extract numbers that appear AFTER the "Description" keyword
-    - This ensures we get the customer's phone, NOT the agent's phone
-    - If agency pattern exists but no phone in Description, return None to force plate lookup
+    - Skip agency numbers (numbers in "agency @XXXXXXXXXX@" format).
+    - ONLY extract numbers that appear AFTER the "Description" keyword.
+    - If agency pattern exists but no phone in Description, return None
+      to force plate lookup.
     """
     if not text or pd.isna(text):
         return None
-    
+
     original_text = str(text)
-    
-    # 🔥 CRITICAL FIX: For NMB messages with "agency @", extract ONLY from Description section
+
+    # 🔥 NMB: agency @...@ guard — extract ONLY from Description section
     if 'AGENCY' in original_text.upper() and '@' in original_text:
-        # Find the Description section
         description_match = re.search(r'DESCRIPTION\s+(.+?)(?:FROM|!!|\Z)', original_text, re.IGNORECASE)
         if description_match:
             description_text = description_match.group(1).strip()
             print(f"  🔍 Searching for phone in Description: {description_text[:60]}...")
-            
-            # Extract phone from Description section ONLY
-            phone = _extract_phone_from_clean_text(description_text.replace(' ', '').replace('-', ''))
+            phone = _extract_phone_from_clean_text(description_text)
             if phone:
                 print(f"  ✅ Found customer phone in Description: {phone}")
                 return phone
@@ -239,40 +247,65 @@ def extract_phone_number(text):
                 print(f"  ⚠️ No phone found in Description section")
         else:
             print(f"  ⚠️ No Description section found in message")
-        
-        # 🔥 KEY FIX: If we have an agency number pattern, do NOT extract from the full text
-        # Return None to force plate lookup instead of using the agency number
+
+        # Agency number present but no customer phone found — force plate lookup
         return None
-    
-    # For non-agency messages, extract normally
-    text_cleaned = original_text.replace(' ', '').replace('-', '')
-    
-    # 🔥 IMPROVED: Exclude account numbers
-    if 'FRANKAB' in text_cleaned.upper() or 'TOFRANKAB' in text_cleaned.upper():
-        parts = re.split(r'[:\s]+', text_cleaned)
-        for part in parts:
-            if 'FRANKAB' not in part.upper() and 'FRANK' not in part.upper():
-                phone = _extract_phone_from_clean_text(part)
-                if phone:
-                    return phone
-        return None
-    
-    return _extract_phone_from_clean_text(text_cleaned)
+
+    # 🔥 FIXED: Pass original text (spaces intact) to the token-based extractor.
+    #    The extractor splits on whitespace internally so adjacent numbers never merge.
+    #    Pre-scrub only things that are definitely NOT phones:
+    #      - REF: hex strings
+    #      - Known account-number patterns (very long digit runs with dashes)
+    scrubbed = original_text
+    scrubbed = re.sub(r'REF:\s*\S+', '', scrubbed, flags=re.IGNORECASE)
+    # Remove "FRANK..." account name tokens so they don't confuse the splitter
+    # (they are non-digit so the token loop skips them anyway, but clean for safety)
+    scrubbed = re.sub(r'FRANK\w*', '', scrubbed, flags=re.IGNORECASE)
+
+    return _extract_phone_from_clean_text(scrubbed)
 
 def _extract_phone_from_clean_text(text):
-    """Helper to extract phone from text without account numbers"""
-    # Pattern for 255 followed by 9 digits (must not be part of longer number)
-    pattern_255 = r'(?<!\d)255(\d{9})(?!\d)'
-    match = re.search(pattern_255, text)
-    if match:
-        return f"255{match.group(1)}"
-    
-    # Pattern for 07 or 06 followed by 8 digits (must not be part of longer number)
-    pattern_07_06 = r'(?<!\d)0([67])(\d{8})(?!\d)'
-    match = re.search(pattern_07_06, text)
-    if match:
-        return f"0{match.group(1)}{match.group(2)}"
-    
+    """
+    🔥 FIXED: Token-based phone extractor.
+
+    ROOT CAUSE OF OLD BUG:
+        Calling text.replace(' ', '') merges adjacent numbers — e.g.
+        '501-26592511761972 25577214342' becomes '5012659251176197225577214342'
+        so the '255' inside 25577214342 is now preceded by '2' (a digit),
+        making the (?<!\\d) lookbehind fail and the real phone is missed.
+
+    FIX:
+        Split on whitespace/slashes/colons FIRST so each token is tested
+        in isolation.  Numbers can never bleed into each other.
+
+    Valid Tanzanian formats accepted:
+        +255XXXXXXXXX  → normalised to 255XXXXXXXXX  (12 digits after stripping +)
+         255XXXXXXXXX  → kept as-is                  (12 digits)
+         0XXXXXXXXX   → kept as-is                  (10 digits: 0 + exactly 9)
+    """
+    if not text:
+        return None
+
+    # Split on whitespace, slashes, colons — keeps each numeric token isolated
+    tokens = re.split(r'[\s/:]', str(text))
+
+    for token in tokens:
+        # Strip leading/trailing punctuation from this token alone
+        token_clean = re.sub(r'^[\+\-\.,]+|[\+\-\.,]+$', '', token)
+        # Collapse internal dashes/dots (e.g. "07-55-123456")
+        token_clean = re.sub(r'[\-\.]', '', token_clean)
+
+        if not token_clean.isdigit():
+            continue  # not a pure numeric token — skip
+
+        # 255 + exactly 9 digits = 12 digits total
+        if len(token_clean) == 12 and token_clean.startswith('255'):
+            return f"255{token_clean[3:]}"
+
+        # 0 + exactly 9 digits = 10 digits total (any 0X prefix, not just 07/06)
+        if len(token_clean) == 10 and token_clean.startswith('0'):
+            return f"0{token_clean[1:]}"
+
     return None
 
 def extract_plate_number(text):
@@ -495,6 +528,167 @@ def extract_ref_number(text):
     
     return None
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🔥 NEW: iPhone Channel Functions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def is_iphone_transaction(details):
+    """
+    Detect whether a transaction description contains the word 'iphone'
+    in any capitalisation: iphone, iPhone, IPHONE, Iphone, etc.
+    Returns True if it's an iPhone transaction (should bypass normal flow).
+    """
+    if not details or pd.isna(details):
+        return False
+    return bool(re.search(r'\biphone\b', str(details), re.IGNORECASE))
+
+
+def normalize_phone_iphone(phone):
+    """
+    Normalize any phone number variant to a bare 9-digit suffix
+    so we can do format-agnostic matching against IPHONE_RECORDS.
+
+    Handles:
+      0752900450    → 752900450
+      +255752900450 → 752900450
+      255752900450  → 752900450
+      752900450     → 752900450   (already bare)
+      0752900450,   → 752900450   (trailing comma stripped first)
+    Returns None if the result is not 9 digits.
+    """
+    if not phone:
+        return None
+    # Strip commas, spaces, dashes, plus signs
+    cleaned = re.sub(r'[,\s\-\+]', '', str(phone)).strip()
+    if not cleaned:
+        return None
+    # Remove country code 255
+    if cleaned.startswith('255') and len(cleaned) == 12:
+        cleaned = cleaned[3:]
+    # Remove leading 0
+    elif cleaned.startswith('0') and len(cleaned) == 10:
+        cleaned = cleaned[1:]
+    # Must now be exactly 9 digits
+    if len(cleaned) == 9 and cleaned.isdigit():
+        return cleaned
+    return None
+
+
+def load_iphone_customers(service):
+    """
+    Load iPhone customer records from the separate IPHONE_SHEET_ID spreadsheet,
+    tab 'IPHONE_RECORDS'.
+
+    Sheet layout:
+        Column A → Customer name
+        Column B → Phone number 1  (stored as  "0752900450," – trailing comma)
+        Column C → Phone number 2  (stored as  "0752900450," – trailing comma)
+
+    Returns:
+        iphone_lookup : dict  { '9-digit-normalized-phone' : customer_name }
+    """
+    iphone_lookup = {}
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=IPHONE_SHEET_ID,
+            range='IPHONE_RECORDS!A:C'
+        ).execute()
+
+        values = result.get('values', [])
+        if not values:
+            print("⚠️ No data found in IPHONE_RECORDS tab")
+            return iphone_lookup
+
+        for row_idx, row in enumerate(values, start=1):
+            # Skip completely empty rows
+            if not row:
+                continue
+
+            name = str(row[0]).strip() if len(row) > 0 else ''
+            phone_b = str(row[1]).strip() if len(row) > 1 else ''
+            phone_c = str(row[2]).strip() if len(row) > 2 else ''
+
+            if not name:
+                continue  # No name → skip
+
+            for raw_phone in [phone_b, phone_c]:
+                if not raw_phone:
+                    continue
+                normalized = normalize_phone_iphone(raw_phone)
+                if normalized:
+                    iphone_lookup[normalized] = name
+
+        print(f"✅ iPhone: Loaded {len(iphone_lookup)} phone entries from IPHONE_RECORDS")
+    except Exception as e:
+        print(f"❌ Error loading IPHONE_RECORDS: {e}")
+        import traceback
+        traceback.print_exc()
+
+    return iphone_lookup
+
+
+def extract_phone_for_iphone(details):
+    """
+    Extract the customer phone number from an iPhone transaction description.
+
+    Uses the same token-based approach as _extract_phone_from_clean_text to
+    avoid false positives and the space-strip merge bug:
+      - Pre-scrubs known false-positive patterns (agency IDs, Ter IDs, REF numbers)
+      - Then delegates to _extract_phone_from_clean_text which tokenises by
+        whitespace so adjacent numbers never bleed into each other.
+
+    Returns the raw matched phone string or None.
+    """
+    if not details or pd.isna(details):
+        return None
+
+    cleaned = str(details)
+
+    # ── Scrub known non-phone patterns ────────────────────────────────────────
+    # Remove "agency @XXXXXXX@" style agency numbers
+    cleaned = re.sub(r'AGENCY\s*@\d+@', '', cleaned, flags=re.IGNORECASE)
+    # Remove "Ter ID XXXXXXXX" (long numeric IDs that can look like phones)
+    cleaned = re.sub(r'TER\s+ID\s+\d+', '', cleaned, flags=re.IGNORECASE)
+    # Remove "Trx ID XXXXXXX"
+    cleaned = re.sub(r'TRX\s+ID\s+\w+', '', cleaned, flags=re.IGNORECASE)
+    # Remove REF: XXXXXXX (hex ref numbers often start with digits)
+    cleaned = re.sub(r'REF:\s*\S+', '', cleaned, flags=re.IGNORECASE)
+
+    # ── Delegate to the shared token-based extractor ───────────────────────────
+    return _extract_phone_from_clean_text(cleaned)
+
+
+def lookup_iphone_customer(details, iphone_lookup):
+    """
+    Given a transaction description, extract the phone number and look it up
+    in the iphone_lookup dict (keyed by 9-digit normalized phone).
+
+    Returns (customer_name, raw_phone_found) or (None, None).
+    """
+    raw_phone = extract_phone_for_iphone(details)
+    if not raw_phone:
+        print(f"  📵 iPhone: No phone found in: {details[:80]}")
+        return None, None
+
+    normalized = normalize_phone_iphone(raw_phone)
+    if not normalized:
+        print(f"  📵 iPhone: Could not normalize phone '{raw_phone}'")
+        return None, None
+
+    customer_name = iphone_lookup.get(normalized)
+    if customer_name:
+        print(f"  ✅ iPhone match: {normalized} → {customer_name}")
+        return customer_name, raw_phone
+    else:
+        print(f"  ❌ iPhone: No match for normalized phone '{normalized}' (raw: {raw_phone})")
+        return None, raw_phone
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# End iPhone Channel Functions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
 def load_all_customers(service):
     """Load all customers from pikipiki records sheet"""
     try:
@@ -646,6 +840,10 @@ def get_existing_refs(service, sheet_name='PASSED'):
             ref_column = 'H'
         elif sheet_name == 'FAILED_NMB':
             ref_column = 'I'
+        elif sheet_name == 'BANK_PASSED':
+            ref_column = 'H'
+        elif sheet_name == 'BANK_FAILED':
+            ref_column = 'H'
         else:  # PASSED
             ref_column = 'H'
         
@@ -843,7 +1041,7 @@ def process_transactions():
 
 
 def process_crdb_transactions(filepath):
-    """Process CRDB bank statement (existing logic)"""
+    """Process CRDB bank statement (existing logic + iPhone channel)"""
     try:
         # Determine file type and read accordingly
         if filepath.endswith('.pdf'):
@@ -887,14 +1085,18 @@ def process_crdb_transactions(filepath):
         # Initialize Google Sheets service
         service = get_google_service()
         
-        # Load customers
+        # ── Load customer lookups ──────────────────────────────────────────────
         print("Loading customer database from pikipiki records...")
         phone_lookup, plate_lookup = load_all_customers(service)
         
         print("\nLoading customer database from pikipiki records2 (SAV)...")
         phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)
+
+        # 🔥 NEW: Load iPhone customer lookup from separate sheet
+        print("\nLoading iPhone customer database from IPHONE_RECORDS...")
+        iphone_lookup = load_iphone_customers(service)
         
-        # Get existing refs
+        # ── Load existing refs (duplicate guard) ──────────────────────────────
         print("Loading existing references from PASSED sheet...")
         existing_passed_refs, existing_passed_messages = get_existing_refs(service, 'PASSED')
         
@@ -903,20 +1105,50 @@ def process_crdb_transactions(filepath):
         
         print("Loading existing references from FAILED sheet...")
         existing_failed_refs, existing_failed_messages = get_existing_refs(service, 'FAILED')
+
+        # 🔥 NEW: Load existing refs for iPhone sheets
+        print("Loading existing references from BANK_PASSED sheet...")
+        existing_bank_passed_refs, existing_bank_passed_messages = get_existing_refs(service, 'BANK_PASSED')
+
+        print("Loading existing references from BANK_FAILED sheet...")
+        existing_bank_failed_refs, existing_bank_failed_messages = get_existing_refs(service, 'BANK_FAILED')
         
-        all_existing_refs = existing_passed_refs.union(existing_passed_sav_refs).union(existing_failed_refs)
-        all_existing_messages = existing_passed_messages.union(existing_passed_sav_messages).union(existing_failed_messages)
-        print(f"Total unique refs in system: {len(all_existing_refs)}")
+        all_existing_refs = (
+            existing_passed_refs
+            .union(existing_passed_sav_refs)
+            .union(existing_failed_refs)
+        )
+        all_existing_messages = (
+            existing_passed_messages
+            .union(existing_passed_sav_messages)
+            .union(existing_failed_messages)
+        )
+
+        # 🔥 NEW: Separate duplicate sets for iPhone channel
+        all_iphone_existing_refs = existing_bank_passed_refs.union(existing_bank_failed_refs)
+        all_iphone_existing_messages = existing_bank_passed_messages.union(existing_bank_failed_messages)
+
+        print(f"Total unique refs in system (normal): {len(all_existing_refs)}")
+        print(f"Total unique refs in system (iPhone): {len(all_iphone_existing_refs)}")
         
-        # Get last IDs
-        last_passed_id = get_last_id(service, 'PASSED')
+        # ── Get last IDs ───────────────────────────────────────────────────────
+        last_passed_id     = get_last_id(service, 'PASSED')
         last_passed_sav_id = get_last_id(service, 'PASSED_SAV')
-        last_failed_id = get_last_id(service, 'FAILED')
+        last_failed_id     = get_last_id(service, 'FAILED')
+
+        # 🔥 NEW: Last IDs for iPhone sheets
+        last_bank_passed_id = get_last_id(service, 'BANK_PASSED')
+        last_bank_failed_id = get_last_id(service, 'BANK_FAILED')
         
-        passed_data = []
-        passed_sav_data = []
-        failed_data = []
+        # ── Row buckets ────────────────────────────────────────────────────────
+        passed_data      = []
+        passed_sav_data  = []
+        failed_data      = []
         needs_review_data = []
+
+        # 🔥 NEW: iPhone buckets
+        bank_passed_data = []
+        bank_failed_data = []
         
         stats = {
             'total': len(credit_df),
@@ -927,17 +1159,90 @@ def process_crdb_transactions(filepath):
             'skipped': 0,
             'skipped_from_passed': 0,
             'skipped_from_passed_sav': 0,
-            'skipped_from_failed': 0
+            'skipped_from_failed': 0,
+            # 🔥 NEW: iPhone stats
+            'iphone_passed': 0,
+            'iphone_failed': 0,
+            'iphone_skipped': 0,
         }
         
         for idx, row in credit_df.iterrows():
-            posting_date = str(row.get('Posting Date', ''))
-            details = str(row.get('Details', ''))
+            posting_date  = str(row.get('Posting Date', ''))
+            details       = str(row.get('Details', ''))
             credit_amount = row.get('Credit', 0)
-            
-            ref_number = extract_ref_number(details)
-            
-            # Check for duplicates
+            ref_number    = extract_ref_number(details)
+
+            # ══════════════════════════════════════════════════════════════════
+            # 🔥 NEW: iPhone Channel — intercept BEFORE normal processing
+            # ══════════════════════════════════════════════════════════════════
+            if is_iphone_transaction(details):
+                print(f"\n📱 iPhone transaction detected: {details[:80]}")
+
+                # Duplicate check within iPhone sheets
+                iphone_is_dup = False
+                if ref_number and ref_number in all_iphone_existing_refs:
+                    iphone_is_dup = True
+                elif details in all_iphone_existing_messages:
+                    iphone_is_dup = True
+
+                if iphone_is_dup:
+                    stats['iphone_skipped'] += 1
+                    stats['skipped'] += 1
+                    print(f"  ⏭️ iPhone duplicate — skipped")
+                    continue  # Do NOT fall through to normal flow
+
+                # Look up customer in IPHONE_RECORDS
+                customer_name, raw_phone = lookup_iphone_customer(details, iphone_lookup)
+
+                # Determine display identifier (prefer 255-prefix format)
+                if raw_phone:
+                    norm = normalize_phone_iphone(raw_phone)
+                    display_phone = f"255{norm}" if norm else raw_phone
+                else:
+                    display_phone = 'No phone'
+
+                if customer_name:
+                    # ✅ Match found → BANK_PASSED
+                    last_bank_passed_id += 1
+                    bank_passed_row = [
+                        last_bank_passed_id,
+                        posting_date,
+                        'CRDB',
+                        details,
+                        credit_amount,
+                        display_phone,
+                        customer_name,
+                        ref_number or '',
+                        ''          # No separate customer_id in IPHONE_RECORDS
+                    ]
+                    bank_passed_data.append(bank_passed_row)
+                    stats['iphone_passed'] += 1
+                    print(f"  ✅ BANK_PASSED: {customer_name} — {display_phone} — {credit_amount}")
+                else:
+                    # ❌ No match → BANK_FAILED
+                    last_bank_failed_id += 1
+                    reason = f"PHONE({display_phone}) not found in IPHONE_RECORDS"
+                    bank_failed_row = [
+                        last_bank_failed_id,
+                        posting_date,
+                        'CRDB',
+                        details,
+                        credit_amount,
+                        display_phone,
+                        reason,
+                        ref_number or ''
+                    ]
+                    bank_failed_data.append(bank_failed_row)
+                    stats['iphone_failed'] += 1
+                    print(f"  ❌ BANK_FAILED: {reason}")
+
+                # ⚠️ CRITICAL: continue — do NOT run normal pikipiki logic
+                continue
+            # ══════════════════════════════════════════════════════════════════
+            # End iPhone Channel
+            # ══════════════════════════════════════════════════════════════════
+
+            # ── Normal duplicate check ─────────────────────────────────────────
             is_duplicate = False
             
             if ref_number and ref_number in all_existing_refs:
@@ -956,19 +1261,19 @@ def process_crdb_transactions(filepath):
                 stats['skipped'] += 1
                 continue
             
-            # Extract phone and plate
+            # ── Extract phone and plate ────────────────────────────────────────
             phone = extract_phone_number(details)
             plate = extract_plate_number(details)
             
-            identifier = None
+            identifier  = None
             lookup_type = None
             
             if phone:
-                identifier = phone
+                identifier  = phone
                 lookup_type = 'phone'
                 print(f"Found phone: {phone} in: {details[:80]}")
             elif plate:
-                identifier = plate
+                identifier  = plate
                 lookup_type = 'plate'
                 print(f"Found plate: {plate} in: {details[:80]}")
             
@@ -1108,7 +1413,16 @@ def process_crdb_transactions(filepath):
                     stats['failed'] += 1
                     print(f"❌ FAILED: No phone/plate found in: {details[:80]} (REF: {ref_number})")
         
-        # Store review data in file instead of session
+        # ── Flush iPhone buckets immediately (no review flow needed) ──────────
+        if bank_passed_data:
+            print(f"\n📱 Writing {len(bank_passed_data)} rows to BANK_PASSED...")
+            append_to_sheet(service, 'BANK_PASSED', bank_passed_data)
+
+        if bank_failed_data:
+            print(f"\n📱 Writing {len(bank_failed_data)} rows to BANK_FAILED...")
+            append_to_sheet(service, 'BANK_FAILED', bank_failed_data)
+
+        # ── Store review data in file instead of session ───────────────────────
         if needs_review_data:
             review_file = os.path.join(app.config['TEMP_FOLDER'], f'review_{datetime.now().timestamp()}.pkl')
             with open(review_file, 'wb') as f:
@@ -1135,7 +1449,7 @@ def process_crdb_transactions(filepath):
                 'message': f"Found {len(needs_review_data)} records that need your review before processing"
             })
         
-        # No reviews needed - append directly
+        # ── No reviews needed — append directly ───────────────────────────────
         if passed_data:
             append_to_sheet(service, 'PASSED', passed_data)
         
@@ -1152,7 +1466,14 @@ def process_crdb_transactions(filepath):
         return jsonify({
             'success': True,
             'stats': stats,
-            'message': f"Processed {stats['total']} transactions: {stats['passed']} passed, {stats['passed_sav']} passed (SAV), {stats['failed']} failed"
+            'message': (
+                f"Processed {stats['total']} transactions: "
+                f"{stats['passed']} passed, "
+                f"{stats['passed_sav']} passed (SAV), "
+                f"{stats['failed']} failed, "
+                f"{stats['iphone_passed']} iPhone passed, "
+                f"{stats['iphone_failed']} iPhone failed"
+            )
         })
     
     except Exception as e:
@@ -1233,14 +1554,14 @@ def process_nmb_transactions(filepath):
 
         # ── Get last IDs ───────────────────────────────────────────────────────
         # PASSED is shared with CRDB — continue from where it left off
-        last_passed_id = get_last_id(service, 'PASSED')
+        last_passed_id     = get_last_id(service, 'PASSED')
         last_passed_nmb_id = get_last_id(service, 'PASSED_SAV_NMB')
         last_failed_nmb_id = get_last_id(service, 'FAILED_NMB')
 
-        passed_data = []          # → shared PASSED tab
-        passed_nmb_data = []      # → PASSED_SAV_NMB
-        failed_nmb_data = []      # → FAILED_NMB
-        needs_review_data = []    # → review modal
+        passed_data      = []          # → shared PASSED tab
+        passed_nmb_data  = []          # → PASSED_SAV_NMB
+        failed_nmb_data  = []          # → FAILED_NMB
+        needs_review_data = []         # → review modal
 
         stats = {
             'total': len(credit_df),
@@ -1252,7 +1573,7 @@ def process_nmb_transactions(filepath):
         }
 
         for idx, row in credit_df.iterrows():
-            date = str(row.get('Date', ''))
+            date        = str(row.get('Date', ''))
             description = str(row.get('Description', ''))
             credit_amount = row.get('Credit', 0)
 
@@ -1279,15 +1600,15 @@ def process_nmb_transactions(filepath):
             phone = extract_phone_number(description)
             plate = extract_plate_number(description)
 
-            identifier = None
+            identifier  = None
             lookup_type = None
 
             if phone:
-                identifier = phone
+                identifier  = phone
                 lookup_type = 'phone'
                 print(f"Found phone: {phone} in: {description[:80]}")
             elif plate:
-                identifier = plate
+                identifier  = plate
                 lookup_type = 'plate'
                 print(f"Found plate: {plate} in: {description[:80]}")
 
@@ -1517,20 +1838,20 @@ def confirm_reviews():
             review_data = pickle.load(f)
 
         needs_review = review_data['needs_review']
-        stats = review_data['stats']
-        last_ids = review_data['last_ids']
-        bank = review_data.get('bank', 'CRDB')
+        stats        = review_data['stats']
+        last_ids     = review_data['last_ids']
+        bank         = review_data.get('bank', 'CRDB')
 
         service = get_google_service()
 
         if bank == 'NMB':
             # ── NMB review processing ──────────────────────────────────────────
-            passed_data = review_data.get('passed_data', [])
+            passed_data     = review_data.get('passed_data', [])
             passed_nmb_data = review_data.get('passed_nmb_data', [])
             failed_nmb_data = review_data.get('failed_nmb_data', [])
 
             for confirmation in confirmations:
-                idx = confirmation['index']
+                idx    = confirmation['index']
                 accept = confirmation['accept']
 
                 if idx >= len(needs_review):
@@ -1603,12 +1924,12 @@ def confirm_reviews():
 
         else:
             # ── CRDB review processing (original logic) ────────────────────────
-            passed_data = review_data['passed_data']
+            passed_data     = review_data['passed_data']
             passed_sav_data = review_data['passed_sav_data']
-            failed_data = review_data['failed_data']
+            failed_data     = review_data['failed_data']
 
             for confirmation in confirmations:
-                idx = confirmation['index']
+                idx    = confirmation['index']
                 accept = confirmation['accept']
 
                 if idx >= len(needs_review):
