@@ -248,7 +248,11 @@ def extract_phone_number(text):
         return None
     
     # For non-agency messages, extract normally
-    text_cleaned = original_text.replace(' ', '').replace('-', '')
+    # 🔥 CRITICAL: Do NOT strip spaces — stripping merges adjacent numbers
+    # e.g. "501-26506579314150 255775907225" → "50126506579314150255775907225"
+    # which makes the (?<!\d) lookbehind fail on the real phone number.
+    # Spaces are what keep numbers isolated; the regex handles them fine.
+    text_cleaned = original_text
     
     # 🔥 IMPROVED: Exclude account numbers
     if 'FRANKAB' in text_cleaned.upper() or 'TOFRANKAB' in text_cleaned.upper():
