@@ -490,12 +490,14 @@ def extract_plate_suggestions(text):
     return suggestions
 
 def extract_ref_number(text):
-    """Extract reference number from message (format: REF:XXXXX)"""
+    """Extract reference number from message (format: REF:XXXXX or REF XXXXX)"""
     if not text or pd.isna(text):
         return None
     
     text = str(text)
-    pattern = r'REF:\s*(\S+)'
+    # 🔥 FIXED: match both REF: and REF (with or without colon)
+    # Ref numbers are hex strings of 10+ chars
+    pattern = r'REF[:\s]\s*([A-Fa-f0-9]{10,})'
     match = re.search(pattern, text, re.IGNORECASE)
     if match:
         return match.group(1)
@@ -1091,20 +1093,25 @@ def process_crdb_transactions(filepath):
         print("Loading existing references from BANK_FAILED sheet...")
         existing_bank_failed_refs, existing_bank_failed_messages = get_existing_refs(service, 'BANK_FAILED')
         
+        # 🔥 iPhone duplicate sets
+        all_iphone_existing_refs = existing_bank_passed_refs.union(existing_bank_failed_refs)
+        all_iphone_existing_messages = existing_bank_passed_messages.union(existing_bank_failed_messages)
+
+        # 🔥 CRITICAL FIX: include BANK_PASSED + BANK_FAILED in the main dup check
+        # so transactions already written to iPhone sheets are caught at the top
+        # of the loop and never fall through to pikipiki lookup → FAILED
         all_existing_refs = (
             existing_passed_refs
             .union(existing_passed_sav_refs)
             .union(existing_failed_refs)
+            .union(all_iphone_existing_refs)
         )
         all_existing_messages = (
             existing_passed_messages
             .union(existing_passed_sav_messages)
             .union(existing_failed_messages)
+            .union(all_iphone_existing_messages)
         )
-
-        # 🔥 NEW: Separate duplicate sets for iPhone channel
-        all_iphone_existing_refs = existing_bank_passed_refs.union(existing_bank_failed_refs)
-        all_iphone_existing_messages = existing_bank_passed_messages.union(existing_bank_failed_messages)
 
         print(f"Total unique refs in system (normal): {len(all_existing_refs)}")
         print(f"Total unique refs in system (iPhone): {len(all_iphone_existing_refs)}")
