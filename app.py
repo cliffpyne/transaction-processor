@@ -1300,31 +1300,64 @@ def process_crdb_transactions(filepath):
                         stats['passed_sav'] += 1
                         print(f"✅ PASSED_SAV: {customer_name_sav} - {identifier} - {credit_amount} - ID: {customer_id}")
                     else:
-                        # Not found - add to FAILED
-                        last_failed_id += 1
-                        reason = f"{lookup_type.upper()}({identifier}) not found"
-                        
-                        final_identifier = identifier
+                        # 🔥 Tier 3: Not in pikipiki records1 or records2.
+                        # If we have a phone, try IPHONE_RECORDS before giving up.
+                        iphone_matched = False
                         if lookup_type == 'phone':
-                            if not identifier.startswith('255'):
-                                if identifier.startswith('0'):
-                                    final_identifier = '255' + identifier[1:]
-                                else:
-                                    final_identifier = '255' + identifier
-                        
-                        failed_row = [
-                            last_failed_id,
-                            posting_date,
-                            'CRDB',
-                            details,
-                            credit_amount,
-                            final_identifier,
-                            reason,
-                            ref_number or ''
-                        ]
-                        failed_data.append(failed_row)
-                        stats['failed'] += 1
-                        print(f"❌ FAILED: Customer not found for {final_identifier} (REF: {ref_number})")
+                            norm = normalize_phone_iphone(identifier)
+                            iphone_customer = iphone_lookup.get(norm) if norm else None
+                            if iphone_customer:
+                                # Found in IPHONE_RECORDS → BANK_PASSED
+                                # Duplicate check first
+                                iphone_is_dup = (
+                                    (ref_number and ref_number in all_iphone_existing_refs)
+                                    or details in all_iphone_existing_messages
+                                )
+                                if not iphone_is_dup:
+                                    norm_phone = identifier if identifier.startswith('255') else f"255{norm}"
+                                    last_bank_passed_id += 1
+                                    bank_passed_row = [
+                                        last_bank_passed_id,
+                                        posting_date,
+                                        'CRDB',
+                                        details,
+                                        credit_amount,
+                                        norm_phone,
+                                        iphone_customer,
+                                        ref_number or '',
+                                        ''
+                                    ]
+                                    bank_passed_data.append(bank_passed_row)
+                                    stats['iphone_passed'] += 1
+                                    iphone_matched = True
+                                    print(f"  ✅ BANK_PASSED (via phone fallback): {iphone_customer} — {norm_phone} — {credit_amount}")
+
+                        if not iphone_matched:
+                            # Truly not found anywhere — add to FAILED
+                            last_failed_id += 1
+                            reason = f"{lookup_type.upper()}({identifier}) not found"
+
+                            final_identifier = identifier
+                            if lookup_type == 'phone':
+                                if not identifier.startswith('255'):
+                                    if identifier.startswith('0'):
+                                        final_identifier = '255' + identifier[1:]
+                                    else:
+                                        final_identifier = '255' + identifier
+
+                            failed_row = [
+                                last_failed_id,
+                                posting_date,
+                                'CRDB',
+                                details,
+                                credit_amount,
+                                final_identifier,
+                                reason,
+                                ref_number or ''
+                            ]
+                            failed_data.append(failed_row)
+                            stats['failed'] += 1
+                            print(f"❌ FAILED: Customer not found for {final_identifier} (REF: {ref_number})")
             else:
                 # Check for plate suggestions
                 plate_suggestions = extract_plate_suggestions(details)
