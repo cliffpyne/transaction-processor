@@ -2,7 +2,6 @@ from flask import Flask, render_template, request, jsonify, session
 from werkzeug.utils import secure_filename
 import os
 import re
-import gc
 import pandas as pd
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -1058,21 +1057,11 @@ def process_crdb_transactions(filepath):
             credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) & 
                            ((df['Debit'].isna()) | (df['Debit'] == 0))].copy()
             
-            # 🔥 Free full df immediately
-            del df
-            gc.collect()
-            
             print(f"✅ Excel: Found {len(credit_df)} credit transactions")
         
         else:
             return jsonify({'error': 'Unsupported file format'}), 400
         
-        # Convert to list of dicts so pandas DataFrame can be freed early
-        transactions_list = credit_df.to_dict('records')
-        del credit_df
-        gc.collect()
-        print(f"✅ Converted {len(transactions_list)} transactions to list, freed DataFrame")
-
         # Initialize Google Sheets service
         service = get_google_service()
         
@@ -1126,15 +1115,6 @@ def process_crdb_transactions(filepath):
 
         print(f"Total unique refs in system (normal): {len(all_existing_refs)}")
         print(f"Total unique refs in system (iPhone): {len(all_iphone_existing_refs)}")
-
-        # 🔥 Free individual sets — merged sets are all we need
-        del existing_passed_refs, existing_passed_messages
-        del existing_passed_sav_refs, existing_passed_sav_messages
-        del existing_failed_refs, existing_failed_messages
-        del existing_bank_passed_refs, existing_bank_passed_messages
-        del existing_bank_failed_refs, existing_bank_failed_messages
-        del all_iphone_existing_messages
-        gc.collect()
         
         # ── Get last IDs ───────────────────────────────────────────────────────
         last_passed_id     = get_last_id(service, 'PASSED')
@@ -1171,7 +1151,7 @@ def process_crdb_transactions(filepath):
             'iphone_skipped': 0,
         }
         
-        for row in transactions_list:
+        for idx, row in credit_df.iterrows():
             posting_date  = str(row.get('Posting Date', ''))
             details       = str(row.get('Details', ''))
             credit_amount = row.get('Credit', 0)
@@ -1556,12 +1536,6 @@ def process_nmb_transactions(filepath):
             credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0)].copy()
         
         print(f"✅ NMB Excel: Found {len(credit_df)} credit transactions")
-
-        # Convert to list of dicts so pandas DataFrame can be freed early
-        transactions_list = credit_df.to_dict('records')
-        del credit_df
-        gc.collect()
-        print(f"✅ Converted {len(transactions_list)} NMB transactions to list, freed DataFrame")
         
         # Initialize Google Sheets service
         service = get_google_service()
@@ -1596,12 +1570,6 @@ def process_nmb_transactions(filepath):
         )
         print(f"Total unique NMB refs in system: {len(all_existing_refs)}")
 
-        # 🔥 Free individual sets — merged sets are all we need
-        del existing_passed_refs, existing_passed_messages
-        del existing_passed_nmb_refs, existing_passed_nmb_messages
-        del existing_failed_nmb_refs, existing_failed_nmb_messages
-        gc.collect()
-
         # ── Get last IDs ───────────────────────────────────────────────────────
         # PASSED is shared with CRDB — continue from where it left off
         last_passed_id     = get_last_id(service, 'PASSED')
@@ -1622,7 +1590,7 @@ def process_nmb_transactions(filepath):
             'skipped': 0
         }
 
-        for row in transactions_list:
+        for idx, row in credit_df.iterrows():
             date        = str(row.get('Date', ''))
             description = str(row.get('Description', ''))
             credit_amount = row.get('Credit', 0)
