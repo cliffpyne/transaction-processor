@@ -1305,21 +1305,15 @@ def process_crdb_transactions(filepath):
 
             # ── Normal duplicate check ─────────────────────────────────────────
             is_duplicate = False
-            
+
             if ref_number and ref_number in all_existing_refs:
                 is_duplicate = True
-                if ref_number in existing_passed_refs:
-                    stats['skipped_from_passed'] += 1
-                elif ref_number in existing_passed_sav_refs:
-                    stats['skipped_from_passed_sav'] += 1
-                else:
-                    stats['skipped_from_failed'] += 1
+                stats['skipped'] += 1
             elif details in all_existing_messages:
                 is_duplicate = True
                 stats['skipped'] += 1
-            
+
             if is_duplicate:
-                stats['skipped'] += 1
                 continue
             
             # ── Extract phone and plate ────────────────────────────────────────
