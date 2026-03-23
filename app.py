@@ -870,8 +870,11 @@ def lookup_customer_id_from_cache(identifier, lookup_type, id_lookup_sav):
     
     return ''
 
-def get_existing_refs(service, sheet_name='PASSED'):
-    """Get existing reference numbers AND messages for duplicate detection"""
+def get_existing_refs(service, sheet_name='PASSED', refs_only=False):
+    """
+    Get existing reference numbers AND messages for duplicate detection.
+    refs_only=True: skip loading message column entirely (saves memory for large sheets).
+    """
     try:
         sheet = service.spreadsheets()
         
@@ -881,8 +884,25 @@ def get_existing_refs(service, sheet_name='PASSED'):
             ref_column = 'H'
         
         target_sheet_id, actual_tab = _resolve_sheet(sheet_name)
-        print(f"📖 Reading {sheet_name} (tab:{actual_tab}): MESSAGE from column D, REFNUMBER from column {ref_column}")
+        mode = 'REFS ONLY' if refs_only else 'MESSAGE+REF'
+        print(f"📖 Reading {sheet_name} (tab:{actual_tab}): {mode}, REFNUMBER from column {ref_column}")
         
+        if refs_only:
+            # Only fetch the ref column — skip messages to save memory
+            result = service.spreadsheets().values().get(
+                spreadsheetId=target_sheet_id,
+                range=f'{actual_tab}!{ref_column}:{ref_column}'
+            ).execute()
+            refs = set()
+            messages = set()
+            for row in result.get('values', [])[1:]:
+                if row and row[0]:
+                    ref = str(row[0]).strip()
+                    if ref and ref.lower() != 'refnumber':
+                        refs.add(ref)
+            print(f"✅ {sheet_name}: Found {len(refs)} unique REFs (refs_only mode)")
+            return refs, messages
+
         result = service.spreadsheets().values().batchGet(
             spreadsheetId=target_sheet_id,
             ranges=[
@@ -911,7 +931,7 @@ def get_existing_refs(service, sheet_name='PASSED'):
                     message = str(row[0]).strip()
                     messages.add(message)
                     
-                    pattern = r'REF:\s*(\S+)'
+                    pattern = r'REF[:\s]\s*([A-Fa-f0-9]{10,})'
                     match = re.search(pattern, message, re.IGNORECASE)
                     if match:
                         ref_from_msg = match.group(1)
@@ -1627,8 +1647,11 @@ def process_nmb_transactions(filepath):
         # Check BOTH old sheet (PASSED_SHEET_ID) AND new NMB sheet to cover
         # all existing records — old data stays on old sheet.
 
-        print("Loading existing references from old PASSED sheet...")
-        existing_passed_refs, existing_passed_messages = get_existing_refs(service, 'PASSED')
+        # 🔥 For NMB: load PASSED refs only (not messages) — PASSED has 30k+ CRDB rows
+        # that would OOM the server. NMB has its own ref number column so message
+        # matching against PASSED is not needed.
+        print("Loading existing references from old PASSED sheet (refs only)...")
+        existing_passed_refs, existing_passed_messages = get_existing_refs(service, 'PASSED', refs_only=True)
 
         print("Loading existing references from new NMB PASSED sheet...")
         existing_nmb_passed_refs, existing_nmb_passed_messages = get_existing_refs(service, 'PASSED_NMB')
