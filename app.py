@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, session
 from werkzeug.utils import secure_filename
 import os
 import re
+import gc
 import pandas as pd
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -37,6 +38,70 @@ PIKIPIKI_SHEET_ID = '1XFwPITQgZmzZ8lbg8MKD9S4rwHyk2cDOKrcxO7SAjHA'
 
 # 🔥 NEW: Separate Google Sheet for iPhone customer records
 IPHONE_SHEET_ID   = '1Y2cOyObQvP502kvEbC-uGDP-3Sf5X9JKnDDYmR0BPRQ'
+
+# 🔥 NEW: Separate Google Sheet for NMB channel output
+NMB_SHEET_ID      = '1YchOygtfVyVNgz37sGX_KKud_Wr9KQsIkQKn_tEdbek'
+
+
+def _resolve_sheet(sheet_name):
+    """
+    Returns (target_sheet_id, actual_tab_name) for any logical sheet_name.
+    Logical names:
+      PASSED_NMB        → NMB_SHEET_ID,   tab PASSED
+      PASSED_SAV_NMB    → NMB_SHEET_ID,   tab PASSED_SAV_NMB
+      FAILED_NMB        → NMB_SHEET_ID,   tab FAILED_NMB
+      PASSED_SAV_NMB_OLD→ PASSED_SHEET_ID, tab PASSED_SAV_NMB  (old data)
+      FAILED_NMB_OLD    → PASSED_SHEET_ID, tab FAILED_NMB       (old data)
+      BANK_PASSED       → IPHONE_SHEET_ID, tab BANK_PASSED
+      BANK_FAILED       → IPHONE_SHEET_ID, tab BANK_FAILED
+      everything else   → PASSED_SHEET_ID, same tab name
+    """
+    if sheet_name in ('BANK_PASSED', 'BANK_FAILED'):
+        return IPHONE_SHEET_ID, sheet_name
+    elif sheet_name == 'PASSED_NMB':
+        return NMB_SHEET_ID, 'PASSED'
+    elif sheet_name in ('PASSED_SAV_NMB', 'FAILED_NMB'):
+        return NMB_SHEET_ID, sheet_name
+    elif sheet_name == 'PASSED_SAV_NMB_OLD':
+        return PASSED_SHEET_ID, 'PASSED_SAV_NMB'
+    elif sheet_name == 'FAILED_NMB_OLD':
+        return PASSED_SHEET_ID, 'FAILED_NMB'
+    else:
+        return PASSED_SHEET_ID, sheet_name
+
+
+def extract_nmb_datetime(description, fallback_date_str):
+    """
+    Extract date and time embedded inside an NMB description.
+    Pattern found in descriptions: DDMM HH MM SS
+    e.g. '2103 19 32 17'  →  day=21, month=03, time=19:32:17
+    Year is taken from fallback_date_str (e.g. '22  Mar 2026').
+    Returns: 'DD.MM.YYYY HH:MM:SS'  (same format CRDB uses in the sheet)
+    Returns None if pattern not found.
+    """
+    if not description:
+        return None
+
+    match = re.search(r'\b(\d{2})(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\b', str(description))
+    if not match:
+        return None
+
+    day     = match.group(1)
+    month   = match.group(2)
+    hours   = match.group(3)
+    minutes = match.group(4)
+    seconds = match.group(5)
+
+    # Extract year from fallback date string (e.g. '22  Mar 2026' or '2026-03-22')
+    year = None
+    if fallback_date_str:
+        year_match = re.search(r'\b(20\d{2})\b', str(fallback_date_str))
+        if year_match:
+            year = year_match.group(1)
+    if not year:
+        year = str(datetime.now().year)
+
+    return f"{day}.{month}.{year} {hours}:{minutes}:{seconds}"
 
 
 def extract_data_from_pdf(filepath):
@@ -810,27 +875,19 @@ def get_existing_refs(service, sheet_name='PASSED'):
     try:
         sheet = service.spreadsheets()
         
-        if sheet_name == 'FAILED':
+        if sheet_name in ('FAILED', 'FAILED_NMB', 'FAILED_NMB_OLD'):
             ref_column = 'I'
-        elif sheet_name in ['PASSED_SAV', 'PASSED_SAV_NMB']:
-            ref_column = 'H'
-        elif sheet_name == 'FAILED_NMB':
-            ref_column = 'I'
-        elif sheet_name == 'BANK_PASSED':
-            ref_column = 'H'
-        elif sheet_name == 'BANK_FAILED':
-            ref_column = 'H'
-        else:  # PASSED
+        else:
             ref_column = 'H'
         
-        print(f"📖 Reading {sheet_name}: MESSAGE from column D, REFNUMBER from column {ref_column}")
+        target_sheet_id, actual_tab = _resolve_sheet(sheet_name)
+        print(f"📖 Reading {sheet_name} (tab:{actual_tab}): MESSAGE from column D, REFNUMBER from column {ref_column}")
         
-        target_sheet_id = IPHONE_SHEET_ID if sheet_name in ('BANK_PASSED', 'BANK_FAILED') else PASSED_SHEET_ID
         result = service.spreadsheets().values().batchGet(
             spreadsheetId=target_sheet_id,
             ranges=[
-                f'{sheet_name}!D:D',
-                f'{sheet_name}!{ref_column}:{ref_column}'
+                f'{actual_tab}!D:D',
+                f'{actual_tab}!{ref_column}:{ref_column}'
             ]
         ).execute()
         
@@ -871,11 +928,11 @@ def get_existing_refs(service, sheet_name='PASSED'):
 def get_last_id(service, sheet_name):
     """Get the last ID from the sheet"""
     try:
-        target_sheet_id = IPHONE_SHEET_ID if sheet_name in ('BANK_PASSED', 'BANK_FAILED') else PASSED_SHEET_ID
+        target_sheet_id, actual_tab = _resolve_sheet(sheet_name)
         sheet = service.spreadsheets()
         result = sheet.values().get(
             spreadsheetId=target_sheet_id,
-            range=f'{sheet_name}!A:A'
+            range=f'{actual_tab}!A:A'
         ).execute()
         
         values = result.get('values', [])
@@ -900,10 +957,10 @@ def get_last_id(service, sheet_name):
 def get_last_row_number(service, sheet_name):
     """Get the actual last row number (works even with filters)"""
     try:
-        target_sheet_id = IPHONE_SHEET_ID if sheet_name in ('BANK_PASSED', 'BANK_FAILED') else PASSED_SHEET_ID
+        target_sheet_id, actual_tab = _resolve_sheet(sheet_name)
         result = service.spreadsheets().values().get(
             spreadsheetId=target_sheet_id,
-            range=f'{sheet_name}!A:A'
+            range=f'{actual_tab}!A:A'
         ).execute()
         
         values = result.get('values', [])
@@ -915,12 +972,12 @@ def get_last_row_number(service, sheet_name):
 def append_to_sheet(service, sheet_name, data):
     """Append data to Google Sheet - WORKS WITH FILTERS"""
     try:
-        target_sheet_id = IPHONE_SHEET_ID if sheet_name in ('BANK_PASSED', 'BANK_FAILED') else PASSED_SHEET_ID
+        target_sheet_id, actual_tab = _resolve_sheet(sheet_name)
         last_row = get_last_row_number(service, sheet_name)
         start_row = last_row + 1
-        range_name = f'{sheet_name}!A{start_row}'
+        range_name = f'{actual_tab}!A{start_row}'
         
-        print(f"Attempting to append to {sheet_name} starting at row {start_row}")
+        print(f"Attempting to append to {sheet_name} (tab:{actual_tab}) starting at row {start_row}")
         print(f"Adding {len(data)} rows")
         
         result = service.spreadsheets().values().update(
@@ -1057,11 +1114,21 @@ def process_crdb_transactions(filepath):
             credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) & 
                            ((df['Debit'].isna()) | (df['Debit'] == 0))].copy()
             
+            # 🔥 Free full df immediately
+            del df
+            gc.collect()
+            
             print(f"✅ Excel: Found {len(credit_df)} credit transactions")
         
         else:
             return jsonify({'error': 'Unsupported file format'}), 400
         
+        # Convert to list of dicts so pandas DataFrame can be freed early
+        transactions_list = credit_df.to_dict('records')
+        del credit_df
+        gc.collect()
+        print(f"✅ Converted {len(transactions_list)} transactions to list, freed DataFrame")
+
         # Initialize Google Sheets service
         service = get_google_service()
         
@@ -1115,6 +1182,15 @@ def process_crdb_transactions(filepath):
 
         print(f"Total unique refs in system (normal): {len(all_existing_refs)}")
         print(f"Total unique refs in system (iPhone): {len(all_iphone_existing_refs)}")
+
+        # 🔥 Free individual sets — merged sets are all we need
+        del existing_passed_refs, existing_passed_messages
+        del existing_passed_sav_refs, existing_passed_sav_messages
+        del existing_failed_refs, existing_failed_messages
+        del existing_bank_passed_refs, existing_bank_passed_messages
+        del existing_bank_failed_refs, existing_bank_failed_messages
+        del all_iphone_existing_messages
+        gc.collect()
         
         # ── Get last IDs ───────────────────────────────────────────────────────
         last_passed_id     = get_last_id(service, 'PASSED')
@@ -1136,7 +1212,7 @@ def process_crdb_transactions(filepath):
         bank_failed_data = []
         
         stats = {
-            'total': len(credit_df),
+            'total': len(transactions_list),
             'passed': 0,
             'passed_sav': 0,
             'failed': 0,
@@ -1151,7 +1227,7 @@ def process_crdb_transactions(filepath):
             'iphone_skipped': 0,
         }
         
-        for idx, row in credit_df.iterrows():
+        for row in transactions_list:
             posting_date  = str(row.get('Posting Date', ''))
             details       = str(row.get('Details', ''))
             credit_amount = row.get('Credit', 0)
@@ -1536,6 +1612,12 @@ def process_nmb_transactions(filepath):
             credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0)].copy()
         
         print(f"✅ NMB Excel: Found {len(credit_df)} credit transactions")
+
+        # Convert to list of dicts so pandas DataFrame can be freed early
+        transactions_list = credit_df.to_dict('records')
+        del credit_df
+        gc.collect()
+        print(f"✅ Converted {len(transactions_list)} NMB transactions to list, freed DataFrame")
         
         # Initialize Google Sheets service
         service = get_google_service()
@@ -1548,33 +1630,59 @@ def process_nmb_transactions(filepath):
         phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)
 
         # ── Duplicate-check refs across ALL relevant tabs ──────────────────────
-        # NMB transactions that already passed to PASSED must also be blocked
-        print("Loading existing references from PASSED sheet...")
+        # Check BOTH old sheet (PASSED_SHEET_ID) AND new NMB sheet to cover
+        # all existing records — old data stays on old sheet.
+
+        print("Loading existing references from old PASSED sheet...")
         existing_passed_refs, existing_passed_messages = get_existing_refs(service, 'PASSED')
 
-        print("Loading existing references from PASSED_SAV_NMB sheet...")
+        print("Loading existing references from new NMB PASSED sheet...")
+        existing_nmb_passed_refs, existing_nmb_passed_messages = get_existing_refs(service, 'PASSED_NMB')
+
+        print("Loading existing references from old PASSED_SAV_NMB sheet...")
+        existing_passed_nmb_old_refs, existing_passed_nmb_old_messages = get_existing_refs(service, 'PASSED_SAV_NMB_OLD')
+
+        print("Loading existing references from new PASSED_SAV_NMB sheet...")
         existing_passed_nmb_refs, existing_passed_nmb_messages = get_existing_refs(service, 'PASSED_SAV_NMB')
 
-        print("Loading existing references from FAILED_NMB sheet...")
+        print("Loading existing references from old FAILED_NMB sheet...")
+        existing_failed_nmb_old_refs, existing_failed_nmb_old_messages = get_existing_refs(service, 'FAILED_NMB_OLD')
+
+        print("Loading existing references from new FAILED_NMB sheet...")
         existing_failed_nmb_refs, existing_failed_nmb_messages = get_existing_refs(service, 'FAILED_NMB')
 
         all_existing_refs = (
             existing_passed_refs
+            .union(existing_nmb_passed_refs)
+            .union(existing_passed_nmb_old_refs)
             .union(existing_passed_nmb_refs)
+            .union(existing_failed_nmb_old_refs)
             .union(existing_failed_nmb_refs)
         )
         all_existing_messages = (
             existing_passed_messages
+            .union(existing_nmb_passed_messages)
+            .union(existing_passed_nmb_old_messages)
             .union(existing_passed_nmb_messages)
+            .union(existing_failed_nmb_old_messages)
             .union(existing_failed_nmb_messages)
         )
-        print(f"Total unique NMB refs in system: {len(all_existing_refs)}")
+        print(f"Total unique NMB refs in system (old+new): {len(all_existing_refs)}")
 
-        # ── Get last IDs ───────────────────────────────────────────────────────
-        # PASSED is shared with CRDB — continue from where it left off
-        last_passed_id     = get_last_id(service, 'PASSED')
-        last_passed_nmb_id = get_last_id(service, 'PASSED_SAV_NMB')
-        last_failed_nmb_id = get_last_id(service, 'FAILED_NMB')
+        # 🔥 Free individual sets
+        del existing_passed_refs, existing_passed_messages
+        del existing_nmb_passed_refs, existing_nmb_passed_messages
+        del existing_passed_nmb_old_refs, existing_passed_nmb_old_messages
+        del existing_passed_nmb_refs, existing_passed_nmb_messages
+        del existing_failed_nmb_old_refs, existing_failed_nmb_old_messages
+        del existing_failed_nmb_refs, existing_failed_nmb_messages
+        gc.collect()
+
+        # ── Get last IDs — take max of old + new sheets ────────────────────────
+        last_passed_id     = max(get_last_id(service, 'PASSED'), get_last_id(service, 'PASSED_NMB'))
+        last_passed_nmb_id = max(get_last_id(service, 'PASSED_SAV_NMB_OLD'), get_last_id(service, 'PASSED_SAV_NMB'))
+        last_failed_nmb_id = max(get_last_id(service, 'FAILED_NMB_OLD'), get_last_id(service, 'FAILED_NMB'))
+        print(f"Continuing from IDs — PASSED:{last_passed_id}, PASSED_SAV_NMB:{last_passed_nmb_id}, FAILED_NMB:{last_failed_nmb_id}")
 
         passed_data      = []          # → shared PASSED tab
         passed_nmb_data  = []          # → PASSED_SAV_NMB
@@ -1582,7 +1690,7 @@ def process_nmb_transactions(filepath):
         needs_review_data = []         # → review modal
 
         stats = {
-            'total': len(credit_df),
+            'total': len(transactions_list),
             'passed': 0,           # went to PASSED (pikipiki records match)
             'passed_sav_nmb': 0,   # went to PASSED_SAV_NMB (records2 match)
             'failed_nmb': 0,
@@ -1590,10 +1698,15 @@ def process_nmb_transactions(filepath):
             'skipped': 0
         }
 
-        for idx, row in credit_df.iterrows():
-            date        = str(row.get('Date', ''))
+        for row in transactions_list:
+            date_col    = str(row.get('Date', ''))
             description = str(row.get('Description', ''))
             credit_amount = row.get('Credit', 0)
+
+            # 🔥 Extract date+time from within the description message.
+            # Fallback to the Date column (date only, no time) if not found.
+            extracted_dt = extract_nmb_datetime(description, date_col)
+            date = extracted_dt if extracted_dt else date_col
 
             # NMB has a dedicated Reference Number column
             ref_number = (
@@ -1798,7 +1911,8 @@ def process_nmb_transactions(filepath):
                         'passed_nmb': last_passed_nmb_id,
                         'failed_nmb': last_failed_nmb_id
                     },
-                    'bank': 'NMB'
+                    'bank': 'NMB',
+                    'use_passed_nmb': True  # 🔥 flag so confirm-reviews writes to NMB sheet
                 }, f)
 
             session['review_file'] = review_file
@@ -1810,9 +1924,9 @@ def process_nmb_transactions(filepath):
                 'message': f"Found {len(needs_review_data)} NMB records that need your review before processing"
             })
 
-        # ── No reviews needed — write directly ────────────────────────────────
+        # ── No reviews needed — write directly to NEW NMB sheet ─────────────
         if passed_data:
-            append_to_sheet(service, 'PASSED', passed_data)
+            append_to_sheet(service, 'PASSED_NMB', passed_data)
 
         if passed_nmb_data:
             append_to_sheet(service, 'PASSED_SAV_NMB', passed_nmb_data)
@@ -1926,8 +2040,9 @@ def confirm_reviews():
                     failed_nmb_data.append(row)
                     stats['failed_nmb'] = stats.get('failed_nmb', 0) + 1
 
+            passed_tab = 'PASSED_NMB' if review_data.get('use_passed_nmb') else 'PASSED'
             if passed_data:
-                append_to_sheet(service, 'PASSED', passed_data)
+                append_to_sheet(service, passed_tab, passed_data)
             if passed_nmb_data:
                 append_to_sheet(service, 'PASSED_SAV_NMB', passed_nmb_data)
             if failed_nmb_data:
