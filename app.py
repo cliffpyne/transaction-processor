@@ -1209,7 +1209,7 @@ def process_crdb_transactions(filepath):
         del existing_failed_refs, existing_failed_messages
         del existing_bank_passed_refs, existing_bank_passed_messages
         del existing_bank_failed_refs, existing_bank_failed_messages
-        del all_iphone_existing_messages
+        # all_iphone_existing_messages kept — still needed in the loop (small, ~few hundred entries)
         gc.collect()
         
         # ── Get last IDs ───────────────────────────────────────────────────────
