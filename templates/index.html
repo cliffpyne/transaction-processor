@@ -263,7 +263,7 @@ main{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:48px 24p
 <canvas class="particles" id="pc"></canvas>
 <nav>
   <div style="display:flex;align-items:center;gap:24px">
-    <div class="brand"><div class="brand-mark">PP</div>PikiPiki<span class="dim">&nbsp;/&nbsp;processor</span></div>
+    <div class="brand"><div class="brand-mark">PP</div>Boda<span class="dim">&nbsp;/&nbsp;iphone</span></div>
     <div class="nav-pill"><div class="live-dot"></div>All systems operational</div>
   </div>
   <div class="nav-time" id="nt">--:--:--</div>
@@ -272,7 +272,7 @@ main{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:48px 24p
 
 <!-- HERO -->
 <div class="hero">
-  <div class="hero-badge">Elegansky Statement Processor v2.4</div>
+  <div class="hero-badge">Elegansky statements Processor Platform v2.4</div>
   <h1>Smart Bank Statement<br><span class="accent">Transaction Processor</span></h1>
   <p class="hero-sub">Upload CRDB or NMB bank statements and watch transactions get automatically matched, routed, and written to Google Sheets in real time — with full duplicate detection and iPhone channel support.</p>
   <div class="hero-pills">
@@ -542,39 +542,54 @@ async function doProc(bank){
 
     if(res.success){
       const s=res.stats;
-      const passed=(s.passed||0);const sav=(s.passed_sav||s.passed_sav_nmb||0);
-      const failed=(s.failed||s.failed_nmb||0);const iph=(s.iphone_passed||0);
-      const skip=(s.skipped||0);
-      const tab=bank==='CRDB'?'PASSED':'PASSED_NMB';
-      initSheet(tab);
-      stopPts();startPts('rgba(59,130,246,1)');
+      const passed =(s.passed||0);
+      const sav    =(s.passed_sav||s.passed_sav_nmb||0);
+      const failed =(s.failed||s.failed_nmb||0);
+      const iph    =(s.iphone_passed||0);
+      const iphFail=(s.iphone_failed||0);
+      const skip   =(s.skipped||0);
+      const tab    = bank==='CRDB'?'PASSED':'PASSED_NMB';
 
-      const names=['JOHN MBEKI','SARAH KIMANI','DAVID OSEI','FATMA SALUM','ALEX MWANGI','GRACE NJERI','HASSAN ALI','LUCY WANJIRU','PETER ODHIAMBO','AMINA HASSAN'];
-      const amts=[12500,25000,15000,50000,30000,8500,17500,22000,45000,11000];
-      let sim=0;
-      const total=Math.min(passed+sav+iph+failed,22);
+      stopPts(); startPts('rgba(59,130,246,1)');
 
-      async function wRows(){
-        if(sim>=total)return;
-        const type=sim<passed?'pass':sim<passed+sav?'sav':sim<passed+sav+iph?'iph':'fail';
-        const n=names[sim%names.length],a=amts[sim%amts.length];
-        addRow(type,n,a);
-        addShRow([sim+1,new Date().toLocaleDateString(),bank,`Transaction ${sim+1}`,a,n,'REF'+Math.random().toString(16).slice(2,10).toUpperCase(),type.toUpperCase()],type);
-        sim++;await wait(110);wRows();
-      }
-      wRows();
-      for(let i=0;i<Math.min(skip,4);i++){await wait(80);addRow('skip','Duplicate — skipped','')}
-      await wait(Math.min(total*110+500,3000));
+      // Show real summary rows from actual API stats — no fake names or amounts
+      const list = document.getElementById('rl');
+      const emp  = document.getElementById('re');
+      if(emp) emp.remove();
 
-      nDone(4);lFlow(4);await wait(420);lDone(4);
-      nAct(5);nDone(5);
-      stopPts();startPts('rgba(16,185,129,1)');setTimeout(stopPts,1800);
-      setPg(100,'Complete ✓');
-      setTimeout(()=>document.getElementById('pgwrap').style.display='none',900);
-      document.getElementById('pb').textContent='DONE';document.getElementById('pb').className='pip-badge done';
-      document.getElementById('stn').textContent=`✓ Written to ${tab}`;
-      showSt(res.message,'ok');showStats(res.stats,bank);
+      const entries = [
+        {type:'pass', count:passed,   label:'PASSED',           sheet: bank==='CRDB'?'PASSED':'PASSED_NMB'},
+        {type:'sav',  count:sav,      label:'PASSED_SAV',       sheet: bank==='CRDB'?'PASSED_SAV':'PASSED_SAV_NMB'},
+        {type:'iph',  count:iph,      label:'BANK_PASSED',      sheet: 'BANK_PASSED'},
+        {type:'fail', count:iphFail,  label:'BANK_FAILED',      sheet: 'BANK_FAILED'},
+        {type:'fail', count:failed,   label:'FAILED',           sheet: bank==='CRDB'?'FAILED':'FAILED_NMB'},
+        {type:'skip', count:skip,     label:'SKIPPED',          sheet: 'Duplicates — not written'},
+      ];
 
+      entries.forEach(e => {
+        if(e.count <= 0) return;
+        const d = document.createElement('div');
+        d.className = `ritem ${e.type}`;
+        d.innerHTML = `<span class="rbadge">${e.label}</span><span class="rname">${e.count.toLocaleString()} transaction${e.count===1?'':'s'} written to ${e.sheet}</span><span class="ramt"></span>`;
+        list.appendChild(d);
+      });
+
+      // Sheet panel — real count only
+      document.getElementById('sp').style.display = 'block';
+      document.getElementById('stn').textContent  = `Writing to ${tab}...`;
+      document.getElementById('src').textContent  = `${(passed+sav+iph).toLocaleString()} rows written`;
+
+      await wait(500);
+      nDone(4); lFlow(4); await wait(420); lDone(4);
+      nAct(5); nDone(5);
+      stopPts(); startPts('rgba(16,185,129,1)'); setTimeout(stopPts, 1800);
+      setPg(100, 'Complete ✓');
+      setTimeout(()=>document.getElementById('pgwrap').style.display='none', 900);
+      document.getElementById('pb').textContent  = 'DONE';
+      document.getElementById('pb').className    = 'pip-badge done';
+      document.getElementById('stn').textContent = `✓ Written to ${tab}`;
+      showSt(res.message, 'ok');
+      showStats(res.stats, bank);
     } else if(res.needs_review){
       nDone(4);lFlow(4);lDone(4);nAct(5);nDone(5);
       stopPts();setPg(100,'Review needed');
