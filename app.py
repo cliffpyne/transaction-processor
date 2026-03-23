@@ -878,8 +878,10 @@ def get_existing_refs(service, sheet_name='PASSED', refs_only=False):
     try:
         sheet = service.spreadsheets()
         
-        if sheet_name in ('FAILED', 'FAILED_NMB', 'FAILED_NMB_OLD'):
-            ref_column = 'I'
+        if sheet_name == 'FAILED':
+            ref_column = 'I'  # CRDB FAILED has 9 cols, ref in col I
+        elif sheet_name in ('FAILED_NMB', 'FAILED_NMB_OLD'):
+            ref_column = 'H'  # NMB FAILED has 8 cols, ref in col H
         else:
             ref_column = 'H'
         
