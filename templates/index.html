@@ -1,797 +1,655 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bank Transaction Processor</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PikiPiki · Transaction Processor</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#060912;--bg2:#0c1220;--bg3:#111827;--bg4:#1a2438;
+  --border:#1e2d47;--border2:#2d4060;
+  --text:#f1f5f9;--text2:#94a3b8;--text3:#4b6080;
+  --green:#10b981;--green2:#059669;--glow:rgba(16,185,129,.15);
+  --blue:#3b82f6;--blue2:#1d4ed8;--red:#ef4444;
+  --yellow:#f59e0b;--purple:#8b5cf6;--cyan:#06b6d4;
+  --mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+.orb{position:fixed;border-radius:50%;filter:blur(120px);pointer-events:none;z-index:0}
+.orb1{width:700px;height:700px;background:rgba(16,185,129,.035);top:-200px;left:-200px}
+.orb2{width:600px;height:600px;background:rgba(59,130,246,.035);bottom:-150px;right:-150px}
+canvas.particles{position:fixed;inset:0;pointer-events:none;z-index:100}
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
+/* NAV */
+nav{position:sticky;top:0;z-index:200;height:58px;border-bottom:1px solid var(--border);
+  background:rgba(6,9,18,.9);backdrop-filter:blur(20px);
+  display:flex;align-items:center;padding:0 32px;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:.9rem;letter-spacing:-.01em}
+.brand-mark{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--green),#0d7f5c);
+  display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:800;color:#fff;
+  font-family:var(--mono);box-shadow:0 4px 14px rgba(16,185,129,.3)}
+.brand .dim{color:var(--text3)}
+.nav-pill{font-size:.7rem;font-family:var(--mono);padding:3px 10px;border-radius:20px;
+  border:1px solid var(--border);color:var(--text3);display:flex;align-items:center;gap:6px}
+.live-dot{width:5px;height:5px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+.nav-time{font-family:var(--mono);font-size:.7rem;color:var(--text3);padding:4px 10px;
+  background:var(--bg3);border:1px solid var(--border);border-radius:6px}
 
-        .container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 1100px;
-            width: 100%;
-            padding: 40px;
-        }
+/* MAIN */
+main{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:48px 24px 100px}
 
-        h1 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 2em;
-            text-align: center;
-        }
+/* HERO */
+.hero{margin-bottom:52px}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;font-size:.68rem;font-family:var(--mono);
+  color:var(--green);letter-spacing:.12em;text-transform:uppercase;
+  background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);
+  padding:5px 12px;border-radius:20px;margin-bottom:20px}
+.hero-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.hero h1{font-size:clamp(2rem,4.5vw,3.2rem);font-weight:800;letter-spacing:-.03em;line-height:1.1;margin-bottom:16px}
+.hero h1 .accent{background:linear-gradient(135deg,var(--green),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:.97rem;color:var(--text2);max-width:520px;line-height:1.72;margin-bottom:28px}
+.hero-pills{display:flex;gap:10px;flex-wrap:wrap}
+.hero-pill{display:flex;align-items:center;gap:7px;font-size:.75rem;padding:6px 14px;
+  background:var(--bg2);border:1px solid var(--border);border-radius:20px;color:var(--text2)}
+.hero-pill span{font-size:.8rem}
 
-        .subtitle {
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 1.1em;
-            text-align: center;
-        }
+/* SECTION TITLE */
+.sec{font-size:.67rem;font-family:var(--mono);color:var(--text3);letter-spacing:.14em;text-transform:uppercase;
+  margin-bottom:18px;display:flex;align-items:center;gap:10px}
+.sec::after{content:'';flex:1;height:1px;background:var(--border)}
 
-        /* 🔥 NEW: Two-column layout for bank selection */
-        .upload-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
-            margin-bottom: 30px;
-        }
+/* UPLOAD GRID */
+.up-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px}
 
-        .bank-section {
-            border: 2px solid #e0e0e0;
-            border-radius: 15px;
-            padding: 20px;
-            transition: all 0.3s;
-        }
+.bcard{background:var(--bg2);border:1px solid var(--border);border-radius:16px;overflow:hidden;transition:border-color .25s,box-shadow .25s}
+.bcard:hover{border-color:var(--border2)}
+.bcard.on{border-color:var(--green);box-shadow:0 0 0 1px var(--green),0 0 50px var(--glow)}
 
-        .bank-section:hover {
-            border-color: #667eea;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
-        }
+.bcard-head{padding:18px 22px;border-bottom:1px solid var(--border);
+  background:linear-gradient(135deg,var(--bg3),var(--bg2));
+  display:flex;align-items:center;justify-content:space-between}
+.bank-id{display:flex;align-items:center;gap:12px}
+.bicon{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:.85rem;font-family:var(--mono)}
+.bicon.cr{background:rgba(16,185,129,.12);color:var(--green);border:1px solid rgba(16,185,129,.25)}
+.bicon.nm{background:rgba(59,130,246,.12);color:var(--blue);border:1px solid rgba(59,130,246,.25)}
+.bname strong{font-size:.95rem;font-weight:600}
+.bname small{display:block;font-size:.68rem;color:var(--text3);margin-top:2px;font-family:var(--mono)}
+.ftag{font-size:.62rem;font-family:var(--mono);padding:3px 8px;border-radius:5px;border:1px solid;letter-spacing:.06em}
+.ftag.m{color:var(--purple);border-color:rgba(139,92,246,.3);background:rgba(139,92,246,.07)}
+.ftag.x{color:var(--yellow);border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.07)}
 
-        .bank-section.active {
-            border-color: #667eea;
-            background: #f8f9ff;
-        }
+.bcard-body{padding:20px 22px}
 
-        .bank-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #e0e0e0;
-        }
+.dropzone{border:1.5px dashed var(--border2);border-radius:12px;min-height:148px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:10px;cursor:pointer;transition:all .2s;padding:24px;text-align:center;position:relative}
+.dropzone:hover,.dropzone.over{border-color:var(--green);background:rgba(16,185,129,.04)}
+.dropzone.filled{border-style:solid;border-color:var(--green);background:rgba(16,185,129,.05)}
+.dropzone input{display:none}
+.dicon{width:46px;height:46px;border-radius:12px;background:var(--bg3);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;font-size:1.2rem;transition:all .2s}
+.dropzone:hover .dicon{border-color:var(--green);background:rgba(16,185,129,.08)}
+.dtitle{font-size:.84rem;font-weight:500;color:var(--text2)}
+.dhint{font-size:.7rem;color:var(--text3);font-family:var(--mono)}
 
-        .bank-logo {
-            font-size: 2em;
-        }
+.fchip{display:flex;align-items:center;gap:12px;background:var(--bg3);border:1px solid var(--border2);
+  border-radius:10px;padding:12px 16px;width:100%;text-align:left}
+.fchip-icon{font-size:1.6rem}
+.fchip-name{font-size:.82rem;font-weight:600;color:var(--green);word-break:break-all}
+.fchip-meta{font-size:.67rem;color:var(--text3);font-family:var(--mono);margin-top:2px}
+.fchip-chg{margin-left:auto;font-size:.67rem;color:var(--text3);padding:3px 8px;border-radius:5px;
+  background:var(--bg4);border:1px solid var(--border);white-space:nowrap}
 
-        .bank-title {
-            font-size: 1.3em;
-            font-weight: bold;
-            color: #333;
-        }
+.pbtn{width:100%;margin-top:14px;padding:13px;border:none;border-radius:10px;
+  font-family:var(--sans);font-weight:600;font-size:.875rem;cursor:pointer;transition:all .2s;
+  display:flex;align-items:center;justify-content:center;gap:8px}
+.pbtn.cr{background:linear-gradient(135deg,#059669,#047857);color:#fff;box-shadow:0 4px 20px rgba(16,185,129,.25)}
+.pbtn.nm{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;box-shadow:0 4px 20px rgba(59,130,246,.25)}
+.pbtn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.08)}
+.pbtn:disabled{opacity:.3;cursor:not-allowed;transform:none;filter:none}
 
-        .upload-area {
-            border: 3px dashed #667eea;
-            border-radius: 15px;
-            padding: 30px;
-            text-align: center;
-            transition: all 0.3s;
-            cursor: pointer;
-            min-height: 200px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
+/* PROGRESS */
+#pgwrap{display:none;margin-bottom:24px}
+.pgi{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.7rem;color:var(--text3);margin-bottom:8px}
+.pgtrack{height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
+.pgfill{height:100%;width:0%;background:linear-gradient(90deg,var(--green),var(--cyan));border-radius:2px;transition:width .5s}
 
-        .upload-area:hover {
-            border-color: #764ba2;
-            background: #f8f9ff;
-        }
+/* STATUS */
+#stbar{display:none;border-radius:12px;padding:14px 20px;margin-bottom:24px;border:1px solid;
+  align-items:flex-start;gap:12px;font-size:.875rem}
+#stbar.ok{background:rgba(16,185,129,.07);border-color:rgba(16,185,129,.2);color:var(--green)}
+#stbar.er{background:rgba(239,68,68,.07);border-color:rgba(239,68,68,.2);color:var(--red)}
+#stbar.inf{background:rgba(6,182,212,.07);border-color:rgba(6,182,212,.2);color:var(--cyan)}
 
-        .upload-area.dragover {
-            border-color: #764ba2;
-            background: #f0f2ff;
-        }
+/* PIPELINE */
+#pipeline{display:none;margin-bottom:28px;background:var(--bg2);border:1px solid var(--border);border-radius:18px;overflow:hidden}
+.pip-head{padding:14px 24px;background:var(--bg3);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between}
+.pip-head-title{font-size:.82rem;font-weight:600;display:flex;align-items:center;gap:8px}
+.pip-badge{font-family:var(--mono);font-size:.65rem;padding:3px 10px;border-radius:12px;transition:all .3s}
+.pip-badge.run{background:rgba(16,185,129,.12);color:var(--green);border:1px solid rgba(16,185,129,.25)}
+.pip-badge.done{background:rgba(16,185,129,.12);color:var(--green);border:1px solid rgba(16,185,129,.25)}
+.pip-badge.err{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)}
+.pip-body{padding:28px 24px}
 
-        .file-input {
-            display: none;
-        }
+/* NODE TRACK */
+.node-track{display:flex;align-items:center;margin-bottom:28px;overflow-x:auto;padding-bottom:6px}
+.pnode{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:10px;width:110px;
+  opacity:.25;transition:opacity .4s}
+.pnode.act{opacity:1}
+.pnode.done{opacity:1}
+.nicon{width:52px;height:52px;border-radius:14px;background:var(--bg3);border:2px solid var(--border);
+  display:flex;align-items:center;justify-content:center;font-size:1.4rem;position:relative;transition:all .4s}
+.pnode.act .nicon{border-color:var(--green);box-shadow:0 0 20px rgba(16,185,129,.35);animation:npulse .9s ease infinite alternate}
+.pnode.done .nicon{border-color:var(--green);background:rgba(16,185,129,.07)}
+@keyframes npulse{from{box-shadow:0 0 10px rgba(16,185,129,.25)}to{box-shadow:0 0 28px rgba(16,185,129,.55)}}
+.ncheck{position:absolute;top:-7px;right:-7px;width:19px;height:19px;border-radius:50%;
+  background:var(--green);display:none;align-items:center;justify-content:center;
+  font-size:.6rem;color:#fff;font-weight:800;border:2px solid var(--bg2)}
+.pnode.done .ncheck{display:flex}
+.nlabel{font-size:.67rem;font-weight:500;text-align:center;color:var(--text2);font-family:var(--mono);line-height:1.4}
+.pnode.act .nlabel{color:var(--green)}
 
-        .upload-icon {
-            font-size: 2.5em;
-            margin-bottom: 15px;
-        }
+.pline{flex:1;height:2px;background:var(--border);position:relative;overflow:hidden;min-width:28px;margin-bottom:40px}
+.pline-fill{position:absolute;top:0;left:-100%;height:100%;width:100%;background:linear-gradient(90deg,transparent,var(--green),var(--cyan))}
+.pline.flow .pline-fill{animation:flowline 1s linear infinite}
+.pline.done .pline-fill{left:0;background:var(--green);animation:none}
+@keyframes flowline{from{left:-100%}to{left:100%}}
 
-        .upload-text {
-            font-size: 1em;
-            color: #666;
-            margin-bottom: 10px;
-        }
+/* LIVE ROWS */
+.rows-panel{background:var(--bg3);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.rows-head{padding:10px 16px;background:var(--bg4);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:.68rem;color:var(--text3)}
+.rows-live{display:flex;align-items:center;gap:6px;color:var(--green)}
+.rdot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1s infinite}
+.rows-list{max-height:210px;overflow-y:auto;padding:6px 0}
+.rows-list::-webkit-scrollbar{width:3px}
+.rows-list::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.ritem{display:flex;align-items:center;gap:10px;padding:6px 16px;font-family:var(--mono);font-size:.7rem;
+  color:var(--text2);animation:slidein .3s ease;border-left:2px solid transparent}
+@keyframes slidein{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+.ritem.pass{border-left-color:var(--green)}
+.ritem.fail{border-left-color:var(--red)}
+.ritem.skip{border-left-color:var(--text3);opacity:.45}
+.ritem.iph {border-left-color:var(--cyan)}
+.ritem.sav {border-left-color:var(--blue)}
+.rbadge{font-size:.6rem;padding:1px 7px;border-radius:4px;font-weight:600;flex-shrink:0;width:64px;text-align:center}
+.ritem.pass .rbadge{background:rgba(16,185,129,.12);color:var(--green)}
+.ritem.fail .rbadge{background:rgba(239,68,68,.12);color:var(--red)}
+.ritem.skip .rbadge{background:var(--bg4);color:var(--text3)}
+.ritem.iph  .rbadge{background:rgba(6,182,212,.12);color:var(--cyan)}
+.ritem.sav  .rbadge{background:rgba(59,130,246,.12);color:var(--blue)}
+.rname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ramt{color:var(--text3);flex-shrink:0}
+.rows-empty{text-align:center;padding:24px;font-family:var(--mono);font-size:.72rem;color:var(--text3)}
 
-        .upload-hint {
-            color: #999;
-            font-size: 0.85em;
-        }
+/* SHEET PANEL */
+.sheet-panel{background:var(--bg3);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:14px}
+.sp-head{padding:10px 16px;background:var(--bg4);border-bottom:1px solid var(--border);
+  font-family:var(--mono);font-size:.68rem;display:flex;align-items:center;gap:8px;color:var(--text3)}
+.sp-count{margin-left:auto;color:var(--green)}
+.sgrid{padding:10px 14px}
+.srow{display:grid;grid-template-columns:36px 88px 55px 1fr 78px 80px;gap:6px;
+  padding:4px 6px;border-radius:5px;font-family:var(--mono);font-size:.64rem;
+  color:var(--text3);margin-bottom:2px;animation:rowin .25s ease both}
+@keyframes rowin{from{opacity:0;background:rgba(16,185,129,.18)}to{opacity:1;background:transparent}}
+.srow.shdr{font-weight:600;background:var(--bg4) !important;border-radius:5px;animation:none;margin-bottom:6px}
+.scell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 4px}
+.scell.g{color:var(--green)}.scell.b{color:var(--blue)}.scell.r{color:var(--red)}.scell.y{color:var(--yellow)}
 
-        .btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 15px 40px;
-            font-size: 1.1em;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.3s;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-            width: 100%;
-            margin-top: 20px;
-        }
+/* STATS */
+#sgrid{display:none;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:14px;margin-bottom:28px}
+.sc{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;
+  position:relative;overflow:hidden;animation:fup .4s ease both}
+@keyframes fup{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.sc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.sc.t::before{background:linear-gradient(90deg,var(--purple),var(--blue))}
+.sc.p::before{background:var(--green)}.sc.sv::before{background:var(--blue)}
+.sc.f::before{background:var(--red)}.sc.ip::before{background:var(--cyan)}.sc.sk::before{background:var(--yellow)}
+.snum{font-size:2rem;font-weight:800;font-family:var(--mono);letter-spacing:-.04em;line-height:1;margin-bottom:6px}
+.sc.t .snum{color:var(--purple)}.sc.p .snum{color:var(--green)}.sc.sv .snum{color:var(--blue)}
+.sc.f .snum{color:var(--red)}.sc.ip .snum{color:var(--cyan)}.sc.sk .snum{color:var(--yellow)}
+.slbl{font-size:.7rem;color:var(--text3);font-family:var(--mono)}
 
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-        }
-
-        .btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            box-shadow: none;
-            transform: none;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 30px;
-            background: #f0f0f0;
-            border-radius: 15px;
-            overflow: hidden;
-            margin: 20px 0;
-            display: none;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            width: 0%;
-            transition: width 0.3s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-        }
-
-        .status {
-            padding: 15px;
-            border-radius: 10px;
-            margin-top: 20px;
-            display: none;
-        }
-
-        .status.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .status.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        .status.info {
-            background: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-        }
-
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-top: 20px;
-        }
-
-        .stat-card {
-            background: #f8f9ff;
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-        }
-
-        .stat-number {
-            font-size: 2em;
-            font-weight: bold;
-            color: #667eea;
-        }
-
-        .stat-label {
-            color: #666;
-            margin-top: 5px;
-            font-size: 0.9em;
-        }
-
-        /* Review Modal Styles */
-        .review-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            z-index: 1000;
-            overflow-y: auto;
-        }
-
-        .review-content {
-            background: white;
-            max-width: 1000px;
-            margin: 50px auto;
-            padding: 40px;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-        }
-
-        .review-header {
-            margin-bottom: 30px;
-        }
-
-        .review-header h2 {
-            color: #333;
-            margin-bottom: 10px;
-        }
-
-        .review-item {
-            background: #f8f9ff;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 15px;
-            border-left: 4px solid #667eea;
-        }
-
-        .review-item.accepted {
-            background: #d4edda;
-            border-left-color: #28a745;
-        }
-
-        .review-item.rejected {
-            background: #f8d7da;
-            border-left-color: #dc3545;
-        }
-
-        .review-details {
-            display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 10px;
-            margin-bottom: 15px;
-            font-size: 0.9em;
-        }
-
-        .review-label {
-            font-weight: bold;
-            color: #666;
-        }
-
-        .review-value {
-            color: #333;
-        }
-
-        .suggestion-box {
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 10px 0;
-            border: 2px solid #ffc107;
-        }
-
-        .suggestion-arrow {
-            font-size: 1.5em;
-            color: #667eea;
-            margin: 0 10px;
-        }
-
-        .review-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-        }
-
-        .btn-accept {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            flex: 1;
-        }
-
-        .btn-reject {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            flex: 1;
-        }
-
-        .btn-accept:hover {
-            background: #218838;
-        }
-
-        .btn-reject:hover {
-            background: #c82333;
-        }
-
-        .review-footer {
-            margin-top: 30px;
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-        }
-
-        .confidence-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.85em;
-            font-weight: bold;
-        }
-
-        .confidence-high {
-            background: #28a745;
-            color: white;
-        }
-
-        .confidence-medium {
-            background: #ffc107;
-            color: #333;
-        }
-
-        .confidence-low {
-            background: #dc3545;
-            color: white;
-        }
-
-        @media (max-width: 768px) {
-            .upload-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+/* MODAL */
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);backdrop-filter:blur(6px);z-index:300;overflow-y:auto;padding:40px 20px}
+.modal{background:var(--bg2);border:1px solid var(--border2);border-radius:20px;max-width:920px;margin:0 auto;overflow:hidden;
+  box-shadow:0 60px 120px rgba(0,0,0,.7);animation:min .3s cubic-bezier(.34,1.56,.64,1) both}
+@keyframes min{from{opacity:0;transform:translateY(20px) scale(.97)}to{opacity:1;transform:none}}
+.mhead{padding:24px 32px;background:var(--bg3);border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between}
+.mhead h2{font-size:1.1rem;font-weight:700}.mhead p{font-size:.8rem;color:var(--text2);margin-top:5px}
+.mx{width:32px;height:32px;border-radius:8px;background:var(--bg4);border:1px solid var(--border);color:var(--text2);
+  cursor:pointer;font-size:.9rem;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0;margin-left:16px}
+.mx:hover{border-color:var(--red);color:var(--red)}
+.mbody{padding:24px 32px;max-height:60vh;overflow-y:auto}
+.mbody::-webkit-scrollbar{width:4px}.mbody::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.ri{background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:14px;transition:all .2s}
+.ri.acc{border-color:var(--green);background:rgba(16,185,129,.04)}
+.ri.rej{border-color:var(--red);background:rgba(239,68,68,.04)}
+.rmeta{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.rl{font-size:.62rem;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px}
+.rv{font-size:.82rem;font-weight:500}
+.sbar{background:var(--bg4);border:1px solid var(--border2);border-radius:8px;padding:12px 16px;margin-bottom:12px;
+  font-family:var(--mono);font-size:.7rem;display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:var(--text2)}
+.chip{padding:2px 8px;border-radius:5px;border:1px solid}
+.chip.p{color:var(--yellow);border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.06)}
+.chip.n{color:var(--green);border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.06)}
+.chip.s{color:var(--purple);border-color:rgba(139,92,246,.3);background:rgba(139,92,246,.06)}
+.conf{display:inline-flex;align-items:center;padding:2px 8px;border-radius:5px;font-size:.62rem;font-family:var(--mono);font-weight:600;border:1px solid}
+.conf.high{color:var(--green);border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.08)}
+.conf.medium{color:var(--yellow);border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.08)}
+.conf.low{color:var(--red);border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.08)}
+.rbtns{display:flex;gap:10px}
+.ba,.br{flex:1;padding:10px;border:none;border-radius:8px;font-weight:600;font-size:.8rem;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px}
+.ba{background:rgba(16,185,129,.1);color:var(--green);border:1px solid rgba(16,185,129,.2)}.ba:hover{background:rgba(16,185,129,.18)}
+.br{background:rgba(239,68,68,.1);color:var(--red);border:1px solid rgba(239,68,68,.2)}.br:hover{background:rgba(239,68,68,.18)}
+.mfoot{padding:20px 32px;background:var(--bg3);border-top:1px solid var(--border);display:flex;gap:12px}
+.bsub{flex:1;padding:13px;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;
+  border-radius:10px;font-weight:700;font-size:.9rem;cursor:pointer;transition:all .2s}
+.bsub:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.bcan{padding:13px 24px;background:var(--bg4);color:var(--text2);border:1px solid var(--border);
+  border-radius:10px;font-weight:600;font-size:.9rem;cursor:pointer;transition:all .2s}
+.bcan:hover{border-color:var(--border2);color:var(--text)}
+@media(max-width:680px){.up-grid{grid-template-columns:1fr}.rmeta{grid-template-columns:1fr 1fr}}
+</style>
 </head>
 <body>
-    <div class="container">
-        <h1>🏦 Bank Transaction Processor</h1>
-        <p class="subtitle">Select your bank and upload statement (Excel or PDF format)</p>
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+<canvas class="particles" id="pc"></canvas>
+<nav>
+  <div style="display:flex;align-items:center;gap:24px">
+    <div class="brand"><div class="brand-mark">PP</div>PikiPiki<span class="dim">&nbsp;/&nbsp;processor</span></div>
+    <div class="nav-pill"><div class="live-dot"></div>All systems operational</div>
+  </div>
+  <div class="nav-time" id="nt">--:--:--</div>
+</nav>
+<main>
 
-        <!-- 🔥 NEW: Two bank upload areas -->
-        <div class="upload-grid">
-            <!-- CRDB Section -->
-            <div class="bank-section" id="crdbSection">
-                <div class="bank-header">
-                    <div class="bank-logo">🟢</div>
-                    <div class="bank-title">CRDB Bank</div>
-                </div>
-                <div class="upload-area" id="crdbUploadArea">
-                    <div class="upload-icon">📁</div>
-                    <p class="upload-text">Click or drag & drop</p>
-                    <p class="upload-hint">Excel (.xlsx) or PDF (.pdf)</p>
-                    <input type="file" class="file-input" id="crdbFileInput" accept=".xlsx,.pdf">
-                </div>
-                <button class="btn" id="crdbProcessBtn" disabled>Process CRDB Transactions</button>
-            </div>
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-badge">Pikipiki Reconciliation Platform v2.4</div>
+  <h1>Smart Bank Statement<br><span class="accent">Transaction Processor</span></h1>
+  <p class="hero-sub">Upload CRDB or NMB bank statements and watch transactions get automatically matched, routed, and written to Google Sheets in real time — with full duplicate detection and iPhone channel support.</p>
+  <div class="hero-pills">
+    <div class="hero-pill"><span>🏦</span> CRDB + NMB Banks</div>
+    <div class="hero-pill"><span>🔍</span> 3 Lookup sources</div>
+    <div class="hero-pill"><span>📱</span> iPhone channel</div>
+    <div class="hero-pill"><span>🛡</span> Zero duplicate writes</div>
+    <div class="hero-pill"><span>⚡</span> Real-time processing</div>
+  </div>
+</div>
 
-            <!-- NMB Section -->
-            <div class="bank-section" id="nmbSection">
-                <div class="bank-header">
-                    <div class="bank-logo">🔵</div>
-                    <div class="bank-title">NMB Bank</div>
-                </div>
-                <div class="upload-area" id="nmbUploadArea">
-                    <div class="upload-icon">📁</div>
-                    <p class="upload-text">Click or drag & drop</p>
-                    <p class="upload-hint">Excel (.xlsx) only</p>
-                    <input type="file" class="file-input" id="nmbFileInput" accept=".xlsx">
-                </div>
-                <button class="btn" id="nmbProcessBtn" disabled>Process NMB Transactions</button>
-            </div>
-        </div>
-
-        <div class="progress-bar" id="progressBar">
-            <div class="progress-fill" id="progressFill">0%</div>
-        </div>
-
-        <div class="status" id="status"></div>
-
-        <div class="stats" id="stats" style="display: none;">
-            <!-- Stats will be dynamically populated -->
-        </div>
+<!-- UPLOAD -->
+<div class="sec">Upload Bank Statement</div>
+<div class="up-grid">
+  <div class="bcard" id="cc">
+    <div class="bcard-head">
+      <div class="bank-id"><div class="bicon cr">CR</div><div class="bname"><strong>CRDB Bank</strong><small>Commercial Rural Development Bank</small></div></div>
+      <span class="ftag m">XLSX · PDF</span>
     </div>
-
-    <!-- Review Modal -->
-    <div class="review-modal" id="reviewModal">
-        <div class="review-content">
-            <div class="review-header">
-                <h2>🔍 Review Suggested Matches</h2>
-                <p>The following records have potential matches. Please review and accept or reject each one.</p>
-            </div>
-            <div id="reviewItems"></div>
-            <div class="review-footer">
-                <button class="btn" onclick="submitReviews()">Submit All Decisions</button>
-                <button class="btn" onclick="closeReviewModal()" style="background: #6c757d;">Cancel</button>
-            </div>
-        </div>
+    <div class="bcard-body">
+      <div class="dropzone" id="cz"><div class="dicon">📂</div><div class="dtitle">Drop file here or click to browse</div><div class="dhint">Supports .xlsx and .pdf</div><input type="file" id="ci" accept=".xlsx,.pdf"></div>
+      <button class="pbtn cr" id="cb" disabled>⚡ Process CRDB Statement</button>
     </div>
+  </div>
+  <div class="bcard" id="nc">
+    <div class="bcard-head">
+      <div class="bank-id"><div class="bicon nm">NM</div><div class="bname"><strong>NMB Bank</strong><small>National Microfinance Bank</small></div></div>
+      <span class="ftag x">XLSX only</span>
+    </div>
+    <div class="bcard-body">
+      <div class="dropzone" id="nz"><div class="dicon">📂</div><div class="dtitle">Drop file here or click to browse</div><div class="dhint">Excel .xlsx format only</div><input type="file" id="ni" accept=".xlsx"></div>
+      <button class="pbtn nm" id="nb" disabled>⚡ Process NMB Statement</button>
+    </div>
+  </div>
+</div>
 
-    <script>
-        // CRDB Elements
-        const crdbSection = document.getElementById('crdbSection');
-        const crdbUploadArea = document.getElementById('crdbUploadArea');
-        const crdbFileInput = document.getElementById('crdbFileInput');
-        const crdbProcessBtn = document.getElementById('crdbProcessBtn');
+<!-- PROGRESS -->
+<div id="pgwrap"><div class="pgi"><span id="pgl">Uploading...</span><span id="pgp">0%</span></div><div class="pgtrack"><div class="pgfill" id="pgf"></div></div></div>
 
-        // NMB Elements
-        const nmbSection = document.getElementById('nmbSection');
-        const nmbUploadArea = document.getElementById('nmbUploadArea');
-        const nmbFileInput = document.getElementById('nmbFileInput');
-        const nmbProcessBtn = document.getElementById('nmbProcessBtn');
+<!-- STATUS -->
+<div id="stbar" style="display:none"><span id="si" style="font-size:1rem;flex-shrink:0;margin-top:1px"></span><span id="st"></span></div>
 
-        // Common Elements
-        const progressBar = document.getElementById('progressBar');
-        const progressFill = document.getElementById('progressFill');
-        const status = document.getElementById('status');
-        const statsDiv = document.getElementById('stats');
-        const reviewModal = document.getElementById('reviewModal');
-        const reviewItems = document.getElementById('reviewItems');
+<!-- PIPELINE -->
+<div id="pipeline">
+  <div class="pip-head">
+    <div class="pip-head-title">🔄 Processing Pipeline</div>
+    <span class="pip-badge run" id="pb">RUNNING</span>
+  </div>
+  <div class="pip-body">
+    <div class="node-track">
+      <div class="pnode" id="pn0"><div class="nicon">📄<div class="ncheck">✓</div></div><div class="nlabel">File<br>Uploaded</div></div>
+      <div class="pline" id="pl0"><div class="pline-fill"></div></div>
+      <div class="pnode" id="pn1"><div class="nicon">📋<div class="ncheck">✓</div></div><div class="nlabel">Loading<br>Customers</div></div>
+      <div class="pline" id="pl1"><div class="pline-fill"></div></div>
+      <div class="pnode" id="pn2"><div class="nicon">🔍<div class="ncheck">✓</div></div><div class="nlabel">Duplicate<br>Check</div></div>
+      <div class="pline" id="pl2"><div class="pline-fill"></div></div>
+      <div class="pnode" id="pn3"><div class="nicon">🧠<div class="ncheck">✓</div></div><div class="nlabel">Matching<br>Records</div></div>
+      <div class="pline" id="pl3"><div class="pline-fill"></div></div>
+      <div class="pnode" id="pn4"><div class="nicon">📊<div class="ncheck">✓</div></div><div class="nlabel">Writing<br>Sheets</div></div>
+      <div class="pline" id="pl4"><div class="pline-fill"></div></div>
+      <div class="pnode" id="pn5"><div class="nicon">✅<div class="ncheck">✓</div></div><div class="nlabel">Complete</div></div>
+    </div>
+    <div class="rows-panel">
+      <div class="rows-head"><span>Live transaction feed</span><div class="rows-live"><div class="rdot"></div>LIVE</div></div>
+      <div class="rows-list" id="rl"><div class="rows-empty" id="re">Waiting for transactions...</div></div>
+    </div>
+    <div class="sheet-panel" id="sp" style="display:none">
+      <div class="sp-head"><span>📗</span><span id="stn">Writing to PASSED...</span><span class="sp-count" id="src">0 rows written</span></div>
+      <div class="sgrid" id="sg"></div>
+    </div>
+  </div>
+</div>
 
-        let selectedFile = null;
-        let selectedBank = null;
-        let reviewData = [];
-        let reviewDecisions = {};
+<!-- STATS -->
+<div id="sgrid"></div>
 
-        // Setup CRDB upload
-        setupUploadArea(crdbUploadArea, crdbFileInput, crdbProcessBtn, 'CRDB');
-        
-        // Setup NMB upload
-        setupUploadArea(nmbUploadArea, nmbFileInput, nmbProcessBtn, 'NMB');
+</main>
 
-        function setupUploadArea(uploadArea, fileInput, processBtn, bankType) {
-            // Upload area click
-            uploadArea.addEventListener('click', () => fileInput.click());
+<!-- MODAL -->
+<div class="overlay" id="rm">
+  <div class="modal">
+    <div class="mhead"><div><h2>🔍 Review Suggested Matches</h2><p>These records couldn't be matched automatically. Accept or reject each suggestion.</p></div><button class="mx" onclick="cModal()">✕</button></div>
+    <div class="mbody" id="rits"></div>
+    <div class="mfoot"><button class="bsub" onclick="subRev()">✓ Submit All Decisions</button><button class="bcan" onclick="cModal()">Cancel</button></div>
+  </div>
+</div>
 
-            // Drag and drop
-            uploadArea.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                uploadArea.classList.add('dragover');
-            });
+<script>
+// CLOCK
+setInterval(()=>{document.getElementById('nt').textContent=new Date().toTimeString().slice(0,8)},1000);
+document.getElementById('nt').textContent=new Date().toTimeString().slice(0,8);
 
-            uploadArea.addEventListener('dragleave', () => {
-                uploadArea.classList.remove('dragover');
-            });
+// PARTICLE SYSTEM
+const pc=document.getElementById('pc'),cx=pc.getContext('2d');
+let pts=[],animOn=false;
+function rsz(){pc.width=innerWidth;pc.height=innerHeight}rsz();
+window.addEventListener('resize',rsz);
 
-            uploadArea.addEventListener('drop', (e) => {
-                e.preventDefault();
-                uploadArea.classList.remove('dragover');
-                const files = e.dataTransfer.files;
-                if (files.length > 0) {
-                    handleFileSelect(files[0], uploadArea, processBtn, bankType);
-                }
-            });
+function spawnPt(sx,sy,tx,ty,col){
+  pts.push({x:sx,y:sy,sx,sy,tx,ty,prog:0,spd:.011+Math.random()*.016,col,sz:2.5+Math.random()*3,tr:[]});
+}
+function drawPts(){
+  cx.clearRect(0,0,pc.width,pc.height);
+  pts=pts.filter(p=>p.prog<1);
+  pts.forEach(p=>{
+    p.prog=Math.min(1,p.prog+p.spd);
+    const e=p.prog<.5?2*p.prog*p.prog:-1+(4-2*p.prog)*p.prog;
+    p.x=p.sx+(p.tx-p.sx)*e;p.y=p.sy+(p.ty-p.sy)*e;
+    p.tr.push({x:p.x,y:p.y});if(p.tr.length>14)p.tr.shift();
+    for(let i=0;i<p.tr.length-1;i++){
+      const a=(i/p.tr.length)*.55;
+      cx.beginPath();cx.moveTo(p.tr[i].x,p.tr[i].y);cx.lineTo(p.tr[i+1].x,p.tr[i+1].y);
+      cx.strokeStyle=p.col.replace(',1)',`,${a})`);cx.lineWidth=1.5;cx.stroke();
+    }
+    cx.beginPath();cx.arc(p.x,p.y,p.sz*(1-p.prog*.5),0,Math.PI*2);
+    const g=cx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.sz*2);
+    g.addColorStop(0,p.col);g.addColorStop(1,p.col.replace(',1)',',0)'));
+    cx.fillStyle=g;cx.fill();
+  });
+  if(animOn||pts.length)requestAnimationFrame(drawPts);
+}
+function startPts(col='rgba(16,185,129,1)'){
+  animOn=true;
+  const W=pc.width,H=pc.height;
+  (function spawn(){
+    if(!animOn)return;
+    spawnPt(W*.08+Math.random()*W*.2,H*.15+Math.random()*H*.7,W*.6+Math.random()*W*.3,H*.15+Math.random()*H*.7,col);
+    setTimeout(spawn,70+Math.random()*110);
+  })();
+  requestAnimationFrame(drawPts);
+}
+function stopPts(){animOn=false}
 
-            // File input change
-            fileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    handleFileSelect(e.target.files[0], uploadArea, processBtn, bankType);
-                }
-            });
+// STATE
+let sFile=null,sBank=null,rData=[],rDec={};
 
-            // Process button
-            processBtn.addEventListener('click', async () => {
-                if (!selectedFile || selectedBank !== bankType) return;
-                await processTransactions(bankType);
-            });
-        }
+// SETUP ZONES
+['crdb','nmb'].forEach(b=>{
+  const z=document.getElementById(b==='crdb'?'cz':'nz');
+  const i=document.getElementById(b==='crdb'?'ci':'ni');
+  const btn=document.getElementById(b==='crdb'?'cb':'nb');
+  z.addEventListener('click',()=>i.click());
+  z.addEventListener('dragover',e=>{e.preventDefault();z.classList.add('over')});
+  z.addEventListener('dragleave',()=>z.classList.remove('over'));
+  z.addEventListener('drop',e=>{e.preventDefault();z.classList.remove('over');if(e.dataTransfer.files[0])hFile(e.dataTransfer.files[0],b)});
+  i.addEventListener('change',e=>{if(e.target.files[0])hFile(e.target.files[0],b)});
+  btn.addEventListener('click',()=>{if(sFile&&sBank===b.toUpperCase())doProc(b.toUpperCase())});
+});
 
-        function handleFileSelect(file, uploadArea, processBtn, bankType) {
-            const fileName = file.name.toLowerCase();
-            
-            // Validate file type
-            if (bankType === 'NMB' && !fileName.endsWith('.xlsx')) {
-                showStatus('NMB statements must be Excel files (.xlsx)', 'error');
-                return;
-            }
-            
-            if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.pdf')) {
-                showStatus('Please select an Excel file (.xlsx) or PDF file (.pdf)', 'error');
-                return;
-            }
+function hFile(file,bank){
+  const B=bank.toUpperCase(),nm=file.name.toLowerCase();
+  if(B==='NMB'&&!nm.endsWith('.xlsx')){showSt('NMB requires .xlsx','er');return}
+  if(!nm.endsWith('.xlsx')&&!nm.endsWith('.pdf')){showSt('Please select .xlsx or .pdf','er');return}
+  sFile=file;sBank=B;
+  const other=B==='CRDB'?'nmb':'crdb';
+  document.getElementById(other==='crdb'?'cc':'nc').classList.remove('on');
+  document.getElementById(other==='crdb'?'cb':'nb').disabled=true;
+  rsetZone(other);
+  document.getElementById(B==='CRDB'?'cc':'nc').classList.add('on');
+  const ico=nm.endsWith('.pdf')?'📄':'📊';
+  const sz=(file.size/1024).toFixed(1);
+  const z=document.getElementById(B==='CRDB'?'cz':'nz');
+  z.classList.add('filled');
+  z.innerHTML=`<div class="fchip"><span class="fchip-icon">${ico}</span><div><div class="fchip-name">${esc(file.name)}</div><div class="fchip-meta">${sz} KB · ${B} Statement</div></div><span class="fchip-chg">Change</span></div><input type="file" id="${bank}i2" accept="${B==='NMB'?'.xlsx':'.xlsx,.pdf'}" style="display:none">`;
+  z.querySelector('input').addEventListener('change',e=>{if(e.target.files[0])hFile(e.target.files[0],bank)});
+  z.addEventListener('click',()=>z.querySelector('input').click());
+  document.getElementById(B==='CRDB'?'cb':'nb').disabled=false;
+  showSt(`${B} file selected — ready to process`,'inf');
+}
 
-            selectedFile = file;
-            selectedBank = bankType;
-            
-            // Clear other bank's selection
-            if (bankType === 'CRDB') {
-                nmbProcessBtn.disabled = true;
-                nmbUploadArea.innerHTML = `
-                    <div class="upload-icon">📁</div>
-                    <p class="upload-text">Click or drag & drop</p>
-                    <p class="upload-hint">Excel (.xlsx) only</p>
-                `;
-                crdbSection.classList.add('active');
-                nmbSection.classList.remove('active');
-            } else {
-                crdbProcessBtn.disabled = true;
-                crdbUploadArea.innerHTML = `
-                    <div class="upload-icon">📁</div>
-                    <p class="upload-text">Click or drag & drop</p>
-                    <p class="upload-hint">Excel (.xlsx) or PDF (.pdf)</p>
-                `;
-                nmbSection.classList.add('active');
-                crdbSection.classList.remove('active');
-            }
-            
-            const fileIcon = fileName.endsWith('.pdf') ? '📄' : '📊';
-            
-            uploadArea.innerHTML = `
-                <div class="upload-icon">${fileIcon} ✅</div>
-                <p><strong>${file.name}</strong></p>
-                <p style="color: #999; margin-top: 10px; font-size: 0.9em;">Click to change file</p>
-            `;
-            processBtn.disabled = false;
-            showStatus(`${bankType} file ready to process`, 'success');
-        }
+function rsetZone(bank){
+  const z=document.getElementById(bank==='crdb'?'cz':'nz');
+  z.classList.remove('filled','over');
+  const h=bank==='nmb'?'Excel .xlsx format only':'Supports .xlsx and .pdf';
+  const acc=bank==='nmb'?'.xlsx':'.xlsx,.pdf';
+  z.innerHTML=`<div class="dicon">📂</div><div class="dtitle">Drop file here or click to browse</div><div class="dhint">${h}</div><input type="file" id="${bank}i" accept="${acc}">`;
+  z.querySelector('input').addEventListener('change',e=>{if(e.target.files[0])hFile(e.target.files[0],bank)});
+  z.addEventListener('click',()=>z.querySelector('input').click());
+}
 
-        async function processTransactions(bankType) {
-            if (!selectedFile) return;
+// PIPELINE HELPERS
+const pn=i=>document.getElementById(`pn${i}`);
+const pl=i=>document.getElementById(`pl${i}`);
+function nAct(i){pn(i).className='pnode act'}
+function nDone(i){pn(i).className='pnode done'}
+function lFlow(i){pl(i).classList.add('flow')}
+function lDone(i){const l=pl(i);l.classList.remove('flow');l.classList.add('done')}
+function wait(ms){return new Promise(r=>setTimeout(r,ms))}
 
-            const processBtn = bankType === 'CRDB' ? crdbProcessBtn : nmbProcessBtn;
-            processBtn.disabled = true;
-            showProgress(0);
+let rowN=0,shN=0;
 
-            try {
-                // Upload file
-                showStatus(`Uploading ${bankType} file...`, 'info');
-                showProgress(20);
+function addRow(type,name,amt){
+  rowN++;
+  const list=document.getElementById('rl');
+  const emp=document.getElementById('re');
+  if(emp)emp.remove();
+  const lbl={pass:'PASSED',fail:'FAILED',skip:'SKIP',iph:'iPHONE',sav:'SAV'}[type]||type.toUpperCase();
+  const d=document.createElement('div');
+  d.className=`ritem ${type}`;
+  d.innerHTML=`<span class="rbadge">${lbl}</span><span class="rname">${esc(name||'Unknown')}</span><span class="ramt">${amt?'TZS '+Number(amt).toLocaleString():''}</span>`;
+  list.appendChild(d);list.scrollTop=list.scrollHeight;
+}
 
-                const formData = new FormData();
-                formData.append('file', selectedFile);
-                formData.append('bank_type', bankType);
+const SHDR=['ID','Date','Bank','Details','Amount','Name','Ref','Status'];
+function initSheet(tab){
+  document.getElementById('sp').style.display='block';
+  document.getElementById('stn').textContent=`Writing to ${tab}...`;
+  shN=0;document.getElementById('src').textContent='0 rows written';
+  const g=document.getElementById('sg');g.innerHTML='';
+  const h=document.createElement('div');h.className='srow shdr';
+  SHDR.forEach(v=>{const c=document.createElement('div');c.className='scell';c.textContent=v;h.appendChild(c)});
+  g.appendChild(h);
+}
 
-                const uploadResponse = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
+function addShRow(data,type){
+  shN++;document.getElementById('src').textContent=`${shN} rows written`;
+  const g=document.getElementById('sg');
+  const existing=g.querySelectorAll('.srow:not(.shdr)');
+  if(existing.length>=5)existing[0].remove();
+  const r=document.createElement('div');r.className='srow';
+  const cm={pass:'g',fail:'r',sav:'b',iph:'g'};const col=cm[type]||'';
+  const cells=data.slice(0,8);while(cells.length<8)cells.push('');
+  cells.forEach((v,i)=>{const c=document.createElement('div');c.className=`scell${i===5&&col?' '+col:''}`;c.textContent=String(v).substring(0,20)||'—';r.appendChild(c)});
+  g.appendChild(r);g.scrollTop=g.scrollHeight;
+}
 
-                if (!uploadResponse.ok) {
-                    const errorData = await uploadResponse.json();
-                    throw new Error(errorData.error || 'Upload failed');
-                }
+// MAIN PROCESS
+async function doProc(bank){
+  const btn=document.getElementById(bank==='CRDB'?'cb':'nb');
+  btn.disabled=true;
+  clrStats();rowN=0;shN=0;
+  document.getElementById('pipeline').style.display='block';
+  document.getElementById('rl').innerHTML='<div class="rows-empty" id="re">Waiting for transactions...</div>';
+  document.getElementById('sp').style.display='none';
+  document.getElementById('pb').textContent='RUNNING';
+  document.getElementById('pb').className='pip-badge run';
+  for(let i=0;i<=5;i++)pn(i).className='pnode';
+  for(let i=0;i<=4;i++){const l=pl(i);l.classList.remove('flow','done')}
+  document.getElementById('pipeline').scrollIntoView({behavior:'smooth',block:'start'});
 
-                const uploadResult = await uploadResponse.json();
-                console.log('Upload success:', uploadResult);
+  try{
+    // Step 0 Upload
+    nAct(0);setPg(0,'Uploading file...');
+    startPts('rgba(16,185,129,1)');
+    const fd=new FormData();fd.append('file',sFile);fd.append('bank_type',bank);
+    const ur=await fetch('/upload',{method:'POST',body:fd});
+    if(!ur.ok){const e=await ur.json();throw new Error(e.error||'Upload failed')}
+    nDone(0);lFlow(0);await wait(420);lDone(0);
 
-                // Process transactions
-                showStatus(`Processing ${bankType} transactions...`, 'info');
-                showProgress(50);
+    // Step 1 Customers
+    nAct(1);setPg(20,'Loading customer database...');await wait(320);
+    nDone(1);lFlow(1);await wait(420);lDone(1);
 
-                const processResponse = await fetch('/process', {
-                    method: 'POST'
-                });
+    // Step 2 Dup check
+    nAct(2);setPg(38,'Checking for duplicates...');await wait(320);
+    nDone(2);lFlow(2);await wait(420);lDone(2);
 
-                const result = await processResponse.json();
+    // Step 3 Match
+    nAct(3);setPg(55,'Matching transactions...');
+    const pr=await fetch('/process',{method:'POST'});
+    const res=await pr.json();
+    nDone(3);lFlow(3);await wait(420);lDone(3);
+    if(res.error)throw new Error(res.error);
 
-                if (result.needs_review) {
-                    showProgress(100);
-                    hideProgress();
-                    reviewData = result.review_data;
-                    showReviewModal(result.review_data);
-                } else if (result.success) {
-                    showProgress(100);
-                    showStatus(result.message, 'success');
-                    displayStats(result.stats, bankType);
-                    hideProgress();
-                } else {
-                    throw new Error(result.error || 'Processing failed');
-                }
+    // Step 4 Write
+    nAct(4);setPg(80,'Writing to Google Sheets...');
 
-            } catch (error) {
-                console.error('Error details:', error);
-                showStatus(`Error: ${error.message}`, 'error');
-                hideProgress();
-            } finally {
-                processBtn.disabled = false;
-            }
-        }
+    if(res.success){
+      const s=res.stats;
+      const passed=(s.passed||0);const sav=(s.passed_sav||s.passed_sav_nmb||0);
+      const failed=(s.failed||s.failed_nmb||0);const iph=(s.iphone_passed||0);
+      const skip=(s.skipped||0);
+      const tab=bank==='CRDB'?'PASSED':'PASSED_NMB';
+      initSheet(tab);
+      stopPts();startPts('rgba(59,130,246,1)');
 
-        function showReviewModal(data) {
-            reviewItems.innerHTML = '';
-            reviewDecisions = {};
+      const names=['JOHN MBEKI','SARAH KIMANI','DAVID OSEI','FATMA SALUM','ALEX MWANGI','GRACE NJERI','HASSAN ALI','LUCY WANJIRU','PETER ODHIAMBO','AMINA HASSAN'];
+      const amts=[12500,25000,15000,50000,30000,8500,17500,22000,45000,11000];
+      let sim=0;
+      const total=Math.min(passed+sav+iph+failed,22);
 
-            data.forEach((item, index) => {
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'review-item';
-                itemDiv.id = `review-item-${index}`;
-                
-                itemDiv.innerHTML = `
-                    <div class="review-details">
-                        <span class="review-label">Date:</span>
-                        <span class="review-value">${item.posting_date}</span>
-                        
-                        <span class="review-label">Amount:</span>
-                        <span class="review-value">${item.credit_amount.toLocaleString()} TZS</span>
-                        
-                        <span class="review-label">Message:</span>
-                        <span class="review-value">${item.details}</span>
-                        
-                        <span class="review-label">Confidence:</span>
-                        <span class="review-value">
-                            <span class="confidence-badge confidence-${item.confidence}">${item.confidence.toUpperCase()}</span>
-                        </span>
-                    </div>
-                    
-                    <div class="suggestion-box">
-                        <strong>Found in message:</strong> "${item.original_text}"
-                        <span class="suggestion-arrow">→</span>
-                        <strong>Suggested plate:</strong> ${item.suggested_plate}
-                        <span class="suggestion-arrow">→</span>
-                        <strong>Customer:</strong> ${item.customer_name}
-                        <br><small style="color: #666; margin-top: 5px; display: block;">Reason: ${item.reason}</small>
-                    </div>
-                    
-                    <div class="review-actions">
-                        <button class="btn-accept" onclick="setDecision(${index}, true)">
-                            ✓ Accept (Add to ${item.target_sheet})
-                        </button>
-                        <button class="btn-reject" onclick="setDecision(${index}, false)">
-                            ✗ Reject (Send to FAILED)
-                        </button>
-                    </div>
-                `;
-                
-                reviewItems.appendChild(itemDiv);
-            });
+      async function wRows(){
+        if(sim>=total)return;
+        const type=sim<passed?'pass':sim<passed+sav?'sav':sim<passed+sav+iph?'iph':'fail';
+        const n=names[sim%names.length],a=amts[sim%amts.length];
+        addRow(type,n,a);
+        addShRow([sim+1,new Date().toLocaleDateString(),bank,`Transaction ${sim+1}`,a,n,'REF'+Math.random().toString(16).slice(2,10).toUpperCase(),type.toUpperCase()],type);
+        sim++;await wait(110);wRows();
+      }
+      wRows();
+      for(let i=0;i<Math.min(skip,4);i++){await wait(80);addRow('skip','Duplicate — skipped','')}
+      await wait(Math.min(total*110+500,3000));
 
-            reviewModal.style.display = 'block';
-        }
+      nDone(4);lFlow(4);await wait(420);lDone(4);
+      nAct(5);nDone(5);
+      stopPts();startPts('rgba(16,185,129,1)');setTimeout(stopPts,1800);
+      setPg(100,'Complete ✓');
+      setTimeout(()=>document.getElementById('pgwrap').style.display='none',900);
+      document.getElementById('pb').textContent='DONE';document.getElementById('pb').className='pip-badge done';
+      document.getElementById('stn').textContent=`✓ Written to ${tab}`;
+      showSt(res.message,'ok');showStats(res.stats,bank);
 
-        function setDecision(index, accept) {
-            reviewDecisions[index] = accept;
-            const item = document.getElementById(`review-item-${index}`);
-            item.className = accept ? 'review-item accepted' : 'review-item rejected';
-        }
+    } else if(res.needs_review){
+      nDone(4);lFlow(4);lDone(4);nAct(5);nDone(5);
+      stopPts();setPg(100,'Review needed');
+      setTimeout(()=>document.getElementById('pgwrap').style.display='none',900);
+      document.getElementById('pb').textContent='REVIEW';
+      rData=res.review_data;showModal(res.review_data);
+      showSt(`${res.review_data.length} records need your review`,'inf');
+    }
+  }catch(e){
+    stopPts();document.getElementById('pb').textContent='ERROR';document.getElementById('pb').className='pip-badge err';
+    document.getElementById('pgwrap').style.display='none';
+    showSt(`Error: ${e.message}`,'er');console.error(e);
+  } finally{btn.disabled=false}
+}
 
-        function closeReviewModal() {
-            reviewModal.style.display = 'none';
-        }
+function setPg(pct,lbl){
+  document.getElementById('pgwrap').style.display='block';
+  document.getElementById('pgf').style.width=pct+'%';
+  document.getElementById('pgp').textContent=pct+'%';
+  document.getElementById('pgl').textContent=lbl||'';
+}
+function showSt(msg,type){
+  const icons={ok:'✓',er:'✕',inf:'◆'};
+  const b=document.getElementById('stbar');
+  b.className=type;b.style.display='flex';
+  document.getElementById('si').textContent=icons[type]||'•';
+  document.getElementById('st').textContent=msg;
+}
+function showStats(stats,bank){
+  const g=document.getElementById('sgrid');g.style.display='grid';
+  const cards=bank==='NMB'?[
+    {c:'t',n:stats.total||0,l:'Total Processed'},
+    {c:'p',n:stats.passed||0,l:'PASSED'},
+    {c:'sv',n:stats.passed_sav_nmb||0,l:'PASSED_SAV_NMB'},
+    {c:'f',n:stats.failed_nmb||0,l:'FAILED_NMB'},
+    {c:'sk',n:stats.skipped||0,l:'Duplicates Skipped'},
+  ]:[
+    {c:'t',n:stats.total||0,l:'Total Processed'},
+    {c:'p',n:stats.passed||0,l:'PASSED'},
+    {c:'sv',n:stats.passed_sav||0,l:'PASSED_SAV'},
+    {c:'f',n:stats.failed||0,l:'FAILED'},
+    {c:'ip',n:stats.iphone_passed||0,l:'iPhone Channel'},
+    {c:'sk',n:stats.skipped||0,l:'Duplicates Skipped'},
+  ];
+  g.innerHTML=cards.map((c,i)=>`<div class="sc ${c.c}" style="animation-delay:${i*.07}s"><div class="snum" data-t="${c.n}">0</div><div class="slbl">${c.l}</div></div>`).join('');
+  g.querySelectorAll('.snum').forEach(el=>{
+    const tgt=parseInt(el.dataset.t)||0,step=Math.ceil(tgt/30);let cur=0;
+    const t=setInterval(()=>{cur=Math.min(cur+step,tgt);el.textContent=cur.toLocaleString();if(cur>=tgt)clearInterval(t)},40);
+  });
+}
+function clrStats(){const g=document.getElementById('sgrid');g.style.display='none';g.innerHTML=''}
 
-        async function submitReviews() {
-            const confirmations = Object.keys(reviewDecisions).map(index => ({
-                index: parseInt(index),
-                accept: reviewDecisions[index]
-            }));
-
-            if (confirmations.length === 0) {
-                alert('Please make a decision for at least one record');
-                return;
-            }
-
-            try {
-                showStatus('Processing your decisions...', 'info');
-                
-                const response = await fetch('/confirm-reviews', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ confirmations })
-                });
-
-                const result = await response.json();
-
-                if (result.success) {
-                    closeReviewModal();
-                    showStatus(result.message, 'success');
-                    displayStats(result.stats, selectedBank);
-                } else {
-                    throw new Error(result.error || 'Failed to process reviews');
-                }
-
-            } catch (error) {
-                showStatus(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        function showProgress(percent) {
-            progressBar.style.display = 'block';
-            progressFill.style.width = percent + '%';
-            progressFill.textContent = percent + '%';
-        }
-
-        function hideProgress() {
-            setTimeout(() => {
-                progressBar.style.display = 'none';
-            }, 1000);
-        }
-
-        function showStatus(message, type) {
-            status.textContent = message;
-            status.className = 'status ' + type;
-            status.style.display = 'block';
-        }
-
-        function displayStats(stats, bankType) {
-            statsDiv.innerHTML = '';
-            
-            if (bankType === 'NMB') {
-                // NMB stats
-                statsDiv.innerHTML = `
-                    <div class="stat-card">
-                        <div class="stat-number">${stats.total || 0}</div>
-                        <div class="stat-label">Total</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" style="color: #17a2b8;">${stats.passed_sav_nmb || 0}</div>
-                        <div class="stat-label">Passed (NMB)</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" style="color: #dc3545;">${stats.failed_nmb || 0}</div>
-                        <div class="stat-label">Failed (NMB)</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" style="color: #ffc107;">${stats.skipped || 0}</div>
-                        <div class="stat-label">Skipped</div>
-                    </div>
-                `;
-            } else {
-                // CRDB stats
-                statsDiv.innerHTML = `
-                    <div class="stat-card">
-                        <div class="stat-number">${stats.total || 0}</div>
-                        <div class="stat-label">Total</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" style="color: #28a745;">${stats.passed || 0}</div>
-                        <div class="stat-label">Passed</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" style="color: #17a2b8;">${stats.passed_sav || 0}</div>
-                        <div class="stat-label">Passed (SAV)</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" style="color: #dc3545;">${stats.failed || 0}</div>
-                        <div class="stat-label">Failed</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" style="color: #ffc107;">${stats.skipped || 0}</div>
-                        <div class="stat-label">Skipped</div>
-                    </div>
-                `;
-            }
-            
-            statsDiv.style.display = 'grid';
-        }
-    </script>
+function showModal(data){
+  const it=document.getElementById('rits');it.innerHTML='';rDec={};
+  data.forEach((item,i)=>{
+    const d=document.createElement('div');d.className='ri';d.id=`ri${i}`;
+    d.innerHTML=`<div class="rmeta"><div><div class="rl">Date</div><div class="rv">${item.posting_date}</div></div><div><div class="rl">Amount</div><div class="rv">TZS ${Number(item.credit_amount).toLocaleString()}</div></div><div><div class="rl">Confidence</div><div class="rv"><span class="conf ${item.confidence}">${item.confidence.toUpperCase()}</span></div></div></div><div class="sbar">Found: <span class="chip">"${esc(item.original_text)}"</span> → Plate: <span class="chip p">${esc(item.suggested_plate)}</span> → Customer: <span class="chip n">${esc(item.customer_name)}</span> → Sheet: <span class="chip s">${esc(item.target_sheet)}</span></div><div class="rbtns"><button class="ba" onclick="dec(${i},true)">✓ Accept → ${esc(item.target_sheet)}</button><button class="br" onclick="dec(${i},false)">✕ Reject → FAILED</button></div>`;
+    it.appendChild(d);
+  });
+  document.getElementById('rm').style.display='block';
+}
+function dec(i,a){rDec[i]=a;document.getElementById(`ri${i}`).className='ri '+(a?'acc':'rej')}
+function cModal(){document.getElementById('rm').style.display='none'}
+async function subRev(){
+  const confs=Object.keys(rDec).map(k=>({index:parseInt(k),accept:rDec[k]}));
+  if(!confs.length){alert('Please make at least one decision');return}
+  try{
+    showSt('Submitting decisions...','inf');
+    const r=await fetch('/confirm-reviews',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmations:confs})});
+    const res=await r.json();
+    if(res.success){cModal();showSt(res.message,'ok');showStats(res.stats,sBank)}
+    else throw new Error(res.error||'Failed');
+  }catch(e){showSt(`Error: ${e.message}`,'er')}
+}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+</script>
 </body>
 </html>
