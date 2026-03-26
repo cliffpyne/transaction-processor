@@ -1645,6 +1645,10 @@ def process_nmb_transactions(filepath):
         print("Loading customer database from pikipiki records2 (SAV)...")
         phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)
 
+        # 🔥 NEW: Load iPhone lookup for NMB iPhone channel
+        print("\nLoading iPhone customer database from IPHONE_RECORDS...")
+        iphone_lookup = load_iphone_customers(service)
+
         # ── Duplicate-check refs across ALL relevant tabs ──────────────────────
         # Check BOTH old sheet (PASSED_SHEET_ID) AND new NMB sheet to cover
         # all existing records — old data stays on old sheet.
@@ -1670,6 +1674,15 @@ def process_nmb_transactions(filepath):
         print("Loading existing references from new FAILED_NMB sheet...")
         existing_failed_nmb_refs, existing_failed_nmb_messages = get_existing_refs(service, 'FAILED_NMB')
 
+        # 🔥 NEW: Also load BANK_PASSED/BANK_FAILED for iPhone dup check
+        print("Loading existing references from BANK_PASSED sheet...")
+        existing_bank_passed_refs, existing_bank_passed_messages = get_existing_refs(service, 'BANK_PASSED')
+        print("Loading existing references from BANK_FAILED sheet...")
+        existing_bank_failed_refs, existing_bank_failed_messages = get_existing_refs(service, 'BANK_FAILED')
+
+        all_iphone_existing_refs     = existing_bank_passed_refs.union(existing_bank_failed_refs)
+        all_iphone_existing_messages = existing_bank_passed_messages.union(existing_bank_failed_messages)
+
         all_existing_refs = (
             existing_passed_refs
             .union(existing_nmb_passed_refs)
@@ -1677,6 +1690,7 @@ def process_nmb_transactions(filepath):
             .union(existing_passed_nmb_refs)
             .union(existing_failed_nmb_old_refs)
             .union(existing_failed_nmb_refs)
+            .union(all_iphone_existing_refs)       # 🔥 iPhone sheets included
         )
         all_existing_messages = (
             existing_passed_messages
@@ -1685,16 +1699,19 @@ def process_nmb_transactions(filepath):
             .union(existing_passed_nmb_messages)
             .union(existing_failed_nmb_old_messages)
             .union(existing_failed_nmb_messages)
+            .union(all_iphone_existing_messages)   # 🔥 iPhone sheets included
         )
         print(f"Total unique NMB refs in system (old+new): {len(all_existing_refs)}")
 
-        # 🔥 Free individual sets
+        # 🔥 Free individual sets — keep all_iphone_existing_messages (still needed in loop)
         del existing_passed_refs, existing_passed_messages
         del existing_nmb_passed_refs, existing_nmb_passed_messages
         del existing_passed_nmb_old_refs, existing_passed_nmb_old_messages
         del existing_passed_nmb_refs, existing_passed_nmb_messages
         del existing_failed_nmb_old_refs, existing_failed_nmb_old_messages
         del existing_failed_nmb_refs, existing_failed_nmb_messages
+        del existing_bank_passed_refs, existing_bank_passed_messages
+        del existing_bank_failed_refs, existing_bank_failed_messages
         gc.collect()
 
         # ── Get last IDs — take max of old + new sheets ────────────────────────
@@ -1703,9 +1720,15 @@ def process_nmb_transactions(filepath):
         last_failed_nmb_id = max(get_last_id(service, 'FAILED_NMB_OLD'), get_last_id(service, 'FAILED_NMB'))
         print(f"Continuing from IDs — PASSED:{last_passed_id}, PASSED_SAV_NMB:{last_passed_nmb_id}, FAILED_NMB:{last_failed_nmb_id}")
 
+        # 🔥 NEW: Last IDs for iPhone sheets (shared with CRDB iPhone)
+        last_bank_passed_id = get_last_id(service, 'BANK_PASSED')
+        last_bank_failed_id = get_last_id(service, 'BANK_FAILED')
+
         passed_data      = []          # → shared PASSED tab
         passed_nmb_data  = []          # → PASSED_SAV_NMB
         failed_nmb_data  = []          # → FAILED_NMB
+        bank_passed_data = []          # 🔥 NEW → BANK_PASSED (iPhone)
+        bank_failed_data = []          # 🔥 NEW → BANK_FAILED (iPhone)
         needs_review_data = []         # → review modal
 
         stats = {
@@ -1714,7 +1737,10 @@ def process_nmb_transactions(filepath):
             'passed_sav_nmb': 0,   # went to PASSED_SAV_NMB (records2 match)
             'failed_nmb': 0,
             'needs_review': 0,
-            'skipped': 0
+            'skipped': 0,
+            'iphone_passed': 0,    # 🔥 NEW
+            'iphone_failed': 0,    # 🔥 NEW
+            'iphone_skipped': 0,   # 🔥 NEW
         }
 
         for row in transactions_list:
@@ -1745,6 +1771,77 @@ def process_nmb_transactions(filepath):
 
             if is_duplicate:
                 continue
+
+            # ══════════════════════════════════════════════════════════════════
+            # 🔥 NEW: NMB iPhone Channel — intercept BEFORE normal processing
+            # Same logic as CRDB iPhone but with 'NMB' in bank column
+            # ══════════════════════════════════════════════════════════════════
+            if is_iphone_transaction(description):
+                print(f"\n📱 NMB iPhone transaction detected: {description[:80]}")
+
+                # Duplicate check within iPhone sheets
+                iphone_is_dup = False
+                if ref_number and ref_number in all_iphone_existing_refs:
+                    iphone_is_dup = True
+                elif description in all_iphone_existing_messages:
+                    iphone_is_dup = True
+
+                if iphone_is_dup:
+                    stats['iphone_skipped'] += 1
+                    stats['skipped'] += 1
+                    print(f"  ⏭️ NMB iPhone duplicate — skipped")
+                    continue  # Do NOT fall through to normal flow
+
+                # Look up customer in IPHONE_RECORDS
+                customer_name, raw_phone = lookup_iphone_customer(description, iphone_lookup)
+
+                # Determine display identifier (0XX format, matching IPHONE_RECORDS)
+                if raw_phone:
+                    norm = normalize_phone_iphone(raw_phone)
+                    display_phone = f"0{norm}" if norm else raw_phone
+                else:
+                    display_phone = 'No phone'
+
+                if customer_name:
+                    # ✅ Match found → BANK_PASSED
+                    last_bank_passed_id += 1
+                    bank_passed_row = [
+                        last_bank_passed_id,
+                        date,
+                        'NMB',          # 🔥 NMB not CRDB
+                        description,
+                        credit_amount,
+                        display_phone,
+                        customer_name,
+                        ref_number or '',
+                        ''
+                    ]
+                    bank_passed_data.append(bank_passed_row)
+                    stats['iphone_passed'] += 1
+                    print(f"  ✅ BANK_PASSED (NMB): {customer_name} — {display_phone} — {credit_amount}")
+                else:
+                    # ❌ No match → BANK_FAILED
+                    last_bank_failed_id += 1
+                    reason = f"PHONE({display_phone}) not found in IPHONE_RECORDS"
+                    bank_failed_row = [
+                        last_bank_failed_id,
+                        date,
+                        'NMB',          # 🔥 NMB not CRDB
+                        description,
+                        credit_amount,
+                        display_phone,
+                        reason,
+                        ref_number or ''
+                    ]
+                    bank_failed_data.append(bank_failed_row)
+                    stats['iphone_failed'] += 1
+                    print(f"  ❌ BANK_FAILED (NMB): {reason}")
+
+                # ⚠️ CRITICAL: continue — do NOT run normal pikipiki logic
+                continue
+            # ══════════════════════════════════════════════════════════════════
+            # End NMB iPhone Channel
+            # ══════════════════════════════════════════════════════════════════
 
             # ── Extract identifiers ────────────────────────────────────────────
             phone = extract_phone_number(description)
@@ -1812,30 +1909,61 @@ def process_nmb_transactions(filepath):
                         print(f"✅ PASSED_SAV_NMB: {customer_name_sav} - {identifier} - {credit_amount} - ID: {customer_id}")
 
                     else:
-                        # ── Tier 3: not found → FAILED_NMB ────────────────────
-                        last_failed_nmb_id += 1
-                        reason = f"{lookup_type.upper()}({identifier}) not found"
+                        # ── Tier 3: not in pikipiki records1 or records2 ──────
+                        # If we have a phone, try IPHONE_RECORDS before giving up
+                        iphone_matched = False
+                        if lookup_type == 'phone':
+                            norm = normalize_phone_iphone(identifier)
+                            iphone_customer = iphone_lookup.get(norm) if norm else None
+                            if iphone_customer:
+                                iphone_is_dup = (
+                                    (ref_number and ref_number in all_iphone_existing_refs)
+                                    or description in all_iphone_existing_messages
+                                )
+                                if not iphone_is_dup:
+                                    display_phone = f"0{norm}"
+                                    last_bank_passed_id += 1
+                                    bank_passed_row = [
+                                        last_bank_passed_id,
+                                        date,
+                                        'NMB',
+                                        description,
+                                        credit_amount,
+                                        display_phone,
+                                        iphone_customer,
+                                        ref_number or '',
+                                        ''
+                                    ]
+                                    bank_passed_data.append(bank_passed_row)
+                                    stats['iphone_passed'] += 1
+                                    iphone_matched = True
+                                    print(f"  ✅ BANK_PASSED (NMB phone fallback): {iphone_customer} — {display_phone} — {credit_amount}")
 
-                        final_identifier = identifier
-                        if lookup_type == 'phone' and not identifier.startswith('255'):
-                            if identifier.startswith('0'):
-                                final_identifier = '255' + identifier[1:]
-                            else:
-                                final_identifier = '255' + identifier
+                        if not iphone_matched:
+                            # Truly not found anywhere → FAILED_NMB
+                            last_failed_nmb_id += 1
+                            reason = f"{lookup_type.upper()}({identifier}) not found"
 
-                        failed_nmb_row = [
-                            last_failed_nmb_id,
-                            date,
-                            'NMB',
-                            description,
-                            credit_amount,
-                            final_identifier,
-                            reason,
-                            ref_number
-                        ]
-                        failed_nmb_data.append(failed_nmb_row)
-                        stats['failed_nmb'] += 1
-                        print(f"❌ FAILED_NMB: Customer not found for {final_identifier} (REF: {ref_number})")
+                            final_identifier = identifier
+                            if lookup_type == 'phone' and not identifier.startswith('255'):
+                                if identifier.startswith('0'):
+                                    final_identifier = '255' + identifier[1:]
+                                else:
+                                    final_identifier = '255' + identifier
+
+                            failed_nmb_row = [
+                                last_failed_nmb_id,
+                                date,
+                                'NMB',
+                                description,
+                                credit_amount,
+                                final_identifier,
+                                reason,
+                                ref_number
+                            ]
+                            failed_nmb_data.append(failed_nmb_row)
+                            stats['failed_nmb'] += 1
+                            print(f"❌ FAILED_NMB: Customer not found for {final_identifier} (REF: {ref_number})")
 
             else:
                 # ── No clean identifier — try plate suggestions (review flow) ──
@@ -1936,6 +2064,14 @@ def process_nmb_transactions(filepath):
 
             session['review_file'] = review_file
 
+            # 🔥 NEW: Flush NMB iPhone buckets immediately even if review needed
+            if bank_passed_data:
+                print(f"\n📱 Writing {len(bank_passed_data)} NMB iPhone rows to BANK_PASSED...")
+                append_to_sheet(service, 'BANK_PASSED', bank_passed_data)
+            if bank_failed_data:
+                print(f"\n📱 Writing {len(bank_failed_data)} NMB iPhone rows to BANK_FAILED...")
+                append_to_sheet(service, 'BANK_FAILED', bank_failed_data)
+
             return jsonify({
                 'needs_review': True,
                 'review_data': needs_review_data,
@@ -1943,7 +2079,17 @@ def process_nmb_transactions(filepath):
                 'message': f"Found {len(needs_review_data)} NMB records that need your review before processing"
             })
 
-        # ── No reviews needed — write directly to NEW NMB sheet ─────────────
+        # ── No reviews needed — write directly ─────────────────────────────
+
+        # 🔥 NEW: Flush iPhone buckets first (same sheets as CRDB)
+        if bank_passed_data:
+            print(f"\n📱 Writing {len(bank_passed_data)} NMB iPhone rows to BANK_PASSED...")
+            append_to_sheet(service, 'BANK_PASSED', bank_passed_data)
+
+        if bank_failed_data:
+            print(f"\n📱 Writing {len(bank_failed_data)} NMB iPhone rows to BANK_FAILED...")
+            append_to_sheet(service, 'BANK_FAILED', bank_failed_data)
+
         if passed_data:
             append_to_sheet(service, 'PASSED_NMB', passed_data)
 
@@ -1964,7 +2110,9 @@ def process_nmb_transactions(filepath):
                 f"Processed {stats['total']} NMB transactions: "
                 f"{stats['passed']} passed (PASSED), "
                 f"{stats['passed_sav_nmb']} passed (PASSED_SAV_NMB), "
-                f"{stats['failed_nmb']} failed"
+                f"{stats['failed_nmb']} failed, "
+                f"{stats['iphone_passed']} iPhone passed, "
+                f"{stats['iphone_failed']} iPhone failed"
             )
         })
 
