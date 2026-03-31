@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, Response
 from werkzeug.utils import secure_filename
 import os
 import re
@@ -12,11 +12,21 @@ import pickle
 from datetime import datetime
 import pdfplumber  # For PDF extraction
 
+def json_response(data, status=200):
+    """
+    🔥 MEMORY: Return a JSON response using Flask's Response with explicit
+    Content-Type instead of jsonify, so Flask doesn't buffer the full body
+    in memory before sending. For large process results this prevents the
+    worker from holding two copies (dict + serialized string) simultaneously.
+    """
+    body = json.dumps(data, ensure_ascii=False)
+    return Response(body, status=status, mimetype='application/json')
+
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['TEMP_FOLDER'] = 'temp_reviews'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB — handles large NMB Excel files
 
 # Ensure folders exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -1114,32 +1124,56 @@ def process_crdb_transactions(filepath):
         
         elif filepath.endswith('.xlsx'):
             print("📊 Processing CRDB Excel file...")
-            # Read Excel file - CRDB format has headers at row 12
-            df = pd.read_excel(filepath, header=12)
-            df.columns = df.iloc[0]
-            df = df[1:].reset_index(drop=True)
-            
+            # 🔥 MEMORY FIX: skiprows=12 skips metadata without loading it into RAM.
+            # usecols loads ONLY the columns we need (skips Balance, Value Date, Cheque No etc.)
+            # dtype=str avoids pandas creating extra float64 arrays on initial read.
+            try:
+                df = pd.read_excel(
+                    filepath,
+                    skiprows=12,
+                    header=0,
+                    usecols=['Posting Date', 'Details', 'Credit', 'Debit'],
+                    dtype=str
+                )
+            except ValueError:
+                # Fallback: Debit column missing in some CRDB statement variants
+                df = pd.read_excel(
+                    filepath,
+                    skiprows=12,
+                    header=0,
+                    usecols=['Posting Date', 'Details', 'Credit'],
+                    dtype=str
+                )
+
+            # CRDB has a duplicate header row right after the real header — drop it
+            if 'Posting Date' in df.columns:
+                df = df[df['Posting Date'] != 'Posting Date'].reset_index(drop=True)
+
             print(f"Columns found: {list(df.columns)}")
-            
+
             required_columns = ['Posting Date', 'Details', 'Credit']
             missing = [col for col in required_columns if col not in df.columns]
-            
+
             if missing:
                 return jsonify({
                     'error': f'Missing required columns: {missing}. Found: {list(df.columns)}'
                 }), 400
-            
-            # Filter only CREDIT transactions — use .loc to avoid pandas FutureWarning
-            df.loc[:, 'Credit'] = pd.to_numeric(df['Credit'].astype(str).str.replace(',', ''), errors='coerce')
-            df.loc[:, 'Debit']  = pd.to_numeric(df['Debit'].astype(str).str.replace(',', ''), errors='coerce')
 
-            credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) &
-                           ((df['Debit'].isna()) | (df['Debit'] == 0))].copy()
-            
-            # 🔥 Free full df immediately
-            del df
+            # 🔥 Convert in-place using .loc to avoid FutureWarning and extra copies
+            df.loc[:, 'Credit'] = pd.to_numeric(df['Credit'].str.replace(',', '', regex=False), errors='coerce')
+            if 'Debit' in df.columns:
+                df.loc[:, 'Debit'] = pd.to_numeric(df['Debit'].str.replace(',', '', regex=False), errors='coerce')
+                mask = (df['Credit'].notna()) & (df['Credit'] > 0) & ((df['Debit'].isna()) | (df['Debit'] == 0))
+            else:
+                mask = (df['Credit'].notna()) & (df['Credit'] > 0)
+
+            keep_cols = [c for c in ['Posting Date', 'Details', 'Credit'] if c in df.columns]
+            credit_df = df.loc[mask, keep_cols].copy()
+
+            # 🔥 Free full df and mask immediately
+            del df, mask
             gc.collect()
-            
+
             print(f"✅ Excel: Found {len(credit_df)} credit transactions")
         
         else:
@@ -1523,6 +1557,14 @@ def process_crdb_transactions(filepath):
                     stats['failed'] += 1
                     print(f"❌ FAILED: No phone/plate found in: {details[:80]} (REF: {ref_number})")
         
+        # 🔥 MEMORY: Free the transactions list and all lookup dicts after the loop
+        del transactions_list
+        del phone_lookup, plate_lookup, phone_lookup_sav, plate_lookup_sav
+        del id_lookup_sav, iphone_lookup
+        del all_existing_refs, all_existing_messages
+        del all_iphone_existing_refs, all_iphone_existing_messages
+        gc.collect()
+
         # ── Flush iPhone buckets immediately (no review flow needed) ──────────
         if bank_passed_data:
             print(f"\n📱 Writing {len(bank_passed_data)} rows to BANK_PASSED...")
@@ -1552,7 +1594,10 @@ def process_crdb_transactions(filepath):
             
             session['review_file'] = review_file
             
-            return jsonify({
+            # 🔥 MEMORY: Free process buckets before serialising — they're now in the pkl file
+            del passed_data, passed_sav_data, failed_data
+            gc.collect()
+            return json_response({
                 'needs_review': True,
                 'review_data': needs_review_data,
                 'stats': stats,
@@ -1573,7 +1618,10 @@ def process_crdb_transactions(filepath):
         if os.path.exists(filepath):
             os.remove(filepath)
         
-        return jsonify({
+        # 🔥 MEMORY: Free all data buckets before building/sending response
+        del passed_data, passed_sav_data, failed_data, bank_passed_data, bank_failed_data
+        gc.collect()
+        return json_response({
             'success': True,
             'stats': stats,
             'message': (
@@ -1589,7 +1637,7 @@ def process_crdb_transactions(filepath):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return json_response({'error': str(e)}, 500)
 
 
 def process_nmb_transactions(filepath):
@@ -1602,48 +1650,63 @@ def process_nmb_transactions(filepath):
     """
     try:
         print("📊 Processing NMB Excel file...")
-        
-        # Read Excel file - NMB format has headers at row 23 (0-indexed)
-        df = pd.read_excel(filepath, header=23)
-        
+
+        # 🔥 MEMORY FIX: skiprows=23 skips the 23 metadata rows without loading them.
+        # usecols loads ONLY the 5 columns we actually need (skips Balance, Value Date, etc.)
+        # dtype=str prevents pandas from creating extra float64 arrays during read.
+        try:
+            df = pd.read_excel(
+                filepath,
+                skiprows=23,
+                header=0,
+                usecols=['Date', 'Description', 'Reference Number', 'Credit', 'Debit'],
+                dtype=str
+            )
+        except ValueError:
+            # Fallback: 'Debit' column might be missing in some NMB formats
+            df = pd.read_excel(
+                filepath,
+                skiprows=23,
+                header=0,
+                usecols=['Date', 'Description', 'Reference Number', 'Credit'],
+                dtype=str
+            )
+
         print(f"Columns found: {list(df.columns)}")
-        
-        # NMB columns: Date, Value Date, Cheque Number/Control Number, Description, Reference Number, Credit, Debit, Balance
+
         required_columns = ['Date', 'Description', 'Credit']
         missing = [col for col in required_columns if col not in df.columns]
-        
+
         if missing:
             return jsonify({
                 'error': f'Missing required columns: {missing}. Found: {list(df.columns)}'
             }), 400
-        
-        # Filter only CREDIT transactions — use .loc to avoid pandas FutureWarning
+
+        # 🔥 Clean and convert Credit in-place using .loc (avoids FutureWarning + extra copy)
         df.loc[:, 'Credit'] = pd.to_numeric(
-            df['Credit'].astype(str).str.replace(',', '').str.replace('TZS', '').str.strip(),
+            df['Credit'].str.replace(',', '', regex=False).str.replace('TZS', '', regex=False).str.strip(),
             errors='coerce'
         )
-        
+
         if 'Debit' in df.columns:
             df.loc[:, 'Debit'] = pd.to_numeric(
-                df['Debit'].astype(str).str.replace(',', '').str.replace('TZS', '').str.strip(),
+                df['Debit'].str.replace(',', '', regex=False).str.replace('TZS', '', regex=False).str.strip(),
                 errors='coerce'
             )
-            credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) &
-                           ((df['Debit'].isna()) | (df['Debit'] == 0))].copy()
+            mask = (df['Credit'].notna()) & (df['Credit'] > 0) & ((df['Debit'].isna()) | (df['Debit'] == 0))
         else:
-            credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0)].copy()
+            mask = (df['Credit'].notna()) & (df['Credit'] > 0)
 
-        # Free full df immediately — only need credit rows from here
-        del df
+        # 🔥 Filter in-place, then convert ONLY the credit rows to lightweight list-of-dicts.
+        # Keep only the 4 columns that the processing loop actually reads.
+        keep_cols = [c for c in ['Date', 'Description', 'Reference Number', 'Credit'] if c in df.columns]
+        transactions_list = df.loc[mask, keep_cols].to_dict('records')
+
+        # 🔥 Free full df (and mask) immediately — list-of-dicts is all we need
+        del df, mask
         gc.collect()
 
-        print(f"✅ NMB Excel: Found {len(credit_df)} credit transactions")
-
-        # Convert to list of dicts so pandas DataFrame can be freed early
-        transactions_list = credit_df.to_dict('records')
-        del credit_df
-        gc.collect()
-        print(f"✅ Converted {len(transactions_list)} NMB transactions to list, freed DataFrame")
+        print(f"✅ NMB Excel: Found {len(transactions_list)} credit transactions, DataFrame freed")
         
         # Initialize Google Sheets service
         service = get_google_service()
@@ -2050,6 +2113,14 @@ def process_nmb_transactions(filepath):
                     stats['failed_nmb'] += 1
                     print(f"❌ FAILED_NMB: No phone/plate found in: {description[:80]} (REF: {ref_number})")
 
+        # 🔥 MEMORY: Free the transactions list and all lookup dicts after the loop
+        del transactions_list
+        del phone_lookup, plate_lookup, phone_lookup_sav, plate_lookup_sav
+        del id_lookup_sav, iphone_lookup
+        del all_existing_refs, all_existing_messages
+        del all_iphone_existing_refs, all_iphone_existing_messages
+        gc.collect()
+
         # ── If review needed, save state and return to frontend ────────────────
         if needs_review_data:
             review_file = os.path.join(
@@ -2082,7 +2153,10 @@ def process_nmb_transactions(filepath):
                 print(f"\n📱 Writing {len(bank_failed_data)} NMB iPhone rows to BANK_FAILED...")
                 append_to_sheet(service, 'BANK_FAILED', bank_failed_data)
 
-            return jsonify({
+            # 🔥 MEMORY: Free process buckets before serialising — they're in the pkl file
+            del passed_data, passed_nmb_data, failed_nmb_data
+            gc.collect()
+            return json_response({
                 'needs_review': True,
                 'review_data': needs_review_data,
                 'stats': stats,
@@ -2113,7 +2187,10 @@ def process_nmb_transactions(filepath):
         if os.path.exists(filepath):
             os.remove(filepath)
 
-        return jsonify({
+        # 🔥 MEMORY: Free all data buckets before building/sending response
+        del passed_data, passed_nmb_data, failed_nmb_data, bank_passed_data, bank_failed_data
+        gc.collect()
+        return json_response({
             'success': True,
             'stats': stats,
             'message': (
@@ -2129,7 +2206,7 @@ def process_nmb_transactions(filepath):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return json_response({'error': str(e)}, 500)
 
 
 @app.route('/confirm-reviews', methods=['POST'])
