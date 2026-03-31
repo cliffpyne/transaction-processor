@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, session, Response
+from flask import Flask, render_template, request, jsonify, session
 from werkzeug.utils import secure_filename
 import os
 import re
@@ -12,21 +12,11 @@ import pickle
 from datetime import datetime
 import pdfplumber  # For PDF extraction
 
-def json_response(data, status=200):
-    """
-    🔥 MEMORY: Return a JSON response using Flask's Response with explicit
-    Content-Type instead of jsonify, so Flask doesn't buffer the full body
-    in memory before sending. For large process results this prevents the
-    worker from holding two copies (dict + serialized string) simultaneously.
-    """
-    body = json.dumps(data, ensure_ascii=False)
-    return Response(body, status=status, mimetype='application/json')
-
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['TEMP_FOLDER'] = 'temp_reviews'
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB — handles large NMB Excel files
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB — handles large NMB/CRDB Excel files
 
 # Ensure folders exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -1057,9 +1047,9 @@ def upload_file():
         
         # 🔥 UPDATED: Accept both .xlsx and .pdf files (case-insensitive)
         filename_lower = file.filename.lower()
-        if not (filename_lower.endswith('.xlsx') or filename_lower.endswith('.pdf')):
+        if not (filename_lower.endswith('.xlsx') or filename_lower.endswith('.xls') or filename_lower.endswith('.pdf')):
             print(f"❌ Invalid file type: {file.filename}")
-            return jsonify({'error': f'Please upload an Excel file (.xlsx) or PDF file (.pdf). Got: {file.filename}'}), 400
+            return jsonify({'error': f'Please upload an Excel file (.xlsx/.xls) or PDF file (.pdf). Got: {file.filename}'}), 400
         
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -1122,58 +1112,34 @@ def process_crdb_transactions(filepath):
             
             print(f"✅ PDF: Found {len(credit_df)} credit transactions")
         
-        elif filepath.endswith('.xlsx'):
+        elif filepath.endswith('.xlsx') or filepath.endswith('.xls'):
             print("📊 Processing CRDB Excel file...")
-            # 🔥 MEMORY FIX: skiprows=12 skips metadata without loading it into RAM.
-            # usecols loads ONLY the columns we need (skips Balance, Value Date, Cheque No etc.)
-            # dtype=str avoids pandas creating extra float64 arrays on initial read.
-            try:
-                df = pd.read_excel(
-                    filepath,
-                    skiprows=12,
-                    header=0,
-                    usecols=['Posting Date', 'Details', 'Credit', 'Debit'],
-                    dtype=str
-                )
-            except ValueError:
-                # Fallback: Debit column missing in some CRDB statement variants
-                df = pd.read_excel(
-                    filepath,
-                    skiprows=12,
-                    header=0,
-                    usecols=['Posting Date', 'Details', 'Credit'],
-                    dtype=str
-                )
-
-            # CRDB has a duplicate header row right after the real header — drop it
-            if 'Posting Date' in df.columns:
-                df = df[df['Posting Date'] != 'Posting Date'].reset_index(drop=True)
-
+            # Read Excel file - CRDB format has headers at row 12
+            df = pd.read_excel(filepath, header=12)
+            df.columns = df.iloc[0]
+            df = df[1:].reset_index(drop=True)
+            
             print(f"Columns found: {list(df.columns)}")
-
+            
             required_columns = ['Posting Date', 'Details', 'Credit']
             missing = [col for col in required_columns if col not in df.columns]
-
+            
             if missing:
                 return jsonify({
                     'error': f'Missing required columns: {missing}. Found: {list(df.columns)}'
                 }), 400
+            
+            # Filter only CREDIT transactions — use .loc to avoid pandas FutureWarning
+            df.loc[:, 'Credit'] = pd.to_numeric(df['Credit'].astype(str).str.replace(',', ''), errors='coerce')
+            df.loc[:, 'Debit']  = pd.to_numeric(df['Debit'].astype(str).str.replace(',', ''), errors='coerce')
 
-            # 🔥 Convert in-place using .loc to avoid FutureWarning and extra copies
-            df.loc[:, 'Credit'] = pd.to_numeric(df['Credit'].str.replace(',', '', regex=False), errors='coerce')
-            if 'Debit' in df.columns:
-                df.loc[:, 'Debit'] = pd.to_numeric(df['Debit'].str.replace(',', '', regex=False), errors='coerce')
-                mask = (df['Credit'].notna()) & (df['Credit'] > 0) & ((df['Debit'].isna()) | (df['Debit'] == 0))
-            else:
-                mask = (df['Credit'].notna()) & (df['Credit'] > 0)
-
-            keep_cols = [c for c in ['Posting Date', 'Details', 'Credit'] if c in df.columns]
-            credit_df = df.loc[mask, keep_cols].copy()
-
-            # 🔥 Free full df and mask immediately
-            del df, mask
+            credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) &
+                           ((df['Debit'].isna()) | (df['Debit'] == 0))].copy()
+            
+            # 🔥 Free full df immediately
+            del df
             gc.collect()
-
+            
             print(f"✅ Excel: Found {len(credit_df)} credit transactions")
         
         else:
@@ -1557,14 +1523,6 @@ def process_crdb_transactions(filepath):
                     stats['failed'] += 1
                     print(f"❌ FAILED: No phone/plate found in: {details[:80]} (REF: {ref_number})")
         
-        # 🔥 MEMORY: Free the transactions list and all lookup dicts after the loop
-        del transactions_list
-        del phone_lookup, plate_lookup, phone_lookup_sav, plate_lookup_sav
-        del id_lookup_sav, iphone_lookup
-        del all_existing_refs, all_existing_messages
-        del all_iphone_existing_refs, all_iphone_existing_messages
-        gc.collect()
-
         # ── Flush iPhone buckets immediately (no review flow needed) ──────────
         if bank_passed_data:
             print(f"\n📱 Writing {len(bank_passed_data)} rows to BANK_PASSED...")
@@ -1594,10 +1552,7 @@ def process_crdb_transactions(filepath):
             
             session['review_file'] = review_file
             
-            # 🔥 MEMORY: Free process buckets before serialising — they're now in the pkl file
-            del passed_data, passed_sav_data, failed_data
-            gc.collect()
-            return json_response({
+            return jsonify({
                 'needs_review': True,
                 'review_data': needs_review_data,
                 'stats': stats,
@@ -1618,10 +1573,7 @@ def process_crdb_transactions(filepath):
         if os.path.exists(filepath):
             os.remove(filepath)
         
-        # 🔥 MEMORY: Free all data buckets before building/sending response
-        del passed_data, passed_sav_data, failed_data, bank_passed_data, bank_failed_data
-        gc.collect()
-        return json_response({
+        return jsonify({
             'success': True,
             'stats': stats,
             'message': (
@@ -1637,7 +1589,7 @@ def process_crdb_transactions(filepath):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return json_response({'error': str(e)}, 500)
+        return jsonify({'error': str(e)}), 500
 
 
 def process_nmb_transactions(filepath):
@@ -1651,29 +1603,55 @@ def process_nmb_transactions(filepath):
     try:
         print("📊 Processing NMB Excel file...")
 
-        # 🔥 MEMORY FIX: skiprows=23 skips the 23 metadata rows without loading them.
-        # usecols loads ONLY the 5 columns we actually need (skips Balance, Value Date, etc.)
-        # dtype=str prevents pandas from creating extra float64 arrays during read.
+        # ── Detect engine: xlrd for .xls, openpyxl for .xlsx ──────────────────
+        filepath_lower = filepath.lower()
+        if filepath_lower.endswith('.xls'):
+            engine = 'xlrd'
+        else:
+            engine = 'openpyxl'
+
+        print(f"📂 Reading with engine: {engine}")
+
+        # ── Auto-detect header row ─────────────────────────────────────────────
+        # NMB statements have variable metadata before the data table.
+        # We scan each row for the word 'Description' which always appears
+        # in the column header row. This works for both .xls and .xlsx.
+        HEADER_ROW = None
+        try:
+            scan_df = pd.read_excel(filepath, engine=engine, header=None, nrows=60)
+            for idx, row in scan_df.iterrows():
+                row_vals = [str(v).strip() for v in row if v is not None and str(v).strip() != 'nan']
+                if 'Description' in row_vals or 'DESCRIPTION' in row_vals:
+                    HEADER_ROW = idx
+                    print(f"✅ NMB header row auto-detected at row {idx} (0-based)")
+                    break
+            del scan_df
+            gc.collect()
+        except Exception as scan_err:
+            print(f"⚠️ Header scan failed: {scan_err} — falling back to row 23")
+
+        if HEADER_ROW is None:
+            HEADER_ROW = 23
+            print(f"⚠️ Header not found in first 60 rows, using default row {HEADER_ROW}")
+
+        # ── Read only the data we need ─────────────────────────────────────────
+        # skiprows skips the metadata; header=0 uses the first row after skipping
+        # as column names. We keep only the 4 columns the processing loop reads.
         try:
             df = pd.read_excel(
                 filepath,
-                skiprows=23,
+                engine=engine,
+                skiprows=HEADER_ROW,
                 header=0,
-                usecols=['Date', 'Description', 'Reference Number', 'Credit', 'Debit'],
                 dtype=str
             )
-        except ValueError:
-            # Fallback: 'Debit' column might be missing in some NMB formats
-            df = pd.read_excel(
-                filepath,
-                skiprows=23,
-                header=0,
-                usecols=['Date', 'Description', 'Reference Number', 'Credit'],
-                dtype=str
-            )
+        except Exception as read_err:
+            return jsonify({'error': f'Failed to read NMB file: {str(read_err)}'}), 400
 
         print(f"Columns found: {list(df.columns)}")
 
+        # NMB columns: Date, Value Date, Cheque Number/Control Number,
+        #              Description, Reference Number, Credit, Debit, Balance
         required_columns = ['Date', 'Description', 'Credit']
         missing = [col for col in required_columns if col not in df.columns]
 
@@ -1682,27 +1660,31 @@ def process_nmb_transactions(filepath):
                 'error': f'Missing required columns: {missing}. Found: {list(df.columns)}'
             }), 400
 
-        # 🔥 Clean and convert Credit in-place using .loc (avoids FutureWarning + extra copy)
+        # ── Convert Credit/Debit in-place, filter to credit rows only ─────────
         df.loc[:, 'Credit'] = pd.to_numeric(
-            df['Credit'].str.replace(',', '', regex=False).str.replace('TZS', '', regex=False).str.strip(),
+            df['Credit'].str.replace(',', '', regex=False)
+                        .str.replace('TZS', '', regex=False)
+                        .str.strip(),
             errors='coerce'
         )
 
         if 'Debit' in df.columns:
             df.loc[:, 'Debit'] = pd.to_numeric(
-                df['Debit'].str.replace(',', '', regex=False).str.replace('TZS', '', regex=False).str.strip(),
+                df['Debit'].str.replace(',', '', regex=False)
+                           .str.replace('TZS', '', regex=False)
+                           .str.strip(),
                 errors='coerce'
             )
-            mask = (df['Credit'].notna()) & (df['Credit'] > 0) & ((df['Debit'].isna()) | (df['Debit'] == 0))
+            mask = ((df['Credit'].notna()) & (df['Credit'] > 0) &
+                    ((df['Debit'].isna()) | (df['Debit'] == 0)))
         else:
             mask = (df['Credit'].notna()) & (df['Credit'] > 0)
 
-        # 🔥 Filter in-place, then convert ONLY the credit rows to lightweight list-of-dicts.
-        # Keep only the 4 columns that the processing loop actually reads.
+        # Keep only the 4 columns the loop actually uses before converting to dicts
         keep_cols = [c for c in ['Date', 'Description', 'Reference Number', 'Credit'] if c in df.columns]
         transactions_list = df.loc[mask, keep_cols].to_dict('records')
 
-        # 🔥 Free full df (and mask) immediately — list-of-dicts is all we need
+        # 🔥 Free full df and mask immediately — list-of-dicts is all we need
         del df, mask
         gc.collect()
 
@@ -2113,14 +2095,6 @@ def process_nmb_transactions(filepath):
                     stats['failed_nmb'] += 1
                     print(f"❌ FAILED_NMB: No phone/plate found in: {description[:80]} (REF: {ref_number})")
 
-        # 🔥 MEMORY: Free the transactions list and all lookup dicts after the loop
-        del transactions_list
-        del phone_lookup, plate_lookup, phone_lookup_sav, plate_lookup_sav
-        del id_lookup_sav, iphone_lookup
-        del all_existing_refs, all_existing_messages
-        del all_iphone_existing_refs, all_iphone_existing_messages
-        gc.collect()
-
         # ── If review needed, save state and return to frontend ────────────────
         if needs_review_data:
             review_file = os.path.join(
@@ -2153,10 +2127,7 @@ def process_nmb_transactions(filepath):
                 print(f"\n📱 Writing {len(bank_failed_data)} NMB iPhone rows to BANK_FAILED...")
                 append_to_sheet(service, 'BANK_FAILED', bank_failed_data)
 
-            # 🔥 MEMORY: Free process buckets before serialising — they're in the pkl file
-            del passed_data, passed_nmb_data, failed_nmb_data
-            gc.collect()
-            return json_response({
+            return jsonify({
                 'needs_review': True,
                 'review_data': needs_review_data,
                 'stats': stats,
@@ -2187,10 +2158,7 @@ def process_nmb_transactions(filepath):
         if os.path.exists(filepath):
             os.remove(filepath)
 
-        # 🔥 MEMORY: Free all data buckets before building/sending response
-        del passed_data, passed_nmb_data, failed_nmb_data, bank_passed_data, bank_failed_data
-        gc.collect()
-        return json_response({
+        return jsonify({
             'success': True,
             'stats': stats,
             'message': (
@@ -2206,7 +2174,7 @@ def process_nmb_transactions(filepath):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return json_response({'error': str(e)}, 500)
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/confirm-reviews', methods=['POST'])
