@@ -42,9 +42,6 @@ IPHONE_SHEET_ID   = '1Y2cOyObQvP502kvEbC-uGDP-3Sf5X9JKnDDYmR0BPRQ'
 # 🔥 NEW: Separate Google Sheet for NMB channel output
 NMB_SHEET_ID      = '1YchOygtfVyVNgz37sGX_KKud_Wr9KQsIkQKn_tEdbek'
 
-# 🔥 NEW: Separate Google Sheet for FORM/Fomu channel (CRDB + NMB)
-FORM_SHEET_ID     = '19bM2xfiP7YTvO0gbmlOQ2PWNPxMrFFRkTYVWzv3rj70'
-
 
 def _resolve_sheet(sheet_name):
     """
@@ -57,7 +54,6 @@ def _resolve_sheet(sheet_name):
       FAILED_NMB_OLD    → PASSED_SHEET_ID, tab FAILED_NMB       (old data)
       BANK_PASSED       → IPHONE_SHEET_ID, tab BANK_PASSED
       BANK_FAILED       → IPHONE_SHEET_ID, tab BANK_FAILED
-      FORM              → FORM_SHEET_ID,   tab FORM
       everything else   → PASSED_SHEET_ID, same tab name
     """
     if sheet_name in ('BANK_PASSED', 'BANK_FAILED'):
@@ -70,8 +66,6 @@ def _resolve_sheet(sheet_name):
         return PASSED_SHEET_ID, 'PASSED_SAV_NMB'
     elif sheet_name == 'FAILED_NMB_OLD':
         return PASSED_SHEET_ID, 'FAILED_NMB'
-    elif sheet_name == 'FORM':
-        return FORM_SHEET_ID, 'FORM'
     else:
         return PASSED_SHEET_ID, sheet_name
 
@@ -578,18 +572,6 @@ def extract_ref_number(text):
 # ═══════════════════════════════════════════════════════════════════════════════
 # 🔥 NEW: iPhone Channel Functions
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def is_form_transaction(details):
-    """
-    Detect whether a transaction description contains any of the FORM keywords:
-    Fomu, form, Fom, formu, phomu, kiingilio, kingilio, kinglio
-    Case-insensitive match on whole word or substring.
-    """
-    if not details or pd.isna(details):
-        return False
-    pattern = r'\b(fomu|form|fom|formu|phomu|kiingilio|kingilio|kinglio)\b'
-    return bool(re.search(pattern, str(details), re.IGNORECASE))
-
 
 def is_iphone_transaction(details):
     """
@@ -1147,11 +1129,11 @@ def process_crdb_transactions(filepath):
                     'error': f'Missing required columns: {missing}. Found: {list(df.columns)}'
                 }), 400
             
-            # Filter only CREDIT transactions
-            df['Credit'] = pd.to_numeric(df['Credit'].astype(str).str.replace(',', ''), errors='coerce')
-            df['Debit'] = pd.to_numeric(df['Debit'].astype(str).str.replace(',', ''), errors='coerce')
-            
-            credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) & 
+            # Filter only CREDIT transactions — use .loc to avoid pandas FutureWarning
+            df.loc[:, 'Credit'] = pd.to_numeric(df['Credit'].astype(str).str.replace(',', ''), errors='coerce')
+            df.loc[:, 'Debit']  = pd.to_numeric(df['Debit'].astype(str).str.replace(',', ''), errors='coerce')
+
+            credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) &
                            ((df['Debit'].isna()) | (df['Debit'] == 0))].copy()
             
             # 🔥 Free full df immediately
@@ -1240,10 +1222,7 @@ def process_crdb_transactions(filepath):
         # 🔥 NEW: Last IDs for iPhone sheets
         last_bank_passed_id = get_last_id(service, 'BANK_PASSED')
         last_bank_failed_id = get_last_id(service, 'BANK_FAILED')
-
-        # 🔥 NEW: Last ID for FORM sheet
-        last_form_id = get_last_id(service, 'FORM')
-
+        
         # ── Row buckets ────────────────────────────────────────────────────────
         passed_data      = []
         passed_sav_data  = []
@@ -1253,10 +1232,7 @@ def process_crdb_transactions(filepath):
         # 🔥 NEW: iPhone buckets
         bank_passed_data = []
         bank_failed_data = []
-
-        # 🔥 NEW: FORM bucket
-        form_data = []
-
+        
         stats = {
             'total': len(transactions_list),
             'passed': 0,
@@ -1271,9 +1247,6 @@ def process_crdb_transactions(filepath):
             'iphone_passed': 0,
             'iphone_failed': 0,
             'iphone_skipped': 0,
-            # 🔥 NEW: FORM stats
-            'form': 0,
-            'form_skipped': 0,
         }
         
         for row in transactions_list:
@@ -1281,44 +1254,6 @@ def process_crdb_transactions(filepath):
             details       = str(row.get('Details', ''))
             credit_amount = row.get('Credit', 0)
             ref_number    = extract_ref_number(details)
-
-            # ══════════════════════════════════════════════════════════════════
-            # 🔥 NEW: FORM Channel — intercept BEFORE everything else
-            # ══════════════════════════════════════════════════════════════════
-            if is_form_transaction(details):
-                print(f"\n📋 FORM transaction detected (CRDB): {details[:80]}")
-
-                # Duplicate check against FORM sheet
-                form_is_dup = False
-                if ref_number and ref_number in all_existing_refs:
-                    form_is_dup = True
-                elif details in all_existing_messages:
-                    form_is_dup = True
-
-                if form_is_dup:
-                    stats['form_skipped'] += 1
-                    stats['skipped'] += 1
-                    print(f"  ⏭️ FORM duplicate — skipped")
-                    continue
-
-                last_form_id += 1
-                form_row = [
-                    last_form_id,
-                    posting_date,
-                    'CRDB',
-                    details,
-                    credit_amount,
-                    '',             # no identifier needed
-                    '',
-                    ref_number or ''
-                ]
-                form_data.append(form_row)
-                stats['form'] += 1
-                print(f"  ✅ FORM (CRDB): {credit_amount} — {ref_number}")
-                continue  # Do NOT fall through to normal flow
-            # ══════════════════════════════════════════════════════════════════
-            # End FORM Channel
-            # ══════════════════════════════════════════════════════════════════
 
             # ══════════════════════════════════════════════════════════════════
             # 🔥 NEW: iPhone Channel — intercept BEFORE normal processing
@@ -1588,11 +1523,6 @@ def process_crdb_transactions(filepath):
                     stats['failed'] += 1
                     print(f"❌ FAILED: No phone/plate found in: {details[:80]} (REF: {ref_number})")
         
-        # ── Flush FORM bucket ─────────────────────────────────────────────────
-        if form_data:
-            print(f"\n📋 Writing {len(form_data)} rows to FORM (CRDB)...")
-            append_to_sheet(service, 'FORM', form_data)
-
         # ── Flush iPhone buckets immediately (no review flow needed) ──────────
         if bank_passed_data:
             print(f"\n📱 Writing {len(bank_passed_data)} rows to BANK_PASSED...")
@@ -1687,16 +1617,26 @@ def process_nmb_transactions(filepath):
                 'error': f'Missing required columns: {missing}. Found: {list(df.columns)}'
             }), 400
         
-        # Filter only CREDIT transactions
-        df['Credit'] = pd.to_numeric(df['Credit'].astype(str).str.replace(',', '').str.replace('TZS', '').str.strip(), errors='coerce')
+        # Filter only CREDIT transactions — use .loc to avoid pandas FutureWarning
+        df.loc[:, 'Credit'] = pd.to_numeric(
+            df['Credit'].astype(str).str.replace(',', '').str.replace('TZS', '').str.strip(),
+            errors='coerce'
+        )
         
         if 'Debit' in df.columns:
-            df['Debit'] = pd.to_numeric(df['Debit'].astype(str).str.replace(',', '').str.replace('TZS', '').str.strip(), errors='coerce')
-            credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) & 
+            df.loc[:, 'Debit'] = pd.to_numeric(
+                df['Debit'].astype(str).str.replace(',', '').str.replace('TZS', '').str.strip(),
+                errors='coerce'
+            )
+            credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0) &
                            ((df['Debit'].isna()) | (df['Debit'] == 0))].copy()
         else:
             credit_df = df[(df['Credit'].notna()) & (df['Credit'] > 0)].copy()
-        
+
+        # Free full df immediately — only need credit rows from here
+        del df
+        gc.collect()
+
         print(f"✅ NMB Excel: Found {len(credit_df)} credit transactions")
 
         # Convert to list of dicts so pandas DataFrame can be freed early
@@ -1729,14 +1669,14 @@ def process_nmb_transactions(filepath):
         print("Loading existing references from old PASSED sheet (refs only)...")
         existing_passed_refs, existing_passed_messages = get_existing_refs(service, 'PASSED', refs_only=True)
 
-        print("Loading existing references from new NMB PASSED sheet...")
-        existing_nmb_passed_refs, existing_nmb_passed_messages = get_existing_refs(service, 'PASSED_NMB')
+        print("Loading existing references from new NMB PASSED sheet (refs only)...")
+        existing_nmb_passed_refs, existing_nmb_passed_messages = get_existing_refs(service, 'PASSED_NMB', refs_only=True)
 
-        print("Loading existing references from old PASSED_SAV_NMB sheet...")
-        existing_passed_nmb_old_refs, existing_passed_nmb_old_messages = get_existing_refs(service, 'PASSED_SAV_NMB_OLD')
+        print("Loading existing references from old PASSED_SAV_NMB sheet (refs only)...")
+        existing_passed_nmb_old_refs, existing_passed_nmb_old_messages = get_existing_refs(service, 'PASSED_SAV_NMB_OLD', refs_only=True)
 
-        print("Loading existing references from new PASSED_SAV_NMB sheet...")
-        existing_passed_nmb_refs, existing_passed_nmb_messages = get_existing_refs(service, 'PASSED_SAV_NMB')
+        print("Loading existing references from new PASSED_SAV_NMB sheet (refs only)...")
+        existing_passed_nmb_refs, existing_passed_nmb_messages = get_existing_refs(service, 'PASSED_SAV_NMB', refs_only=True)
 
         print("Loading existing references from old FAILED_NMB sheet...")
         existing_failed_nmb_old_refs, existing_failed_nmb_old_messages = get_existing_refs(service, 'FAILED_NMB_OLD')
@@ -1744,11 +1684,11 @@ def process_nmb_transactions(filepath):
         print("Loading existing references from new FAILED_NMB sheet...")
         existing_failed_nmb_refs, existing_failed_nmb_messages = get_existing_refs(service, 'FAILED_NMB')
 
-        # 🔥 NEW: Also load BANK_PASSED/BANK_FAILED for iPhone dup check
-        print("Loading existing references from BANK_PASSED sheet...")
-        existing_bank_passed_refs, existing_bank_passed_messages = get_existing_refs(service, 'BANK_PASSED')
-        print("Loading existing references from BANK_FAILED sheet...")
-        existing_bank_failed_refs, existing_bank_failed_messages = get_existing_refs(service, 'BANK_FAILED')
+        # 🔥 Load BANK_PASSED/BANK_FAILED refs_only to save memory
+        print("Loading existing references from BANK_PASSED sheet (refs only)...")
+        existing_bank_passed_refs, existing_bank_passed_messages = get_existing_refs(service, 'BANK_PASSED', refs_only=True)
+        print("Loading existing references from BANK_FAILED sheet (refs only)...")
+        existing_bank_failed_refs, existing_bank_failed_messages = get_existing_refs(service, 'BANK_FAILED', refs_only=True)
 
         all_iphone_existing_refs     = existing_bank_passed_refs.union(existing_bank_failed_refs)
         all_iphone_existing_messages = existing_bank_passed_messages.union(existing_bank_failed_messages)
@@ -1794,15 +1734,11 @@ def process_nmb_transactions(filepath):
         last_bank_passed_id = get_last_id(service, 'BANK_PASSED')
         last_bank_failed_id = get_last_id(service, 'BANK_FAILED')
 
-        # 🔥 NEW: Last ID for FORM sheet (shared with CRDB FORM)
-        last_form_id = get_last_id(service, 'FORM')
-
         passed_data      = []          # → shared PASSED tab
         passed_nmb_data  = []          # → PASSED_SAV_NMB
         failed_nmb_data  = []          # → FAILED_NMB
         bank_passed_data = []          # 🔥 NEW → BANK_PASSED (iPhone)
         bank_failed_data = []          # 🔥 NEW → BANK_FAILED (iPhone)
-        form_data        = []          # 🔥 NEW → FORM (form/fomu)
         needs_review_data = []         # → review modal
 
         stats = {
@@ -1815,8 +1751,6 @@ def process_nmb_transactions(filepath):
             'iphone_passed': 0,    # 🔥 NEW
             'iphone_failed': 0,    # 🔥 NEW
             'iphone_skipped': 0,   # 🔥 NEW
-            'form': 0,             # 🔥 NEW
-            'form_skipped': 0,     # 🔥 NEW
         }
 
         for row in transactions_list:
@@ -1847,44 +1781,6 @@ def process_nmb_transactions(filepath):
 
             if is_duplicate:
                 continue
-
-            # ══════════════════════════════════════════════════════════════════
-            # 🔥 NEW: FORM Channel — intercept BEFORE everything else
-            # ══════════════════════════════════════════════════════════════════
-            if is_form_transaction(description):
-                print(f"\n📋 FORM transaction detected (NMB): {description[:80]}")
-
-                # Duplicate check against existing refs/messages
-                form_is_dup = False
-                if ref_number and ref_number in all_existing_refs:
-                    form_is_dup = True
-                elif description in all_existing_messages:
-                    form_is_dup = True
-
-                if form_is_dup:
-                    stats['form_skipped'] += 1
-                    stats['skipped'] += 1
-                    print(f"  ⏭️ FORM duplicate — skipped")
-                    continue
-
-                last_form_id += 1
-                form_row = [
-                    last_form_id,
-                    date,
-                    'NMB',
-                    description,
-                    credit_amount,
-                    '',             # no identifier needed
-                    '',
-                    ref_number or ''
-                ]
-                form_data.append(form_row)
-                stats['form'] += 1
-                print(f"  ✅ FORM (NMB): {credit_amount} — {ref_number}")
-                continue  # Do NOT fall through to normal flow
-            # ══════════════════════════════════════════════════════════════════
-            # End FORM Channel
-            # ══════════════════════════════════════════════════════════════════
 
             # ══════════════════════════════════════════════════════════════════
             # 🔥 NEW: NMB iPhone Channel — intercept BEFORE normal processing
@@ -2178,11 +2074,6 @@ def process_nmb_transactions(filepath):
 
             session['review_file'] = review_file
 
-            # 🔥 NEW: Flush FORM bucket before review return
-            if form_data:
-                print(f"\n📋 Writing {len(form_data)} rows to FORM (NMB)...")
-                append_to_sheet(service, 'FORM', form_data)
-
             # 🔥 NEW: Flush NMB iPhone buckets immediately even if review needed
             if bank_passed_data:
                 print(f"\n📱 Writing {len(bank_passed_data)} NMB iPhone rows to BANK_PASSED...")
@@ -2199,11 +2090,6 @@ def process_nmb_transactions(filepath):
             })
 
         # ── No reviews needed — write directly ─────────────────────────────
-
-        # 🔥 NEW: Flush FORM bucket
-        if form_data:
-            print(f"\n📋 Writing {len(form_data)} rows to FORM (NMB)...")
-            append_to_sheet(service, 'FORM', form_data)
 
         # 🔥 NEW: Flush iPhone buckets first (same sheets as CRDB)
         if bank_passed_data:
