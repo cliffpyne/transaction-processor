@@ -347,212 +347,127 @@ def _extract_phone_from_clean_text(text):
     
     return None
 
+def _find_plate_candidates(desc_text):
+    """
+    Core plate extraction: find ALL instances of (3 digits + 3 letters) or
+    (3 letters + 3 digits) within desc_text.  Only spaces are allowed as
+    separators between or within groups — no dashes, dots, etc.
+
+    Returns a deduplicated list of normalised plate strings: "MC" + digits + letters.
+
+    No INVALID_LETTERS filter needed — _get_description_section() already scopes
+    us to text AFTER the Description keyword, so header words (NMB, TER, TRX,
+    ACC, AGD, etc.) never reach this function.
+    """
+    text = str(desc_text).upper()
+    found = []
+    seen  = set()
+
+    # Forward  : 3 digits (opt single space between each) → opt spaces → 3 letters
+    # Reverse  : 3 letters → opt spaces → 3 digits
+    patterns = [
+        r'(\d[ ]?\d[ ]?\d)[ ]*([A-Za-z][ ]?[A-Za-z][ ]?[A-Za-z])',
+        r'([A-Za-z][ ]?[A-Za-z][ ]?[A-Za-z])[ ]*(\d[ ]?\d[ ]?\d)',
+    ]
+
+    for i, pat in enumerate(patterns):
+        for m in re.finditer(pat, text):
+            g1 = re.sub(r'\s', '', m.group(1))
+            g2 = re.sub(r'\s', '', m.group(2))
+            digits, letters = (g1, g2) if i == 0 else (g2, g1)
+            if not digits.isdigit() or not letters.isalpha():
+                continue
+            if len(digits) != 3 or len(letters) != 3:
+                continue
+            plate = f"MC{digits}{letters}"
+            if plate not in seen:
+                seen.add(plate)
+                found.append(plate)
+
+    return found
+
+
+def _get_description_section(text):
+    """
+    Extract the text that follows the word 'Description' (case-insensitive)
+    and ends at 'From', '!!' or end of string.
+    Returns the section string, or None if no Description keyword found.
+    """
+    if not text or pd.isna(text):
+        return None
+    m = re.search(r'description\s+(.+?)(?:\s+from\s+|\s*!!\s*|$)',
+                  str(text), re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    return None
+
+
 def extract_plate_number(text):
     """
-    🔥 FIXED: Extract plate number with PRIORITY on Description section
-    
-    CRITICAL FOR NMB:
-    - ALWAYS extract from the Description section FIRST
-    - The Description section comes after "Description" keyword and before "FROM" or "!!"
-    - This avoids false matches from "Ter ID", "101 NMB", agency numbers, etc.
-    - Only search full text if Description section doesn't have a plate
-    
-    Valid formats:
-    - MC###XXX (standard: MC567EFL)
-    - MC ### XXX (with spaces: MC 567 EFL)
-    - mc###xxx (lowercase: mc567efl, mc808flm)
-    - MC.###.XXX (with dots: MC.567.EFL)
-    - MC-###-XXX (with hyphens: MC-567-EFL)
-    - ###XXX (missing MC: 567EFL)
-    - MC XXX ### (letters first: MC EFL 567, MC 870 FLL)
-    - XXX ### MC (MC at end: EFL 567 MC)
-    - pikipiki MC874FLL
+    Extract a plate number from a transaction description.
+
+    Rules:
+    - ONLY search inside the Description section (after the word 'Description',
+      case-insensitive, before 'From' / '!!' / end of string).
+    - If there is NO Description section → return None (discouraged).
+    - Pattern: exactly 3 consecutive digits + exactly 3 consecutive letters
+      (or the reverse), with only spaces as separators.
+    - If exactly 1 candidate found  → return it.
+    - If 0 or 2+ candidates found   → return None
+      (2+ go to extract_plate_suggestions for the review dialog).
     """
-    if not text or pd.isna(text):
+    desc = _get_description_section(text)
+    if desc is None:
         return None
-    
-    original_text = str(text)
-    text_upper = original_text.upper()
-    
-    # 🔥 CRITICAL: For NMB messages, extract from Description section FIRST
-    # Pattern matches: "Description <CONTENT> FROM" or "Description <CONTENT> !!"
-    description_match = re.search(r'DESCRIPTION\s+(.+?)(?:FROM|!!|\Z)', original_text, re.IGNORECASE)
-    if description_match:
-        description_text = description_match.group(1).strip()
-        print(f"  🔍 Found Description section: {description_text[:80]}...")
-        
-        # Try to extract plate from description section
-        plate = _extract_plate_from_text(description_text)
-        if plate:
-            print(f"  ✅ Extracted plate from Description: {plate}")
-            return plate
-        else:
-            print(f"  ⚠️ No plate found in Description section: {description_text}")
-    
-    # If no Description section or no plate found, try entire text (cleaned)
-    # But clean it first to avoid false matches from Ter ID, agency numbers, etc.
-    text_cleaned = _clean_nmb_message(text_upper)
-    plate = _extract_plate_from_text(text_cleaned)
-    
-    if plate:
-        print(f"  ⚠️ Plate extracted from full text (not Description): {plate}")
-    
-    return plate
 
+    print(f"  🔍 Found Description section: {desc[:80]}...")
+    candidates = _find_plate_candidates(desc)
 
-def _clean_nmb_message(text):
-    """
-    🔥 NEW: Clean NMB message text to remove false positive patterns
-    Removes:
-    - "101 - NMB" bank identifier
-    - "Ter ID ###XXX" patterns (e.g., "Ter ID 2245105627")
-    - "agency @###" patterns
-    - "Trx ID" patterns
-    """
-    # Remove NMB bank identifier
-    text = re.sub(r'\d{3}\s*-?\s*NMB\s+(HEAD\s+OFFICE|BANK)?', '', text, flags=re.IGNORECASE)
-    
-    # 🔥 Remove "Ter ID" followed by any numbers (these create false XXX### patterns)
-    text = re.sub(r'TER\s+ID\s+\d+', '', text, flags=re.IGNORECASE)
-    
-    # 🔥 Remove "agency @" patterns (these create false phone numbers)
-    text = re.sub(r'AGENCY\s+@\d+@', '', text, flags=re.IGNORECASE)
-    
-    # 🔥 Remove "Trx ID" patterns
-    text = re.sub(r'TRX\s+ID\s+\w+', '', text, flags=re.IGNORECASE)
-    
-    return text
+    if len(candidates) == 1:
+        plate = candidates[0]
+        print(f"  ✅ Extracted plate from Description: {plate}")
+        return plate
 
+    if len(candidates) == 0:
+        print(f"  ⚠️ No plate found in Description section: {desc}")
+    else:
+        print(f"  ⚠️ Multiple plate candidates ({len(candidates)}) — sending to review: {candidates}")
 
-def _extract_plate_from_text(text):
-    """
-    🔥 IMPROVED: Core plate extraction logic with ALL patterns
-    Handles: MC808FLM, MC 808 FLM, mc808flm, mc 808 fll, 808FLM, mc175flm, MC 870 FLL, etc.
-    """
-    if not text or pd.isna(text):
-        return None
-    
-    # Convert to uppercase for matching
-    text_upper = str(text).upper()
-    
-    # List of invalid letter combinations (not real plates)
-    INVALID_LETTERS = {'NMB', 'TER', 'TRX', 'AGD', 'TPS', 'ACC', 'TPS', 'FRO', 'LTD'}
-    
-    # Try all patterns in order of specificity
-    
-    # Pattern 1: MC###XXX or MC ### XXX (standard format with MC prefix)
-    # Matches: MC808FLM, MC 808 FLM, MC-808-FLM, MC.808.FLM
-    pattern1 = r'\bMC[\s\.\-]*(\d{3})[\s\.\-]*([A-Z]{3})\b'
-    match = re.search(pattern1, text_upper)
-    if match:
-        letters = match.group(2)
-        if letters not in INVALID_LETTERS:
-            plate = f"MC{match.group(1)}{letters}"
-            print(f"  ✓ Pattern 1 (MC###XXX): {plate} from: {text[:80]}")
-            return plate
-    
-    # Pattern 2: MCXXX### or MC XXX ### (letters before numbers)
-    # Matches: MC FLL 870, MCFLL870, MC-FLL-870
-    pattern2 = r'\bMC[\s\.\-]*([A-Z]{3})[\s\.\-]*(\d{3})\b'
-    match = re.search(pattern2, text_upper)
-    if match:
-        letters = match.group(1)
-        if letters not in INVALID_LETTERS:
-            # Convert to standard format MC###XXX
-            plate = f"MC{match.group(2)}{letters}"
-            print(f"  ✓ Pattern 2 (MCXXX###): {plate} from: {text[:80]}")
-            return plate
-    
-    # Pattern 3: ###XXX (no MC prefix, numbers then letters)
-    # Matches: 808FLM, 808 FLM, 808-FLM
-    # Must NOT be preceded by MC or letters
-    pattern3 = r'(?<![A-Z])\b(\d{3})[\s\.\-]*([A-Z]{3})(?:\b|!!)'
-    matches = re.finditer(pattern3, text_upper)
-    for match in matches:
-        letters = match.group(2)
-        # Skip if this is actually part of "MC###XXX" pattern
-        start_pos = match.start()
-        if start_pos >= 2 and text_upper[start_pos-2:start_pos] == 'MC':
-            continue
-        if letters not in INVALID_LETTERS:
-            plate = f"MC{match.group(1)}{letters}"
-            print(f"  ✓ Pattern 3 (###XXX): {plate} from: {text[:80]}")
-            return plate
-    
-    # Pattern 4: XXX### (no MC prefix, letters then numbers)
-    # Matches: FLM175, fll886, FLL 870
-    # This handles mc175flm, mc886fll, etc.
-    pattern4 = r'(?<![A-Z])\b([A-Z]{3})[\s\.\-]*(\d{3})(?:\b|!!)'
-    matches = re.finditer(pattern4, text_upper)
-    for match in matches:
-        letters = match.group(1)
-        # Skip if this is actually part of "MCXXX###" pattern
-        start_pos = match.start()
-        if start_pos >= 2 and text_upper[start_pos-2:start_pos] == 'MC':
-            continue
-        if letters not in INVALID_LETTERS:
-            # Convert to standard format MC###XXX
-            plate = f"MC{match.group(2)}{letters}"
-            print(f"  ✓ Pattern 4 (XXX###): {plate} from: {text[:80]}")
-            return plate
-    
-    # Pattern 5: XXX MC ### (MC in middle, letters first)
-    # Matches: FLL MC 870, EFL MC 567
-    pattern5 = r'\b([A-Z]{3})[\s\.\-]+MC[\s\.\-]+(\d{3})\b'
-    match = re.search(pattern5, text_upper)
-    if match:
-        letters = match.group(1)
-        if letters not in INVALID_LETTERS:
-            plate = f"MC{match.group(2)}{letters}"
-            print(f"  ✓ Pattern 5 (XXX MC ###): {plate} from: {text[:80]}")
-            return plate
-    
-    # Pattern 6: ### MC XXX (MC in middle, numbers first)
-    # Matches: 870 MC FLL, 567 MC EFL
-    pattern6 = r'\b(\d{3})[\s\.\-]+MC[\s\.\-]+([A-Z]{3})\b'
-    match = re.search(pattern6, text_upper)
-    if match:
-        letters = match.group(2)
-        if letters not in INVALID_LETTERS:
-            plate = f"MC{match.group(1)}{letters}"
-            print(f"  ✓ Pattern 6 (### MC XXX): {plate} from: {text[:80]}")
-            return plate
-    
     return None
+
 
 def extract_plate_suggestions(text):
     """
-    🔥 NEW: Extract potential plate numbers that need confirmation
-    Returns list of (original_text, suggested_plate, confidence)
+    Return ALL plate candidates found in the Description section when there
+    are 2 or more — so the review dialog can ask the user which one to use.
+
+    Returns a list of dicts compatible with the existing review flow:
+      { 'original': plate, 'suggested': plate,
+        'confidence': 'medium', 'reason': '...' }
+
+    Returns [] if:
+    - no Description section
+    - 0 candidates  (nothing to suggest)
+    - exactly 1 candidate  (handled directly by extract_plate_number)
     """
-    if not text or pd.isna(text):
+    desc = _get_description_section(text)
+    if desc is None:
         return []
-    
-    text_upper = str(text).upper()
-    suggestions = []
-    
-    # Look for patterns that might be plates but need cleanup
-    pattern_messy = r'MC[\s\.\-]*([A-Z]{3,4})[\s\.\-]*(\d{2,4})|([A-Z]{3,4})[\s\.\-]*(\d{2,4})[\s\.\-]*(?:MC)?'
-    matches = re.finditer(pattern_messy, text_upper)
-    
-    for match in matches:
-        original = match.group(0)
-        
-        # Extract numbers and letters
-        numbers = ''.join(re.findall(r'\d', original))
-        letters = ''.join(re.findall(r'[A-Z]', original.replace('MC', '')))
-        
-        # Must have exactly 3 numbers and 3 letters to be valid
-        if len(numbers) == 3 and len(letters) == 3:
-            suggested = f"MC{numbers}{letters}"
-            suggestions.append({
-                'original': original,
-                'suggested': suggested,
-                'confidence': 'medium',
-                'reason': 'Rearranged format'
-            })
-    
-    return suggestions
+
+    candidates = _find_plate_candidates(desc)
+    if len(candidates) <= 1:
+        return []
+
+    return [
+        {
+            'original': plate,
+            'suggested': plate,
+            'confidence': 'medium',
+            'reason': f'Multiple plate candidates found in Description: {candidates}',
+        }
+        for plate in candidates
+    ]
+
 
 def extract_ref_number(text):
     """Extract reference number from message (format: REF:XXXXX or REF XXXXX)"""
@@ -1460,53 +1375,40 @@ def process_crdb_transactions(filepath):
             else:
                 # Check for plate suggestions
                 plate_suggestions = extract_plate_suggestions(details)
-                
+
                 if plate_suggestions:
-                    for suggestion in plate_suggestions:
-                        suggested_plate = suggestion['suggested']
-                        
-                        customer_name = lookup_customer_from_cache(suggested_plate, 'plate', phone_lookup, plate_lookup)
-                        customer_name_sav = None
-                        customer_id = ''
-                        
-                        if not customer_name:
-                            customer_name_sav = lookup_customer_from_cache(suggested_plate, 'plate', phone_lookup_sav, plate_lookup_sav)
-                            if customer_name_sav:
-                                customer_id = lookup_customer_id_from_cache(suggested_plate, 'plate', id_lookup_sav)
-                        
-                        if customer_name or customer_name_sav:
-                            needs_review_data.append({
-                                'posting_date': posting_date,
-                                'details': details,
-                                'credit_amount': credit_amount,
-                                'ref_number': ref_number or '',
-                                'original_text': suggestion['original'],
-                                'suggested_plate': suggested_plate,
-                                'customer_name': customer_name or customer_name_sav,
-                                'customer_id': customer_id,
-                                'target_sheet': 'PASSED' if customer_name else 'PASSED_SAV',
-                                'confidence': suggestion['confidence'],
-                                'reason': suggestion['reason'],
-                                'bank': 'CRDB'
-                            })
-                            stats['needs_review'] += 1
-                            print(f"🔍 NEEDS REVIEW: {suggestion['original']} -> {suggested_plate} -> {customer_name or customer_name_sav}")
-                            break
-                    
-                    if not needs_review_data or needs_review_data[-1]['details'] != details:
-                        last_failed_id += 1
-                        failed_row = [
-                            last_failed_id,
-                            posting_date,
-                            'CRDB',
-                            details,
-                            credit_amount,
-                            'No phone/plate',
-                            'No identifier',
-                            ref_number or ''
-                        ]
-                        failed_data.append(failed_row)
-                        stats['failed'] += 1
+                    # Pre-fetch pikipiki info for each candidate so confirm_reviews
+                    # doesn't need to reload the customer database
+                    candidate_details = []
+                    for s in plate_suggestions:
+                        cplate = s['suggested']
+                        cname = lookup_customer_from_cache(cplate, 'plate', phone_lookup, plate_lookup)
+                        cname_sav = None
+                        cid = ''
+                        if not cname:
+                            cname_sav = lookup_customer_from_cache(cplate, 'plate', phone_lookup_sav, plate_lookup_sav)
+                            if cname_sav:
+                                cid = lookup_customer_id_from_cache(cplate, 'plate', id_lookup_sav)
+                        candidate_details.append({
+                            'plate': cplate,
+                            'customer_name': cname or cname_sav or '',
+                            'customer_id': cid,
+                            'target_sheet': 'PASSED' if cname else ('PASSED_SAV' if cname_sav else None)
+                        })
+
+                    # Send ALL candidates to the dialog — user picks which one is real
+                    needs_review_data.append({
+                        'posting_date': posting_date,
+                        'details': details,
+                        'credit_amount': credit_amount,
+                        'ref_number': ref_number or '',
+                        'review_type': 'choose_plate',
+                        'candidates': candidate_details,
+                        'bank': 'CRDB'
+                    })
+                    stats['needs_review'] += 1
+                    plates_found = [c['plate'] for c in candidate_details]
+                    print(f"🔍 NEEDS REVIEW (choose plate): {plates_found}")
                 else:
                     last_failed_id += 1
                     failed_row = [
@@ -2025,61 +1927,39 @@ def process_nmb_transactions(filepath):
                 plate_suggestions = extract_plate_suggestions(description)
 
                 if plate_suggestions:
-                    added_to_review = False
-                    for suggestion in plate_suggestions:
-                        suggested_plate = suggestion['suggested']
-
-                        # Check records (tier 1) first
-                        customer_name = lookup_customer_from_cache(
-                            suggested_plate, 'plate', phone_lookup, plate_lookup
-                        )
-                        customer_name_sav = None
-                        customer_id = ''
-
-                        if not customer_name:
-                            customer_name_sav = lookup_customer_from_cache(
-                                suggested_plate, 'plate', phone_lookup_sav, plate_lookup_sav
+                    # Pre-fetch pikipiki info for each candidate
+                    candidate_details = []
+                    for s in plate_suggestions:
+                        cplate = s['suggested']
+                        cname = lookup_customer_from_cache(cplate, 'plate', phone_lookup, plate_lookup)
+                        cname_sav = None
+                        cid = ''
+                        if not cname:
+                            cname_sav = lookup_customer_from_cache(
+                                cplate, 'plate', phone_lookup_sav, plate_lookup_sav
                             )
-                            if customer_name_sav:
-                                customer_id = lookup_customer_id_from_cache(
-                                    suggested_plate, 'plate', id_lookup_sav
-                                )
+                            if cname_sav:
+                                cid = lookup_customer_id_from_cache(cplate, 'plate', id_lookup_sav)
+                        candidate_details.append({
+                            'plate': cplate,
+                            'customer_name': cname or cname_sav or '',
+                            'customer_id': cid,
+                            'target_sheet': 'PASSED' if cname else ('PASSED_SAV_NMB' if cname_sav else None)
+                        })
 
-                        if customer_name or customer_name_sav:
-                            # target_sheet drives where confirm-reviews sends it
-                            target_sheet = 'PASSED' if customer_name else 'PASSED_SAV_NMB'
-                            needs_review_data.append({
-                                'posting_date': date,
-                                'details': description,
-                                'credit_amount': credit_amount,
-                                'ref_number': ref_number,
-                                'original_text': suggestion['original'],
-                                'suggested_plate': suggested_plate,
-                                'customer_name': customer_name or customer_name_sav,
-                                'customer_id': customer_id,
-                                'target_sheet': target_sheet,
-                                'confidence': suggestion['confidence'],
-                                'reason': suggestion['reason'],
-                                'bank': 'NMB'
-                            })
-                            stats['needs_review'] += 1
-                            added_to_review = True
-                            print(f"🔍 NMB NEEDS REVIEW: {suggestion['original']} -> {suggested_plate} -> {customer_name or customer_name_sav}")
-                            break
-
-                    if not added_to_review:
-                        last_failed_nmb_id += 1
-                        failed_nmb_data.append([
-                            last_failed_nmb_id,
-                            date,
-                            'NMB',
-                            description,
-                            credit_amount,
-                            'No phone/plate',
-                            'No identifier',
-                            ref_number
-                        ])
-                        stats['failed_nmb'] += 1
+                    # Send ALL candidates to the dialog — user picks which one is real
+                    needs_review_data.append({
+                        'posting_date': date,
+                        'details': description,
+                        'credit_amount': credit_amount,
+                        'ref_number': ref_number,
+                        'review_type': 'choose_plate',
+                        'candidates': candidate_details,
+                        'bank': 'NMB'
+                    })
+                    stats['needs_review'] += 1
+                    plates_found = [c['plate'] for c in candidate_details]
+                    print(f"🔍 NMB NEEDS REVIEW (choose plate): {plates_found}")
                 else:
                     last_failed_nmb_id += 1
                     failed_nmb_data.append([
@@ -2213,9 +2093,76 @@ def confirm_reviews():
 
                 review_item = needs_review[idx]
 
-                if accept:
+                if review_item.get('review_type') == 'choose_plate':
+                    # User picks one plate from multiple candidates
+                    chosen_plate = confirmation.get('chosen_plate')
+                    if accept and chosen_plate:
+                        candidate = next(
+                            (c for c in review_item['candidates'] if c['plate'] == chosen_plate), None
+                        )
+                        if candidate and candidate['target_sheet'] == 'PASSED':
+                            last_ids['passed'] += 1
+                            row = [
+                                last_ids['passed'],
+                                review_item['posting_date'],
+                                'NMB',
+                                review_item['details'],
+                                review_item['credit_amount'],
+                                chosen_plate,
+                                candidate['customer_name'],
+                                review_item['ref_number'],
+                                ''
+                            ]
+                            passed_data.append(row)
+                            stats['passed'] = stats.get('passed', 0) + 1
+                        elif candidate and candidate['target_sheet'] == 'PASSED_SAV_NMB':
+                            last_ids['passed_nmb'] += 1
+                            row = [
+                                last_ids['passed_nmb'],
+                                review_item['posting_date'],
+                                'NMB',
+                                review_item['details'],
+                                review_item['credit_amount'],
+                                chosen_plate,
+                                candidate['customer_name'],
+                                review_item['ref_number'],
+                                candidate.get('customer_id', '')
+                            ]
+                            passed_nmb_data.append(row)
+                            stats['passed_sav_nmb'] = stats.get('passed_sav_nmb', 0) + 1
+                        else:
+                            # Chosen plate not in pikipiki → FAILED_NMB
+                            last_ids['failed_nmb'] += 1
+                            row = [
+                                last_ids['failed_nmb'],
+                                review_item['posting_date'],
+                                'NMB',
+                                review_item['details'],
+                                review_item['credit_amount'],
+                                chosen_plate,
+                                f'PLATE({chosen_plate}) not found in records',
+                                review_item['ref_number']
+                            ]
+                            failed_nmb_data.append(row)
+                            stats['failed_nmb'] = stats.get('failed_nmb', 0) + 1
+                    else:
+                        # Skipped / no plate chosen → FAILED_NMB
+                        last_ids['failed_nmb'] += 1
+                        row = [
+                            last_ids['failed_nmb'],
+                            review_item['posting_date'],
+                            'NMB',
+                            review_item['details'],
+                            review_item['credit_amount'],
+                            'No plate chosen',
+                            'Skipped by user',
+                            review_item['ref_number']
+                        ]
+                        failed_nmb_data.append(row)
+                        stats['failed_nmb'] = stats.get('failed_nmb', 0) + 1
+
+                elif accept:
                     if review_item['target_sheet'] == 'PASSED':
-                        # Goes to shared PASSED tab
                         last_ids['passed'] += 1
                         row = [
                             last_ids['passed'],
@@ -2223,15 +2170,14 @@ def confirm_reviews():
                             'NMB',
                             review_item['details'],
                             review_item['credit_amount'],
-                            review_item['suggested_plate'],
-                            review_item['customer_name'],
+                            review_item.get('suggested_plate', ''),
+                            review_item.get('customer_name', ''),
                             review_item['ref_number'],
                             ''
                         ]
                         passed_data.append(row)
                         stats['passed'] = stats.get('passed', 0) + 1
                     else:
-                        # Goes to PASSED_SAV_NMB
                         last_ids['passed_nmb'] += 1
                         row = [
                             last_ids['passed_nmb'],
@@ -2239,15 +2185,14 @@ def confirm_reviews():
                             'NMB',
                             review_item['details'],
                             review_item['credit_amount'],
-                            review_item['suggested_plate'],
-                            review_item['customer_name'],
+                            review_item.get('suggested_plate', ''),
+                            review_item.get('customer_name', ''),
                             review_item['ref_number'],
                             review_item.get('customer_id', '')
                         ]
                         passed_nmb_data.append(row)
                         stats['passed_sav_nmb'] = stats.get('passed_sav_nmb', 0) + 1
                 else:
-                    # Rejected → FAILED_NMB
                     last_ids['failed_nmb'] += 1
                     row = [
                         last_ids['failed_nmb'],
@@ -2255,7 +2200,7 @@ def confirm_reviews():
                         'NMB',
                         review_item['details'],
                         review_item['credit_amount'],
-                        review_item['suggested_plate'],
+                        review_item.get('suggested_plate', ''),
                         'Rejected by user',
                         review_item['ref_number']
                     ]
@@ -2292,7 +2237,75 @@ def confirm_reviews():
 
                 review_item = needs_review[idx]
 
-                if accept:
+                if review_item.get('review_type') == 'choose_plate':
+                    # User picks one plate from multiple candidates
+                    chosen_plate = confirmation.get('chosen_plate')
+                    if accept and chosen_plate:
+                        candidate = next(
+                            (c for c in review_item['candidates'] if c['plate'] == chosen_plate), None
+                        )
+                        if candidate and candidate['target_sheet'] == 'PASSED':
+                            last_ids['passed'] += 1
+                            row = [
+                                last_ids['passed'],
+                                review_item['posting_date'],
+                                'CRDB',
+                                review_item['details'],
+                                review_item['credit_amount'],
+                                chosen_plate,
+                                candidate['customer_name'],
+                                review_item['ref_number'],
+                                ''
+                            ]
+                            passed_data.append(row)
+                            stats['passed'] += 1
+                        elif candidate and candidate['target_sheet'] == 'PASSED_SAV':
+                            last_ids['passed_sav'] += 1
+                            row = [
+                                last_ids['passed_sav'],
+                                review_item['posting_date'],
+                                'CRDB',
+                                review_item['details'],
+                                review_item['credit_amount'],
+                                chosen_plate,
+                                candidate['customer_name'],
+                                review_item['ref_number'],
+                                candidate.get('customer_id', '')
+                            ]
+                            passed_sav_data.append(row)
+                            stats['passed_sav'] += 1
+                        else:
+                            # Chosen plate not in pikipiki → FAILED
+                            last_ids['failed'] += 1
+                            row = [
+                                last_ids['failed'],
+                                review_item['posting_date'],
+                                'CRDB',
+                                review_item['details'],
+                                review_item['credit_amount'],
+                                chosen_plate,
+                                f'PLATE({chosen_plate}) not found in records',
+                                review_item['ref_number']
+                            ]
+                            failed_data.append(row)
+                            stats['failed'] += 1
+                    else:
+                        # Skipped / no plate chosen → FAILED
+                        last_ids['failed'] += 1
+                        row = [
+                            last_ids['failed'],
+                            review_item['posting_date'],
+                            'CRDB',
+                            review_item['details'],
+                            review_item['credit_amount'],
+                            'No plate chosen',
+                            'Skipped by user',
+                            review_item['ref_number']
+                        ]
+                        failed_data.append(row)
+                        stats['failed'] += 1
+
+                elif accept:
                     if review_item['target_sheet'] == 'PASSED':
                         last_ids['passed'] += 1
                         row = [
@@ -2301,8 +2314,8 @@ def confirm_reviews():
                             'CRDB',
                             review_item['details'],
                             review_item['credit_amount'],
-                            review_item['suggested_plate'],
-                            review_item['customer_name'],
+                            review_item.get('suggested_plate', ''),
+                            review_item.get('customer_name', ''),
                             review_item['ref_number'],
                             ''
                         ]
@@ -2316,8 +2329,8 @@ def confirm_reviews():
                             'CRDB',
                             review_item['details'],
                             review_item['credit_amount'],
-                            review_item['suggested_plate'],
-                            review_item['customer_name'],
+                            review_item.get('suggested_plate', ''),
+                            review_item.get('customer_name', ''),
                             review_item['ref_number'],
                             review_item.get('customer_id', '')
                         ]
@@ -2331,7 +2344,7 @@ def confirm_reviews():
                         'CRDB',
                         review_item['details'],
                         review_item['credit_amount'],
-                        review_item['suggested_plate'],
+                        review_item.get('suggested_plate', ''),
                         'Rejected by user',
                         review_item['ref_number']
                     ]
