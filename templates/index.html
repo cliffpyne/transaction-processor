@@ -407,7 +407,7 @@ function startPts(col='rgba(16,185,129,1)'){
 function stopPts(){animOn=false}
 
 // STATE
-let sFile=null,sBank=null,rData=[],rDec={};
+let sFile=null,sBank=null,rData=[],rDec={},rSubmitting=false;
 
 // SETUP ZONES
 ['crdb','nmb'].forEach(b=>{
@@ -671,8 +671,9 @@ function decPlate(i,plate){
   const sel=document.getElementById(`ri${i}sel`);
   if(sel){sel.style.display='block';sel.textContent='✓ Selected: '+plate}
 }
-function cModal(){document.getElementById('rm').style.display='none'}
+function cModal(){document.getElementById('rm').style.display='none';rSubmitting=false;const btn=document.querySelector('.bsub');if(btn){btn.disabled=false;btn.textContent='✓ Submit All Decisions';}}
 async function subRev(){
+  if(rSubmitting)return;  // block double-submit
   const confs=Object.keys(rDec).map(k=>{
     const v=rDec[k];
     const obj={index:parseInt(k),accept:v.accept};
@@ -680,13 +681,22 @@ async function subRev(){
     return obj;
   });
   if(!confs.length){alert('Please make at least one decision');return}
+  rSubmitting=true;
+  const btn=document.querySelector('.bsub');
+  if(btn){btn.disabled=true;btn.textContent='Submitting...';}
   try{
     showSt('Submitting decisions...','inf');
     const r=await fetch('/confirm-reviews',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmations:confs})});
     const res=await r.json();
     if(res.success){cModal();showSt(res.message,'ok');showStats(res.stats,sBank)}
     else throw new Error(res.error||'Failed');
-  }catch(e){showSt(`Error: ${e.message}`,'er')}
+  }catch(e){
+    showSt(`Error: ${e.message}`,'er');
+    // Re-enable on error so user can retry
+    if(btn){btn.disabled=false;btn.textContent='✓ Submit All Decisions';}
+  }finally{
+    rSubmitting=false;
+  }
 }
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 </script>
