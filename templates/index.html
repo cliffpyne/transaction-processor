@@ -646,15 +646,18 @@ function showModal(data){
   const it=document.getElementById('rits');it.innerHTML='';rDec={};
   data.forEach((item,i)=>{
     const d=document.createElement('div');d.className='ri';d.id=`ri${i}`;
-    const conf=item.confidence||'medium';
     const isRescue=item.review_type==='choose_plate';
     if(isRescue){
-      // Rescue item: show candidate plate buttons for user to pick from
-      const candBtns=(item.candidates||[]).map((c,ci)=>
-        `<button class="ba" style="flex:0 0 auto;padding:8px 14px" onclick="decPlate(${i},'${esc(c)}')">${esc(c)}</button>`
-      ).join('');
-      d.innerHTML=`<div class="rmeta"><div><div class="rl">Date</div><div class="rv">${item.posting_date||'—'}</div></div><div><div class="rl">Amount</div><div class="rv">TZS ${Number(item.credit_amount||0).toLocaleString()}</div></div><div><div class="rl">Type</div><div class="rv"><span class="conf medium">RESCUE</span></div></div></div><div class="sbar">Message: <span class="chip">"${esc(item.original_text||item.message||'')}"</span> → Pick plate below</div><div class="rbtns" style="flex-wrap:wrap;gap:8px">${candBtns}<button class="br" style="flex:0 0 auto;padding:8px 14px" onclick="dec(${i},false)">✕ Reject → FAILED</button></div><div id="ri${i}sel" style="font-family:var(--mono);font-size:.7rem;color:var(--green);margin-top:8px;display:none"></div>`;
+      // Rescue item — candidates is [{plate, customer_name, target_sheet, ...}]
+      const candBtns=(item.candidates||[]).map(c=>{
+        const plate=c.plate||'';
+        const cname=c.customer_name?` · ${c.customer_name}`:'';
+        const sheet=c.target_sheet||'?';
+        return `<button class="ba" style="flex:0 0 auto;padding:8px 14px;margin:2px" onclick="decPlate(${i},'${esc(plate)}')">${esc(plate)}${esc(cname)} → ${esc(sheet)}</button>`;
+      }).join('');
+      d.innerHTML=`<div class="rmeta"><div><div class="rl">Date</div><div class="rv">${item.posting_date||'—'}</div></div><div><div class="rl">Amount</div><div class="rv">TZS ${Number(item.credit_amount||0).toLocaleString()}</div></div><div><div class="rl">Type</div><div class="rv"><span class="conf medium" style="color:var(--cyan);border-color:rgba(6,182,212,.3);background:rgba(6,182,212,.08)">RESCUE</span></div></div></div><div class="sbar" style="flex-direction:column;align-items:flex-start;gap:4px"><span style="color:var(--text3);font-size:.65rem">MESSAGE</span><span class="chip">${esc(item.details||item.original_text||'')}</span></div><div class="rbtns" style="flex-wrap:wrap;gap:6px;margin-top:8px">${candBtns}<button class="br" style="flex:0 0 auto;padding:8px 14px" onclick="dec(${i},false)">✕ Reject → FAILED</button></div><div id="ri${i}sel" style="display:none;font-family:var(--mono);font-size:.7rem;color:var(--green);margin-top:8px;padding:6px 10px;background:rgba(16,185,129,.07);border-radius:6px;border:1px solid rgba(16,185,129,.2)"></div>`;
     } else {
+      const conf=item.confidence||'medium';
       d.innerHTML=`<div class="rmeta"><div><div class="rl">Date</div><div class="rv">${item.posting_date||'—'}</div></div><div><div class="rl">Amount</div><div class="rv">TZS ${Number(item.credit_amount||0).toLocaleString()}</div></div><div><div class="rl">Confidence</div><div class="rv"><span class="conf ${conf}">${conf.toUpperCase()}</span></div></div></div><div class="sbar">Found: <span class="chip">"${esc(item.original_text||'')}"</span> → Plate: <span class="chip p">${esc(item.suggested_plate)}</span> → Customer: <span class="chip n">${esc(item.customer_name)}</span> → Sheet: <span class="chip s">${esc(item.target_sheet)}</span></div><div class="rbtns"><button class="ba" onclick="dec(${i},true)">✓ Accept → ${esc(item.target_sheet)}</button><button class="br" onclick="dec(${i},false)">✕ Reject → FAILED</button></div>`;
     }
     it.appendChild(d);
