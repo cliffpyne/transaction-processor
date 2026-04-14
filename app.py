@@ -477,6 +477,63 @@ def _extract_plate_from_text(text):
         return f"MC{m.group(1)}{m.group(2)}"
 
     return None
+
+
+def _extract_plate_from_text_rightmost(text):
+    """
+    Like _extract_plate_from_text but returns the RIGHTMOST (last) match.
+    Used when there is no Description keyword — we prefer patterns near the
+    end of the message.  Numbers-then-letters (priority 1) beat
+    letters-then-numbers (priority 2).
+    """
+    if not text or pd.isna(text):
+        return None
+
+    tu = str(text).upper()
+    INVALID = {'NMB', 'TER', 'TRX', 'AGD', 'TPS', 'ACC', 'FRO', 'LTD', 'HEAD', 'OFF'}
+    all_matches = []  # (position, plate, priority)
+
+    # MC-prefixed — priority 1
+    for m in re.finditer(r'MC[ ]?(\d[ ]?\d[ ]?\d)[ ]?([A-Z]{3})', tu):
+        l = m.group(2)
+        if l not in INVALID:
+            d = re.sub(r'\s', '', m.group(1))
+            all_matches.append((m.start(), f"MC{d}{l}", 1))
+
+    for m in re.finditer(r'MC[ ]?([A-Z]{3})[ ]?(\d[ ]?\d[ ]?\d)', tu):
+        l = m.group(1)
+        if l not in INVALID:
+            d = re.sub(r'\s', '', m.group(2))
+            all_matches.append((m.start(), f"MC{d}{l}", 1))
+
+    # Bare ###XXX — priority 1
+    for m in re.finditer(r'(\d{3})[ ]?([A-Z]{3})(?![A-Z])', tu):
+        pos = m.start()
+        if pos >= 2 and tu[pos-2:pos] == 'MC':
+            continue
+        l = m.group(2)
+        if l not in INVALID:
+            all_matches.append((pos, f"MC{m.group(1)}{l}", 1))
+
+    # Bare XXX### — priority 2
+    for m in re.finditer(r'(?<![A-Z])([A-Z]{3})[ ]?(\d{3})(?!\d)', tu):
+        l = m.group(1)
+        pos = m.start()
+        if pos >= 2 and tu[pos-2:pos] == 'MC':
+            continue
+        if l not in INVALID:
+            all_matches.append((pos, f"MC{m.group(2)}{l}", 2))
+
+    if not all_matches:
+        return None
+
+    # Sort: priority 1 before 2, then rightmost (largest position) first
+    all_matches.sort(key=lambda x: (x[2], -x[0]))
+    plate = all_matches[0][1]
+    print(f"  ✓ rightmost match: {plate}")
+    return plate
+
+
 def extract_plate_suggestions(text):
     """
     🔥 NEW: Extract potential plate numbers that need confirmation
