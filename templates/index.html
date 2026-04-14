@@ -646,15 +646,36 @@ function showModal(data){
   const it=document.getElementById('rits');it.innerHTML='';rDec={};
   data.forEach((item,i)=>{
     const d=document.createElement('div');d.className='ri';d.id=`ri${i}`;
-    d.innerHTML=`<div class="rmeta"><div><div class="rl">Date</div><div class="rv">${item.posting_date}</div></div><div><div class="rl">Amount</div><div class="rv">TZS ${Number(item.credit_amount).toLocaleString()}</div></div><div><div class="rl">Confidence</div><div class="rv"><span class="conf ${item.confidence}">${item.confidence.toUpperCase()}</span></div></div></div><div class="sbar">Found: <span class="chip">"${esc(item.original_text)}"</span> → Plate: <span class="chip p">${esc(item.suggested_plate)}</span> → Customer: <span class="chip n">${esc(item.customer_name)}</span> → Sheet: <span class="chip s">${esc(item.target_sheet)}</span></div><div class="rbtns"><button class="ba" onclick="dec(${i},true)">✓ Accept → ${esc(item.target_sheet)}</button><button class="br" onclick="dec(${i},false)">✕ Reject → FAILED</button></div>`;
+    const conf=item.confidence||'medium';
+    const isRescue=item.review_type==='choose_plate';
+    if(isRescue){
+      // Rescue item: show candidate plate buttons for user to pick from
+      const candBtns=(item.candidates||[]).map((c,ci)=>
+        `<button class="ba" style="flex:0 0 auto;padding:8px 14px" onclick="decPlate(${i},'${esc(c)}')">${esc(c)}</button>`
+      ).join('');
+      d.innerHTML=`<div class="rmeta"><div><div class="rl">Date</div><div class="rv">${item.posting_date||'—'}</div></div><div><div class="rl">Amount</div><div class="rv">TZS ${Number(item.credit_amount||0).toLocaleString()}</div></div><div><div class="rl">Type</div><div class="rv"><span class="conf medium">RESCUE</span></div></div></div><div class="sbar">Message: <span class="chip">"${esc(item.original_text||item.message||'')}"</span> → Pick plate below</div><div class="rbtns" style="flex-wrap:wrap;gap:8px">${candBtns}<button class="br" style="flex:0 0 auto;padding:8px 14px" onclick="dec(${i},false)">✕ Reject → FAILED</button></div><div id="ri${i}sel" style="font-family:var(--mono);font-size:.7rem;color:var(--green);margin-top:8px;display:none"></div>`;
+    } else {
+      d.innerHTML=`<div class="rmeta"><div><div class="rl">Date</div><div class="rv">${item.posting_date||'—'}</div></div><div><div class="rl">Amount</div><div class="rv">TZS ${Number(item.credit_amount||0).toLocaleString()}</div></div><div><div class="rl">Confidence</div><div class="rv"><span class="conf ${conf}">${conf.toUpperCase()}</span></div></div></div><div class="sbar">Found: <span class="chip">"${esc(item.original_text||'')}"</span> → Plate: <span class="chip p">${esc(item.suggested_plate)}</span> → Customer: <span class="chip n">${esc(item.customer_name)}</span> → Sheet: <span class="chip s">${esc(item.target_sheet)}</span></div><div class="rbtns"><button class="ba" onclick="dec(${i},true)">✓ Accept → ${esc(item.target_sheet)}</button><button class="br" onclick="dec(${i},false)">✕ Reject → FAILED</button></div>`;
+    }
     it.appendChild(d);
   });
   document.getElementById('rm').style.display='block';
 }
-function dec(i,a){rDec[i]=a;document.getElementById(`ri${i}`).className='ri '+(a?'acc':'rej')}
+function dec(i,a){rDec[i]={accept:a};document.getElementById(`ri${i}`).className='ri '+(a?'acc':'rej')}
+function decPlate(i,plate){
+  rDec[i]={accept:true,chosen_plate:plate};
+  document.getElementById(`ri${i}`).className='ri acc';
+  const sel=document.getElementById(`ri${i}sel`);
+  if(sel){sel.style.display='block';sel.textContent='✓ Selected: '+plate}
+}
 function cModal(){document.getElementById('rm').style.display='none'}
 async function subRev(){
-  const confs=Object.keys(rDec).map(k=>({index:parseInt(k),accept:rDec[k]}));
+  const confs=Object.keys(rDec).map(k=>{
+    const v=rDec[k];
+    const obj={index:parseInt(k),accept:v.accept};
+    if(v.chosen_plate)obj.chosen_plate=v.chosen_plate;
+    return obj;
+  });
   if(!confs.length){alert('Please make at least one decision');return}
   try{
     showSt('Submitting decisions...','inf');
