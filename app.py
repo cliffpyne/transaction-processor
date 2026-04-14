@@ -349,54 +349,44 @@ def _extract_phone_from_clean_text(text):
 
 def extract_plate_number(text):
     """
-    🔥 FIXED: Extract plate number with PRIORITY on Description section
-    
-    CRITICAL FOR NMB:
-    - ALWAYS extract from the Description section FIRST
-    - The Description section comes after "Description" keyword and before "FROM" or "!!"
-    - This avoids false matches from "Ter ID", "101 NMB", agency numbers, etc.
-    - Only search full text if Description section doesn't have a plate
-    
-    Valid formats:
-    - MC###XXX (standard: MC567EFL)
-    - MC ### XXX (with spaces: MC 567 EFL)
-    - mc###xxx (lowercase: mc567efl, mc808flm)
-    - MC.###.XXX (with dots: MC.567.EFL)
-    - MC-###-XXX (with hyphens: MC-567-EFL)
-    - ###XXX (missing MC: 567EFL)
-    - MC XXX ### (letters first: MC EFL 567, MC 870 FLL)
-    - XXX ### MC (MC at end: EFL 567 MC)
-    - pikipiki MC874FLL
+    DESCRIPTION BOUNDARY RULE (strict):
+
+    If message contains the word 'Description':
+      - ONLY search text AFTER that word (before 'From' / '!!' / end).
+      - NEVER look before 'Description'. No fallback to full text.
+      - If nothing found after Description → return None immediately.
+      This prevents TPS900, Ter ID, agency numbers from being picked up.
+
+    If message has NO 'Description' keyword:
+      - Search the entire cleaned message.
+      - Rightmost match wins (patterns near the end get priority).
+      - Numbers-then-letters patterns have priority over letters-then-numbers.
+
+    Returns normalised plate "MC###XXX" or None.
     """
     if not text or pd.isna(text):
         return None
-    
+
     original_text = str(text)
-    text_upper = original_text.upper()
-    
-    # 🔥 CRITICAL: For NMB messages, extract from Description section FIRST
-    # Pattern matches: "Description <CONTENT> FROM" or "Description <CONTENT> !!"
-    description_match = re.search(r'DESCRIPTION\s+(.+?)(?:FROM|!!|\Z)', original_text, re.IGNORECASE)
-    if description_match:
-        description_text = description_match.group(1).strip()
-        print(f"  🔍 Found Description section: {description_text[:80]}...")
-        
-        # Try to extract plate from description section
-        plate = _extract_plate_from_text(description_text)
+
+    # ── Description boundary present → search ONLY after it ──────────────────
+    desc_m = re.search(r'\bDESCRIPTION\b\s+(.+?)(?:\s+FROM\b|!!|$)',
+                       original_text, re.IGNORECASE | re.DOTALL)
+    if desc_m:
+        desc_text = desc_m.group(1).strip()
+        print(f"  🔍 Description section: {desc_text[:80]}...")
+        plate = _extract_plate_from_text(desc_text)
         if plate:
-            print(f"  ✅ Extracted plate from Description: {plate}")
-            return plate
+            print(f"  ✅ Plate from Description: {plate}")
         else:
-            print(f"  ⚠️ No plate found in Description section: {description_text}")
-    
-    # If no Description section or no plate found, try entire text (cleaned)
-    # But clean it first to avoid false matches from Ter ID, agency numbers, etc.
-    text_cleaned = _clean_nmb_message(text_upper)
-    plate = _extract_plate_from_text(text_cleaned)
-    
+            print(f"  ⚠️ No plate in Description — not falling back to full text")
+        return plate  # None or found — STOP here, never search before Description
+
+    # ── No Description → full cleaned message, rightmost match wins ───────────
+    cleaned = _clean_nmb_message(original_text.upper())
+    plate = _extract_plate_from_text_rightmost(cleaned)
     if plate:
-        print(f"  ⚠️ Plate extracted from full text (not Description): {plate}")
-    
+        print(f"  ✅ Plate from full text (rightmost): {plate}")
     return plate
 
 
@@ -426,100 +416,67 @@ def _clean_nmb_message(text):
 
 def _extract_plate_from_text(text):
     """
-    🔥 IMPROVED: Core plate extraction logic with ALL patterns
-    Handles: MC808FLM, MC 808 FLM, mc808flm, mc 808 fll, 808FLM, mc175flm, MC 870 FLL, etc.
+    Core plate extraction for a (typically short) text snippet.
+    Used on:
+      - The Description section of NMB messages (already scoped — no noise)
+      - Full cleaned message when no Description keyword exists
+
+    Rules:
+      - No word-boundary restriction: plates can be embedded mid-word
+        (e.g. kambangaMC264FNN, MC790FCEMaulid).
+      - Priority order: MC-prefixed > bare-###XXX > bare-XXX### > 2-letter fallback.
+      - Returns the FIRST match at each priority level.
     """
     if not text or pd.isna(text):
         return None
-    
-    # Convert to uppercase for matching
-    text_upper = str(text).upper()
-    
-    # List of invalid letter combinations (not real plates)
-    INVALID_LETTERS = {'NMB', 'TER', 'TRX', 'AGD', 'TPS', 'ACC', 'TPS', 'FRO', 'LTD'}
-    
-    # Try all patterns in order of specificity
-    
-    # Pattern 1: MC###XXX or MC ### XXX (standard format with MC prefix)
-    # Matches: MC808FLM, MC 808 FLM, MC-808-FLM, MC.808.FLM
-    pattern1 = r'\bMC[\s\.\-]*(\d{3})[\s\.\-]*([A-Z]{3})\b'
-    match = re.search(pattern1, text_upper)
-    if match:
-        letters = match.group(2)
-        if letters not in INVALID_LETTERS:
-            plate = f"MC{match.group(1)}{letters}"
-            print(f"  ✓ Pattern 1 (MC###XXX): {plate} from: {text[:80]}")
-            return plate
-    
-    # Pattern 2: MCXXX### or MC XXX ### (letters before numbers)
-    # Matches: MC FLL 870, MCFLL870, MC-FLL-870
-    pattern2 = r'\bMC[\s\.\-]*([A-Z]{3})[\s\.\-]*(\d{3})\b'
-    match = re.search(pattern2, text_upper)
-    if match:
-        letters = match.group(1)
-        if letters not in INVALID_LETTERS:
-            # Convert to standard format MC###XXX
-            plate = f"MC{match.group(2)}{letters}"
-            print(f"  ✓ Pattern 2 (MCXXX###): {plate} from: {text[:80]}")
-            return plate
-    
-    # Pattern 3: ###XXX (no MC prefix, numbers then letters)
-    # Matches: 808FLM, 808 FLM, 808-FLM
-    # Must NOT be preceded by MC or letters
-    pattern3 = r'(?<![A-Z])\b(\d{3})[\s\.\-]*([A-Z]{3})(?:\b|!!)'
-    matches = re.finditer(pattern3, text_upper)
-    for match in matches:
-        letters = match.group(2)
-        # Skip if this is actually part of "MC###XXX" pattern
-        start_pos = match.start()
-        if start_pos >= 2 and text_upper[start_pos-2:start_pos] == 'MC':
-            continue
-        if letters not in INVALID_LETTERS:
-            plate = f"MC{match.group(1)}{letters}"
-            print(f"  ✓ Pattern 3 (###XXX): {plate} from: {text[:80]}")
-            return plate
-    
-    # Pattern 4: XXX### (no MC prefix, letters then numbers)
-    # Matches: FLM175, fll886, FLL 870
-    # This handles mc175flm, mc886fll, etc.
-    pattern4 = r'(?<![A-Z])\b([A-Z]{3})[\s\.\-]*(\d{3})(?:\b|!!)'
-    matches = re.finditer(pattern4, text_upper)
-    for match in matches:
-        letters = match.group(1)
-        # Skip if this is actually part of "MCXXX###" pattern
-        start_pos = match.start()
-        if start_pos >= 2 and text_upper[start_pos-2:start_pos] == 'MC':
-            continue
-        if letters not in INVALID_LETTERS:
-            # Convert to standard format MC###XXX
-            plate = f"MC{match.group(2)}{letters}"
-            print(f"  ✓ Pattern 4 (XXX###): {plate} from: {text[:80]}")
-            return plate
-    
-    # Pattern 5: XXX MC ### (MC in middle, letters first)
-    # Matches: FLL MC 870, EFL MC 567
-    pattern5 = r'\b([A-Z]{3})[\s\.\-]+MC[\s\.\-]+(\d{3})\b'
-    match = re.search(pattern5, text_upper)
-    if match:
-        letters = match.group(1)
-        if letters not in INVALID_LETTERS:
-            plate = f"MC{match.group(2)}{letters}"
-            print(f"  ✓ Pattern 5 (XXX MC ###): {plate} from: {text[:80]}")
-            return plate
-    
-    # Pattern 6: ### MC XXX (MC in middle, numbers first)
-    # Matches: 870 MC FLL, 567 MC EFL
-    pattern6 = r'\b(\d{3})[\s\.\-]+MC[\s\.\-]+([A-Z]{3})\b'
-    match = re.search(pattern6, text_upper)
-    if match:
-        letters = match.group(2)
-        if letters not in INVALID_LETTERS:
-            plate = f"MC{match.group(1)}{letters}"
-            print(f"  ✓ Pattern 6 (### MC XXX): {plate} from: {text[:80]}")
-            return plate
-    
-    return None
+    tu = str(text).upper()
+    INVALID = {'NMB', 'TER', 'TRX', 'AGD', 'TPS', 'ACC', 'FRO', 'LTD', 'HEAD', 'OFF'}
 
+    # P1: MC + 3 digits + 3 letters (plate may be mid-word or followed by more letters)
+    m = re.search(r'MC[ ]?(\d[ ]?\d[ ]?\d)[ ]?([A-Z]{3})', tu)
+    if m:
+        d = re.sub(r'\s', '', m.group(1))
+        l = m.group(2)
+        if l not in INVALID:
+            print(f"  ✓ P1 MC###XXX: MC{d}{l}")
+            return f"MC{d}{l}"
+
+    # P2: MC + 3 letters + 3 digits
+    m = re.search(r'MC[ ]?([A-Z]{3})[ ]?(\d[ ]?\d[ ]?\d)', tu)
+    if m:
+        l = m.group(1)
+        d = re.sub(r'\s', '', m.group(2))
+        if l not in INVALID:
+            print(f"  ✓ P2 MCXXX###: MC{d}{l}")
+            return f"MC{d}{l}"
+
+    # P3: bare 3digits + 3letters (no lookbehind — catches CN607FLW, etc.)
+    for m in re.finditer(r'(\d{3})[ ]?([A-Z]{3})(?![A-Z])', tu):
+        pos = m.start()
+        if pos >= 2 and tu[pos-2:pos] == 'MC':
+            continue  # already covered by P1
+        l = m.group(2)
+        if l not in INVALID:
+            print(f"  ✓ P3 ###XXX: MC{m.group(1)}{l}")
+            return f"MC{m.group(1)}{l}"
+
+    # P4: bare 3letters + 3digits
+    for m in re.finditer(r'(?<![A-Z])([A-Z]{3})[ ]?(\d{3})(?!\d)', tu):
+        l = m.group(1)
+        pos = m.start()
+        if pos >= 2 and tu[pos-2:pos] == 'MC':
+            continue
+        if l not in INVALID:
+            print(f"  ✓ P4 XXX###: MC{m.group(2)}{l}")
+            return f"MC{m.group(2)}{l}"
+
+    # P5: MC + 3digits + 2letters fallback (truncated plates like mc266ey, mc628vj)
+    m = re.search(r'MC[ ]?(\d{3})[ ]?([A-Z]{2})(?![A-Z])', tu)
+    if m:
+        print(f"  ✓ P5 MC###XX (2-letter fallback): MC{m.group(1)}{m.group(2)}")
+        return f"MC{m.group(1)}{m.group(2)}"
+
+    return None
 def extract_plate_suggestions(text):
     """
     🔥 NEW: Extract potential plate numbers that need confirmation
@@ -594,34 +551,57 @@ def _rescue_extract_after_prefix(prefix, text):
 
 def _rescue_find_plates(text):
     """
-    Priority-aware rescue: MC → NC → M/C → rest → bare fallback.
-    First tier with results wins. Returns [] / [plate] / [p1,p2,...].
+    Last-resort plate finder triggered just before a transaction goes to FAILED.
+
+    Description boundary rule (same as extract_plate_number):
+      - If 'Description' keyword present → search ONLY the text after it.
+        Nothing before Description is considered. Ever.
+      - If no 'Description' keyword → search full cleaned message.
+        Rightmost / numbers-first patterns get priority.
+
+    Returns [] (nothing found), [plate] (single result → auto-route),
+    or [p1, p2, ...] (multiple → ask user to pick).
     """
     if not text or pd.isna(text):
         return []
-    cleaned = str(text).upper()
-    cleaned = re.sub(r'\d{3}\s*-?\s*NMB\s*(HEAD\s*OFFICE|BANK)?', '', cleaned)
-    cleaned = re.sub(r'TER\s+ID\s+\d+', '', cleaned)
-    cleaned = re.sub(r'TRX\s+ID\s+\w+', '', cleaned)
-    cleaned = re.sub(r'AGENCY\s+@\d+@', '', cleaned)
 
+    original = str(text)
+
+    # ── Respect Description boundary ─────────────────────────────────────────
+    desc_m = re.search(r'\bDESCRIPTION\b\s+(.+?)(?:\s+FROM\b|!!|$)',
+                       original, re.IGNORECASE | re.DOTALL)
+    if desc_m:
+        search_text = desc_m.group(1).strip().upper()
+        print(f"  🔍 RESCUE: searching Description section only: {search_text[:60]}...")
+    else:
+        search_text = original.upper()
+        # Clean noise only when searching full text
+        search_text = re.sub(r'\d{3}\s*-?\s*NMB\s*(HEAD\s*OFFICE|BANK)?', '', search_text)
+        search_text = re.sub(r'TER\s+ID\s+\d+', '', search_text)
+        search_text = re.sub(r'TRX\s+ID\s+\w+', '', search_text)
+        search_text = re.sub(r'AGENCY\s+@\d+@', '', search_text)
+
+    # ── Tier-based prefix search ──────────────────────────────────────────────
     for tier in _RESCUE_TIERS:
         tier_found, tier_seen = [], set()
         for prefix in tier:
-            for plate in _rescue_extract_after_prefix(prefix, cleaned):
+            for plate in _rescue_extract_after_prefix(prefix, search_text):
                 if plate not in tier_seen:
                     tier_seen.add(plate)
                     tier_found.append(plate)
         if tier_found:
+            print(f"  🔍 RESCUE tier hit: {tier_found}")
             return tier_found
 
-    # Bare fallback — no prefix found at all
-    found, seen = [], set()
+    # ── Bare fallback (3+3 without prefix) ───────────────────────────────────
+    # Collect ALL matches, sort rightmost + numbers-first for priority
+    all_found = []
+    seen = set()
     for i, pat in enumerate([
         r'(?<![A-Z\d])(\d[ ]?\d[ ]?\d)[ ]*([A-Z][ ]?[A-Z][ ]?[A-Z])(?![A-Z])',
         r'(?<![A-Z])([A-Z][ ]?[A-Z][ ]?[A-Z])[ ]*(\d[ ]?\d[ ]?\d)(?!\d)',
     ]):
-        for m in re.finditer(pat, cleaned):
+        for m in re.finditer(pat, search_text):
             g1 = re.sub(r'\s', '', m.group(1))
             g2 = re.sub(r'\s', '', m.group(2))
             digits, letters = (g1, g2) if i == 0 else (g2, g1)
@@ -630,8 +610,17 @@ def _rescue_find_plates(text):
             plate = f"MC{digits}{letters}"
             if plate not in seen:
                 seen.add(plate)
-                found.append(plate)
-    return found
+                # Store (position, plate, priority) — priority 1=nums-first, 2=letters-first
+                all_found.append((m.start(), plate, i + 1))
+
+    if all_found:
+        # Sort: priority 1 before 2, then rightmost position first
+        all_found.sort(key=lambda x: (x[2], -x[0]))
+        plates = [p for _, p, _ in all_found]
+        print(f"  🔍 RESCUE bare fallback: {plates}")
+        return plates
+
+    return []
 
 def extract_ref_number(text):
     """Extract reference number from message (format: REF:XXXXX or REF XXXXX)"""
