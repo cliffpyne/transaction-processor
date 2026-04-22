@@ -679,6 +679,273 @@ def _rescue_find_plates(text):
 
     return []
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🔥 NEW: FUZZY PLATE MATCHER — LAST-RESORT RESCUE BEFORE FAILED
+# Runs ONLY after all existing logic (extract_plate_number, _rescue_find_plates)
+# has already failed. Finds close matches in pikipiki records / records2
+# to catch customer typos like:
+#   MC601DXH → MC601EXH  (1-letter suffix typo)
+#   MC912ERW → MC912EWR  (suffix anagram/swap)
+#   MC367EZ  → MC367EZT  (truncated suffix)
+#   MC50EYP  → MC500EYP  (truncated number)
+#   MC968EZW → MC969EZW  (1-digit number typo)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _fuzzy_extract_candidate(text):
+    """
+    Loose plate extraction used ONLY by the fuzzy matcher.
+    Accepts 1-3 digits + 2-3 letters (to catch truncations like MC50EYP, MC367EZ).
+    Also accepts reversed order (MC895PFJ type letter-first-digit-after patterns).
+    Respects the Description boundary (NMB messages) — only searches after the
+    'Description' keyword if present, same as extract_plate_number.
+    Returns (number_str, suffix_str) or None.
+    """
+    if not text or pd.isna(text):
+        return None
+
+    original = str(text)
+
+    # Respect Description boundary — same as extract_plate_number
+    desc_m = re.search(r'\bDESCRIPTION\b\s+(.+?)(?:\s+FROM\b|!!|$)',
+                       original, re.IGNORECASE | re.DOTALL)
+    if desc_m:
+        search_text = desc_m.group(1).strip().upper()
+    else:
+        # Clean known noise when searching full text
+        search_text = original.upper()
+        search_text = re.sub(r'\d{3}\s*-?\s*NMB\s*(HEAD\s*OFFICE|BANK)?', '', search_text)
+        search_text = re.sub(r'TER\s+ID\s+\d+', '', search_text)
+        search_text = re.sub(r'TRX\s+ID\s+\w+', '', search_text)
+        search_text = re.sub(r'AGENCY\s+@\d+@', '', search_text)
+
+    # Pattern A: MC + digits + letters (digits-first)
+    m = re.search(r'MC\s*(\d(?:\s*\d){0,2})\s*([A-Z](?:\s*[A-Z]){1,2})(?![A-Z])', search_text)
+    if m:
+        num = re.sub(r'\s', '', m.group(1))
+        suf = re.sub(r'\s', '', m.group(2))
+        if 1 <= len(num) <= 3 and 2 <= len(suf) <= 3:
+            return (num, suf)
+
+    # Pattern B: MC + letters + digits (letters-first, catches MC895PFJ type)
+    m = re.search(r'MC\s*([A-Z](?:\s*[A-Z]){1,2})\s*(\d(?:\s*\d){0,2})(?!\d)', search_text)
+    if m:
+        suf = re.sub(r'\s', '', m.group(1))
+        num = re.sub(r'\s', '', m.group(2))
+        if 1 <= len(num) <= 3 and 2 <= len(suf) <= 3:
+            return (num, suf)
+
+    return None
+
+
+def _find_fuzzy_plate_matches(number, suffix, plate_lookup, plate_lookup_sav,
+                               id_lookup_sav, max_candidates=15):
+    """
+    Given an extracted (number, suffix), find close matches in plate DBs.
+
+    Rules applied:
+      A: same number, suffix differs by exactly 1 letter        (MC601DXH → MC601EXH)
+      B: same number, suffix is anagram of target               (MC912ERW → MC912EWR)
+      C: same number, suffix prefix-match for truncations       (MC367EZ  → MC367EZT)
+      D: same suffix, number differs by exactly 1 digit         (MC968EZW → MC969EZW)
+      E: same suffix, number is truncated (len mismatch)        (MC50EYP  → MC500EYP)
+
+    Returns list of dicts:
+      [{'plate': 'MC601EXH', 'name': 'JOHN DOE', 'customer_id': '', 'source': 'records'}, ...]
+
+    Returns [] (triggers fallback to FAILED) if:
+      - no candidates found
+      - total candidates exceed max_candidates (too ambiguous to auto-rescue)
+    """
+    if not number or not suffix:
+        return []
+
+    # Merge both plate lookups — records1 wins on collision
+    all_plates = {}
+    for plate, name in plate_lookup.items():
+        if plate and plate not in all_plates:
+            all_plates[plate] = {'name': name, 'source': 'records', 'customer_id': ''}
+    for plate, name in plate_lookup_sav.items():
+        if plate and plate not in all_plates:
+            cid = (id_lookup_sav or {}).get(plate, '')
+            all_plates[plate] = {'name': name, 'source': 'records2', 'customer_id': cid}
+
+    candidates = {}
+
+    def _letter_diff(s1, s2):
+        if len(s1) != len(s2):
+            return 99
+        return sum(1 for a, b in zip(s1, s2) if a != b)
+
+    for plate, info in all_plates.items():
+        m = re.match(r'^MC(\d{3})([A-Z]{3})$', plate)
+        if not m:
+            continue
+        pnum, psuf = m.group(1), m.group(2)
+        matched = False
+
+        if len(number) == 3 and len(suffix) == 3:
+            if pnum == number and psuf != suffix:
+                # Rule A: 1-letter suffix typo
+                if _letter_diff(suffix, psuf) == 1:
+                    matched = True
+                # Rule B: suffix anagram (letter swap)
+                elif sorted(suffix) == sorted(psuf):
+                    matched = True
+            elif psuf == suffix and pnum != number:
+                # Rule D: 1-digit number typo
+                if _letter_diff(number, pnum) == 1:
+                    matched = True
+
+        # Rule C: truncated suffix (2 letters instead of 3)
+        elif len(suffix) == 2 and len(number) == 3:
+            if pnum == number and psuf.startswith(suffix):
+                matched = True
+
+        # Rule E: truncated number (1 or 2 digits instead of 3)
+        elif len(number) != 3 and len(suffix) == 3:
+            if psuf == suffix and (pnum.startswith(number) or number.startswith(pnum)):
+                matched = True
+
+        if matched:
+            candidates[plate] = info
+
+    # Too ambiguous — don't auto-rescue
+    if len(candidates) == 0:
+        return []
+    if len(candidates) > max_candidates:
+        print(f"  🔍 FUZZY: {len(candidates)} candidates exceeds max ({max_candidates}) — skipping rescue")
+        return []
+
+    result = [{'plate': p, **info} for p, info in candidates.items()]
+    # Stable sort so output is deterministic (alphabetical by plate)
+    result.sort(key=lambda c: c['plate'])
+    return result
+
+
+def fuzzy_rescue_to_passed_row(last_passed_id, posting_date, bank, details,
+                                credit_amount, ref_number, fuzzy_candidates):
+    """
+    Build a PASSED row from fuzzy match candidates (matches PASSED schema: 9 cols).
+      - Plate column (F): comma-separated plate list
+      - Name column (G):  "PLATE=NAME, PLATE=NAME, ..." pairs
+      - Customer ID (I):  comma-joined IDs from records2 entries (empty if none)
+    """
+    plates_str = ', '.join(c['plate'] for c in fuzzy_candidates)
+    names_str  = ', '.join(f"{c['plate']}={c['name']}" for c in fuzzy_candidates)
+    ids_list   = [c['customer_id'] for c in fuzzy_candidates if c['customer_id']]
+    ids_str    = ', '.join(ids_list) if ids_list else ''
+
+    return [
+        last_passed_id,
+        posting_date,
+        bank,
+        details,
+        credit_amount,
+        plates_str,
+        names_str,
+        ref_number or '',
+        ids_str,
+    ]
+
+
+def apply_green_highlight(service, sheet_name, row_indices):
+    """
+    Apply bright green background (#00ff00) to specified 1-indexed row numbers
+    in the given logical sheet. Uses batchUpdate with repeatCell requests.
+    row_indices: list of 1-based row numbers (e.g. [152, 153, 154]).
+    """
+    if not row_indices:
+        return
+
+    try:
+        target_sheet_id, actual_tab = _resolve_sheet(sheet_name)
+
+        # We need the numeric sheetId (gid) for batchUpdate, not the tab name
+        meta = service.spreadsheets().get(spreadsheetId=target_sheet_id).execute()
+        tab_gid = None
+        for s in meta.get('sheets', []):
+            if s['properties']['title'] == actual_tab:
+                tab_gid = s['properties']['sheetId']
+                break
+
+        if tab_gid is None:
+            print(f"  ⚠️ Could not find tab '{actual_tab}' for green highlight")
+            return
+
+        requests = []
+        for row_1based in row_indices:
+            requests.append({
+                'repeatCell': {
+                    'range': {
+                        'sheetId': tab_gid,
+                        'startRowIndex': row_1based - 1,
+                        'endRowIndex':   row_1based,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': 9,
+                    },
+                    'cell': {
+                        'userEnteredFormat': {
+                            'backgroundColor': {
+                                'red':   0.0,
+                                'green': 1.0,
+                                'blue':  0.0,
+                            }
+                        }
+                    },
+                    'fields': 'userEnteredFormat.backgroundColor',
+                }
+            })
+
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=target_sheet_id,
+            body={'requests': requests}
+        ).execute()
+        print(f"  🟢 Applied green highlight to {len(row_indices)} fuzzy-rescued row(s) in {actual_tab}")
+
+    except Exception as e:
+        print(f"  ⚠️ Could not apply green highlight: {e}")
+
+
+def try_fuzzy_rescue(details, plate_lookup, plate_lookup_sav, id_lookup_sav):
+    """
+    High-level wrapper: given a failing transaction description, try to find
+    fuzzy plate matches. Returns list of candidate dicts (possibly empty).
+
+    This is the ONLY function the main processing loops need to call.
+    Returns [] when:
+      - no plate-like pattern can be extracted
+      - extracted plate already exists exactly in DB (shouldn't happen — means
+        normal flow missed it — but we guard anyway)
+      - no fuzzy matches found
+      - too many fuzzy matches (>15) to be confident
+    """
+    extracted = _fuzzy_extract_candidate(details)
+    if not extracted:
+        return []
+
+    number, suffix = extracted
+    full_plate = f"MC{number}{suffix}"
+
+    # Don't "rescue" a plate that already exists exactly — means something
+    # upstream is broken, not a fuzzy case
+    if full_plate in plate_lookup or full_plate in plate_lookup_sav:
+        print(f"  ⚠️ FUZZY: MC{number}{suffix} already in DB — not a fuzzy case")
+        return []
+
+    print(f"  🔎 FUZZY: trying to rescue MC{number}{suffix} (from: {str(details)[:60]})")
+    cands = _find_fuzzy_plate_matches(number, suffix, plate_lookup,
+                                       plate_lookup_sav, id_lookup_sav)
+    if cands:
+        print(f"  🟢 FUZZY RESCUE ({len(cands)} candidates): {[c['plate'] for c in cands]}")
+    return cands
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# End Fuzzy Plate Matcher
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
 def extract_ref_number(text):
     """Extract reference number from message (format: REF:XXXXX or REF XXXXX)"""
     if not text or pd.isna(text):
@@ -1357,7 +1624,10 @@ def process_crdb_transactions(filepath):
         # 🔥 NEW: iPhone buckets
         bank_passed_data = []
         bank_failed_data = []
-        
+
+        # 🔥 NEW: Fuzzy-rescued rows — written to PASSED with green highlight
+        fuzzy_passed_data = []
+
         stats = {
             'total': len(transactions_list),
             'passed': 0,
@@ -1372,6 +1642,8 @@ def process_crdb_transactions(filepath):
             'iphone_passed': 0,
             'iphone_failed': 0,
             'iphone_skipped': 0,
+            # 🔥 NEW: Fuzzy stats
+            'fuzzy_rescued': 0,
         }
         
         for row in transactions_list:
@@ -1557,6 +1829,24 @@ def process_crdb_transactions(filepath):
                                     print(f"  ✅ BANK_PASSED (via phone fallback): {iphone_customer} — {norm_phone} — {credit_amount}")
 
                         if not iphone_matched:
+                            # ── FUZZY RESCUE attempt before giving up ─────────
+                            # Only for plate failures, not phone failures
+                            fuzzy_cands = []
+                            if lookup_type == 'plate':
+                                fuzzy_cands = try_fuzzy_rescue(details, plate_lookup,
+                                                               plate_lookup_sav, id_lookup_sav)
+
+                            if fuzzy_cands:
+                                last_passed_id += 1
+                                fuzzy_row = fuzzy_rescue_to_passed_row(
+                                    last_passed_id, posting_date, 'CRDB', details,
+                                    credit_amount, ref_number, fuzzy_cands
+                                )
+                                fuzzy_passed_data.append(fuzzy_row)
+                                stats['fuzzy_rescued'] += 1
+                                print(f"  🟢 FUZZY→PASSED: {len(fuzzy_cands)} candidate(s) written green")
+                                continue  # move to next transaction
+
                             # Truly not found anywhere — add to FAILED
                             last_failed_id += 1
                             reason = f"{lookup_type.upper()}({identifier}) not found"
@@ -1635,9 +1925,22 @@ def process_crdb_transactions(filepath):
                             stats['needs_review'] += 1
                             print(f"🔍 RESCUE REVIEW (CRDB): {[c['plate'] for c in candidate_details]}")
                         else:
-                            last_failed_id += 1
-                            failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
-                            stats['failed'] += 1
+                            # ── FUZZY RESCUE before FAILED ─────────────────────
+                            fuzzy_cands = try_fuzzy_rescue(details, plate_lookup,
+                                                           plate_lookup_sav, id_lookup_sav)
+                            if fuzzy_cands:
+                                last_passed_id += 1
+                                fuzzy_row = fuzzy_rescue_to_passed_row(
+                                    last_passed_id, posting_date, 'CRDB', details,
+                                    credit_amount, ref_number, fuzzy_cands
+                                )
+                                fuzzy_passed_data.append(fuzzy_row)
+                                stats['fuzzy_rescued'] += 1
+                                print(f"  🟢 FUZZY→PASSED: {len(fuzzy_cands)} candidate(s) written green")
+                            else:
+                                last_failed_id += 1
+                                failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
+                                stats['failed'] += 1
                 else:
                     # ── RESCUE before FAILED ──────────────────────────────────
                     rescue_plates = _rescue_find_plates(details)
@@ -1655,10 +1958,23 @@ def process_crdb_transactions(filepath):
                         stats['needs_review'] += 1
                         print(f"🔍 RESCUE REVIEW (CRDB): {[c['plate'] for c in candidate_details]}")
                     else:
-                        last_failed_id += 1
-                        failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
-                        stats['failed'] += 1
-                        print(f"❌ FAILED: No phone/plate found in: {details[:80]} (REF: {ref_number})")
+                        # ── FUZZY RESCUE before FAILED ─────────────────────────
+                        fuzzy_cands = try_fuzzy_rescue(details, plate_lookup,
+                                                       plate_lookup_sav, id_lookup_sav)
+                        if fuzzy_cands:
+                            last_passed_id += 1
+                            fuzzy_row = fuzzy_rescue_to_passed_row(
+                                last_passed_id, posting_date, 'CRDB', details,
+                                credit_amount, ref_number, fuzzy_cands
+                            )
+                            fuzzy_passed_data.append(fuzzy_row)
+                            stats['fuzzy_rescued'] += 1
+                            print(f"  🟢 FUZZY→PASSED: {len(fuzzy_cands)} candidate(s) written green")
+                        else:
+                            last_failed_id += 1
+                            failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
+                            stats['failed'] += 1
+                            print(f"❌ FAILED: No phone/plate found in: {details[:80]} (REF: {ref_number})")
         
         # ── Flush iPhone buckets immediately (no review flow needed) ──────────
         if bank_passed_data:
@@ -1668,6 +1984,15 @@ def process_crdb_transactions(filepath):
         if bank_failed_data:
             print(f"\n📱 Writing {len(bank_failed_data)} rows to BANK_FAILED...")
             append_to_sheet(service, 'BANK_FAILED', bank_failed_data)
+
+        # ── Flush fuzzy-rescued bucket → PASSED + green highlight ─────────────
+        if fuzzy_passed_data:
+            print(f"\n🟢 Writing {len(fuzzy_passed_data)} fuzzy-rescued rows to PASSED...")
+            # Capture next row number BEFORE appending so we can compute which rows to highlight
+            start_row = get_last_row_number(service, 'PASSED') + 1
+            if append_to_sheet(service, 'PASSED', fuzzy_passed_data):
+                highlight_rows = list(range(start_row, start_row + len(fuzzy_passed_data)))
+                apply_green_highlight(service, 'PASSED', highlight_rows)
 
         # ── Store review data in file instead of session ───────────────────────
         if needs_review_data:
@@ -1719,7 +2044,8 @@ def process_crdb_transactions(filepath):
                 f"{stats['passed_sav']} passed (SAV), "
                 f"{stats['failed']} failed, "
                 f"{stats['iphone_passed']} iPhone passed, "
-                f"{stats['iphone_failed']} iPhone failed"
+                f"{stats['iphone_failed']} iPhone failed, "
+                f"{stats['fuzzy_rescued']} fuzzy rescued 🟢"
             )
         })
     
@@ -1923,6 +2249,9 @@ def process_nmb_transactions(filepath):
         bank_failed_data = []          # 🔥 NEW → BANK_FAILED (iPhone)
         needs_review_data = []         # → review modal
 
+        # 🔥 NEW: Fuzzy-rescued rows → PASSED with green highlight
+        fuzzy_passed_data = []
+
         stats = {
             'total': len(transactions_list),
             'passed': 0,           # went to PASSED (pikipiki records match)
@@ -1933,6 +2262,7 @@ def process_nmb_transactions(filepath):
             'iphone_passed': 0,    # 🔥 NEW
             'iphone_failed': 0,    # 🔥 NEW
             'iphone_skipped': 0,   # 🔥 NEW
+            'fuzzy_rescued': 0,    # 🔥 NEW
         }
 
         for row in transactions_list:
@@ -2132,6 +2462,24 @@ def process_nmb_transactions(filepath):
                                     print(f"  ✅ BANK_PASSED (NMB phone fallback): {iphone_customer} — {display_phone} — {credit_amount}")
 
                         if not iphone_matched:
+                            # ── FUZZY RESCUE attempt before giving up ─────────
+                            # Only for plate failures, not phone failures
+                            fuzzy_cands = []
+                            if lookup_type == 'plate':
+                                fuzzy_cands = try_fuzzy_rescue(description, plate_lookup,
+                                                               plate_lookup_sav, id_lookup_sav)
+
+                            if fuzzy_cands:
+                                last_passed_id += 1
+                                fuzzy_row = fuzzy_rescue_to_passed_row(
+                                    last_passed_id, date, 'NMB', description,
+                                    credit_amount, ref_number, fuzzy_cands
+                                )
+                                fuzzy_passed_data.append(fuzzy_row)
+                                stats['fuzzy_rescued'] += 1
+                                print(f"  🟢 FUZZY→PASSED (NMB): {len(fuzzy_cands)} candidate(s) written green")
+                                continue  # move to next transaction
+
                             # Truly not found anywhere → FAILED_NMB
                             last_failed_nmb_id += 1
                             reason = f"{lookup_type.upper()}({identifier}) not found"
@@ -2197,9 +2545,22 @@ def process_nmb_transactions(filepath):
                             stats['needs_review'] += 1
                             print(f"🔍 RESCUE REVIEW (NMB): {[c['plate'] for c in candidate_details]}")
                         else:
-                            last_failed_nmb_id += 1
-                            failed_nmb_data.append([last_failed_nmb_id, date, 'NMB', description, credit_amount, 'No phone/plate', 'No identifier', ref_number])
-                            stats['failed_nmb'] += 1
+                            # ── FUZZY RESCUE before FAILED ─────────────────────
+                            fuzzy_cands = try_fuzzy_rescue(description, plate_lookup,
+                                                           plate_lookup_sav, id_lookup_sav)
+                            if fuzzy_cands:
+                                last_passed_id += 1
+                                fuzzy_row = fuzzy_rescue_to_passed_row(
+                                    last_passed_id, date, 'NMB', description,
+                                    credit_amount, ref_number, fuzzy_cands
+                                )
+                                fuzzy_passed_data.append(fuzzy_row)
+                                stats['fuzzy_rescued'] += 1
+                                print(f"  🟢 FUZZY→PASSED (NMB): {len(fuzzy_cands)} candidate(s) written green")
+                            else:
+                                last_failed_nmb_id += 1
+                                failed_nmb_data.append([last_failed_nmb_id, date, 'NMB', description, credit_amount, 'No phone/plate', 'No identifier', ref_number])
+                                stats['failed_nmb'] += 1
                 else:
                     # ── RESCUE before FAILED ──────────────────────────────────
                     rescue_plates = _rescue_find_plates(description)
@@ -2217,10 +2578,23 @@ def process_nmb_transactions(filepath):
                         stats['needs_review'] += 1
                         print(f"🔍 RESCUE REVIEW (NMB): {[c['plate'] for c in candidate_details]}")
                     else:
-                        last_failed_nmb_id += 1
-                        failed_nmb_data.append([last_failed_nmb_id, date, 'NMB', description, credit_amount, 'No phone/plate', 'No identifier', ref_number])
-                        stats['failed_nmb'] += 1
-                        print(f"❌ FAILED_NMB: No phone/plate found in: {description[:80]} (REF: {ref_number})")
+                        # ── FUZZY RESCUE before FAILED ─────────────────────────
+                        fuzzy_cands = try_fuzzy_rescue(description, plate_lookup,
+                                                       plate_lookup_sav, id_lookup_sav)
+                        if fuzzy_cands:
+                            last_passed_id += 1
+                            fuzzy_row = fuzzy_rescue_to_passed_row(
+                                last_passed_id, date, 'NMB', description,
+                                credit_amount, ref_number, fuzzy_cands
+                            )
+                            fuzzy_passed_data.append(fuzzy_row)
+                            stats['fuzzy_rescued'] += 1
+                            print(f"  🟢 FUZZY→PASSED (NMB): {len(fuzzy_cands)} candidate(s) written green")
+                        else:
+                            last_failed_nmb_id += 1
+                            failed_nmb_data.append([last_failed_nmb_id, date, 'NMB', description, credit_amount, 'No phone/plate', 'No identifier', ref_number])
+                            stats['failed_nmb'] += 1
+                            print(f"❌ FAILED_NMB: No phone/plate found in: {description[:80]} (REF: {ref_number})")
 
         # ── If review needed, save state and return to frontend ────────────────
         if needs_review_data:
@@ -2254,6 +2628,14 @@ def process_nmb_transactions(filepath):
                 print(f"\n📱 Writing {len(bank_failed_data)} NMB iPhone rows to BANK_FAILED...")
                 append_to_sheet(service, 'BANK_FAILED', bank_failed_data)
 
+            # 🔥 NEW: Flush fuzzy-rescued bucket → PASSED_NMB + green highlight
+            if fuzzy_passed_data:
+                print(f"\n🟢 Writing {len(fuzzy_passed_data)} NMB fuzzy-rescued rows to PASSED_NMB...")
+                start_row = get_last_row_number(service, 'PASSED_NMB') + 1
+                if append_to_sheet(service, 'PASSED_NMB', fuzzy_passed_data):
+                    highlight_rows = list(range(start_row, start_row + len(fuzzy_passed_data)))
+                    apply_green_highlight(service, 'PASSED_NMB', highlight_rows)
+
             return jsonify({
                 'needs_review': True,
                 'review_data': needs_review_data,
@@ -2271,6 +2653,14 @@ def process_nmb_transactions(filepath):
         if bank_failed_data:
             print(f"\n📱 Writing {len(bank_failed_data)} NMB iPhone rows to BANK_FAILED...")
             append_to_sheet(service, 'BANK_FAILED', bank_failed_data)
+
+        # 🔥 NEW: Flush fuzzy-rescued bucket → PASSED_NMB + green highlight
+        if fuzzy_passed_data:
+            print(f"\n🟢 Writing {len(fuzzy_passed_data)} NMB fuzzy-rescued rows to PASSED_NMB...")
+            start_row = get_last_row_number(service, 'PASSED_NMB') + 1
+            if append_to_sheet(service, 'PASSED_NMB', fuzzy_passed_data):
+                highlight_rows = list(range(start_row, start_row + len(fuzzy_passed_data)))
+                apply_green_highlight(service, 'PASSED_NMB', highlight_rows)
 
         if passed_data:
             append_to_sheet(service, 'PASSED_NMB', passed_data)
@@ -2294,7 +2684,8 @@ def process_nmb_transactions(filepath):
                 f"{stats['passed_sav_nmb']} passed (PASSED_SAV_NMB), "
                 f"{stats['failed_nmb']} failed, "
                 f"{stats['iphone_passed']} iPhone passed, "
-                f"{stats['iphone_failed']} iPhone failed"
+                f"{stats['iphone_failed']} iPhone failed, "
+                f"{stats['fuzzy_rescued']} fuzzy rescued 🟢"
             )
         })
 
