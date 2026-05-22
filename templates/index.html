@@ -303,7 +303,7 @@ main{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:48px 24p
       <span class="ftag x">XLSX only</span>
     </div>
     <div class="bcard-body">
-      <div class="dropzone" id="nz"><div class="dicon">📂</div><div class="dtitle">Drop file here or click to browse</div><div class="dhint">Excel .xlsx format only</div><input type="file" id="ni" accept=".xlsx"></div>
+      <div class="dropzone" id="nz"><div class="dicon">📂</div><div class="dtitle">Drop file here or click to browse</div><div class="dhint">Excel .xlsx or .csv format</div><input type="file" id="ni" accept=".xlsx,.csv"></div>
       <button class="pbtn nm" id="nb" disabled>⚡ Process NMB Statement</button>
     </div>
   </div>
@@ -424,19 +424,19 @@ let sFile=null,sBank=null,rData=[],rDec={},rSubmitting=false;
 
 function hFile(file,bank){
   const B=bank.toUpperCase(),nm=file.name.toLowerCase();
-  if(B==='NMB'&&!nm.endsWith('.xlsx')){showSt('NMB requires .xlsx','er');return}
-  if(!nm.endsWith('.xlsx')&&!nm.endsWith('.pdf')){showSt('Please select .xlsx or .pdf','er');return}
+  if(B==='NMB'&&!(nm.endsWith('.xlsx')||nm.endsWith('.csv'))){showSt('NMB requires .xlsx or .csv','er');return}
+  if(B!=='NMB'&&!nm.endsWith('.xlsx')&&!nm.endsWith('.pdf')){showSt('Please select .xlsx or .pdf','er');return}
   sFile=file;sBank=B;
   const other=B==='CRDB'?'nmb':'crdb';
   document.getElementById(other==='crdb'?'cc':'nc').classList.remove('on');
   document.getElementById(other==='crdb'?'cb':'nb').disabled=true;
   rsetZone(other);
   document.getElementById(B==='CRDB'?'cc':'nc').classList.add('on');
-  const ico=nm.endsWith('.pdf')?'📄':'📊';
+  const ico=nm.endsWith('.pdf')?'📄':(nm.endsWith('.csv')?'📑':'📊');
   const sz=(file.size/1024).toFixed(1);
   const z=document.getElementById(B==='CRDB'?'cz':'nz');
   z.classList.add('filled');
-  z.innerHTML=`<div class="fchip"><span class="fchip-icon">${ico}</span><div><div class="fchip-name">${esc(file.name)}</div><div class="fchip-meta">${sz} KB · ${B} Statement</div></div><span class="fchip-chg">Change</span></div><input type="file" id="${bank}i2" accept="${B==='NMB'?'.xlsx':'.xlsx,.pdf'}" style="display:none">`;
+  z.innerHTML=`<div class="fchip"><span class="fchip-icon">${ico}</span><div><div class="fchip-name">${esc(file.name)}</div><div class="fchip-meta">${sz} KB · ${B} Statement</div></div><span class="fchip-chg">Change</span></div><input type="file" id="${bank}i2" accept="${B==='NMB'?'.xlsx,.csv':'.xlsx,.pdf'}" style="display:none">`;
   z.querySelector('input').addEventListener('change',e=>{if(e.target.files[0])hFile(e.target.files[0],bank)});
   z.addEventListener('click',()=>z.querySelector('input').click());
   document.getElementById(B==='CRDB'?'cb':'nb').disabled=false;
@@ -446,8 +446,8 @@ function hFile(file,bank){
 function rsetZone(bank){
   const z=document.getElementById(bank==='crdb'?'cz':'nz');
   z.classList.remove('filled','over');
-  const h=bank==='nmb'?'Excel .xlsx format only':'Supports .xlsx and .pdf';
-  const acc=bank==='nmb'?'.xlsx':'.xlsx,.pdf';
+  const h=bank==='nmb'?'Excel .xlsx or .csv format':'Supports .xlsx and .pdf';
+  const acc=bank==='nmb'?'.xlsx,.csv':'.xlsx,.pdf';
   z.innerHTML=`<div class="dicon">📂</div><div class="dtitle">Drop file here or click to browse</div><div class="dhint">${h}</div><input type="file" id="${bank}i" accept="${acc}">`;
   z.querySelector('input').addEventListener('change',e=>{if(e.target.files[0])hFile(e.target.files[0],bank)});
   z.addEventListener('click',()=>z.querySelector('input').click());

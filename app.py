@@ -1437,11 +1437,13 @@ def upload_file():
             print("❌ Empty filename")
             return jsonify({'error': 'No file selected'}), 400
         
-        # 🔥 UPDATED: Accept both .xlsx and .pdf files (case-insensitive)
+        # 🔥 UPDATED: Accept .xlsx, .xls, .pdf, and .csv files (case-insensitive)
+        #            .csv is currently supported for the NMB channel.
         filename_lower = file.filename.lower()
-        if not (filename_lower.endswith('.xlsx') or filename_lower.endswith('.xls') or filename_lower.endswith('.pdf')):
+        if not (filename_lower.endswith('.xlsx') or filename_lower.endswith('.xls')
+                or filename_lower.endswith('.pdf') or filename_lower.endswith('.csv')):
             print(f"❌ Invalid file type: {file.filename}")
-            return jsonify({'error': f'Please upload an Excel file (.xlsx/.xls) or PDF file (.pdf). Got: {file.filename}'}), 400
+            return jsonify({'error': f'Please upload an Excel file (.xlsx/.xls), PDF file (.pdf), or CSV file (.csv). Got: {file.filename}'}), 400
         
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -2055,6 +2057,210 @@ def process_crdb_transactions(filepath):
         return jsonify({'error': str(e)}), 500
 
 
+def read_nmb_excel(filepath):
+    """
+    Read an NMB statement in Excel (.xls/.xlsx) format and return
+    transactions_list — a list of dicts with keys:
+        Date, Description, Reference Number, Credit
+    Logic moved verbatim from process_nmb_transactions so the Excel
+    handling is unchanged. Returns a jsonify(...) error tuple on failure.
+    """
+    print("📊 Processing NMB Excel file...")
+
+    # ── Detect engine: xlrd for .xls, openpyxl for .xlsx ──────────────────
+    filepath_lower = filepath.lower()
+    if filepath_lower.endswith('.xls'):
+        engine = 'xlrd'
+    else:
+        engine = 'openpyxl'
+
+    print(f"📂 Reading with engine: {engine}")
+
+    # ── Auto-detect header row ─────────────────────────────────────────────
+    # NMB statements have variable metadata before the data table.
+    # We scan each row for the word 'Description' which always appears
+    # in the column header row. This works for both .xls and .xlsx.
+    HEADER_ROW = None
+    try:
+        scan_df = pd.read_excel(filepath, engine=engine, header=None, nrows=60)
+        for idx, row in scan_df.iterrows():
+            row_vals = [str(v).strip() for v in row if v is not None and str(v).strip() != 'nan']
+            if 'Description' in row_vals or 'DESCRIPTION' in row_vals:
+                HEADER_ROW = idx
+                print(f"✅ NMB header row auto-detected at row {idx} (0-based)")
+                break
+        del scan_df
+        gc.collect()
+    except Exception as scan_err:
+        print(f"⚠️ Header scan failed: {scan_err} — falling back to row 23")
+
+    if HEADER_ROW is None:
+        HEADER_ROW = 23
+        print(f"⚠️ Header not found in first 60 rows, using default row {HEADER_ROW}")
+
+    # ── Read only the data we need ─────────────────────────────────────────
+    # skiprows skips the metadata; header=0 uses the first row after skipping
+    # as column names. We keep only the 4 columns the processing loop reads.
+    try:
+        df = pd.read_excel(
+            filepath,
+            engine=engine,
+            skiprows=HEADER_ROW,
+            header=0,
+            dtype=str
+        )
+    except Exception as read_err:
+        return jsonify({'error': f'Failed to read NMB file: {str(read_err)}'}), 400
+
+    print(f"Columns found: {list(df.columns)}")
+
+    # NMB columns: Date, Value Date, Cheque Number/Control Number,
+    #              Description, Reference Number, Credit, Debit, Balance
+    required_columns = ['Date', 'Description', 'Credit']
+    missing = [col for col in required_columns if col not in df.columns]
+
+    if missing:
+        return jsonify({
+            'error': f'Missing required columns: {missing}. Found: {list(df.columns)}'
+        }), 400
+
+    # ── Convert Credit/Debit in-place, filter to credit rows only ─────────
+    df.loc[:, 'Credit'] = pd.to_numeric(
+        df['Credit'].str.replace(',', '', regex=False)
+                    .str.replace('TZS', '', regex=False)
+                    .str.strip(),
+        errors='coerce'
+    )
+
+    if 'Debit' in df.columns:
+        df.loc[:, 'Debit'] = pd.to_numeric(
+            df['Debit'].str.replace(',', '', regex=False)
+                       .str.replace('TZS', '', regex=False)
+                       .str.strip(),
+            errors='coerce'
+        )
+        mask = ((df['Credit'].notna()) & (df['Credit'] > 0) &
+                ((df['Debit'].isna()) | (df['Debit'] == 0)))
+    else:
+        mask = (df['Credit'].notna()) & (df['Credit'] > 0)
+
+    # Keep only the 4 columns the loop actually uses before converting to dicts
+    keep_cols = [c for c in ['Date', 'Description', 'Reference Number', 'Credit'] if c in df.columns]
+    transactions_list = df.loc[mask, keep_cols].to_dict('records')
+
+    # 🔥 Free full df and mask immediately — list-of-dicts is all we need
+    del df, mask
+    gc.collect()
+
+    print(f"✅ NMB Excel: Found {len(transactions_list)} credit transactions, DataFrame freed")
+    return transactions_list
+
+
+def read_nmb_csv(filepath):
+    """
+    🔥 NEW: Read an NMB statement in CSV format and return transactions_list —
+    the SAME structure read_nmb_excel returns (list of dicts with keys:
+    Date, Description, Reference Number, Credit) so the identical NMB
+    processing pipeline is reused unchanged.
+
+    NMB CSV layout (downloaded from NMB online banking):
+        row 0: <account number>, <account holder name>
+        row 1: Opening Balance, TZS ...
+        row 2: Closing Balance, TZS ...
+        row 3: HEADER -> Value Date, Narration/Description, Transaction Reference,
+                         Debit Amount, Credit Amount, Balance
+        row 4+: data rows
+
+    Returns a jsonify(...) error tuple on failure.
+    """
+    print("📄 Processing NMB CSV file...")
+
+    # ── Auto-detect the header row (metadata rows precede the table) ──────
+    try:
+        scan_df = pd.read_csv(filepath, header=None, dtype=str,
+                              nrows=60, keep_default_na=False)
+        HEADER_ROW = None
+        for idx, row in scan_df.iterrows():
+            joined = ' '.join(str(v).strip().lower() for v in row.tolist())
+            if ('description' in joined or 'narration' in joined) and 'credit' in joined:
+                HEADER_ROW = idx
+                print(f"✅ NMB CSV header row auto-detected at row {idx} (0-based)")
+                break
+        del scan_df
+        gc.collect()
+    except Exception as scan_err:
+        HEADER_ROW = None
+        print(f"⚠️ CSV header scan failed: {scan_err} — falling back to row 3")
+
+    if HEADER_ROW is None:
+        HEADER_ROW = 3  # known default for NMB CSV exports
+        print(f"⚠️ CSV header not auto-detected, using default row {HEADER_ROW}")
+
+    try:
+        df = pd.read_csv(filepath, skiprows=HEADER_ROW, header=0,
+                         dtype=str, keep_default_na=False)
+    except Exception as read_err:
+        return jsonify({'error': f'Failed to read NMB CSV file: {str(read_err)}'}), 400
+
+    # ── Normalize column names (strip stray spaces) and map to canonical ──
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.rename(columns={
+        'Value Date': 'Date',
+        'Narration/Description': 'Description',
+        'Transaction Reference': 'Reference Number',
+        'Credit Amount': 'Credit',
+        'Debit Amount': 'Debit',
+    })
+    print(f"NMB CSV columns found: {list(df.columns)}")
+
+    # ── Normalize the Date to a 4-digit year (e.g. 18-May-26 → 18-May-2026) ──
+    # NMB CSV uses a 2-digit year, but the shared extract_nmb_datetime() reads
+    # the year via a 20\d{2} regex and would otherwise miss it. Rows that don't
+    # parse keep their original value untouched.
+    if 'Date' in df.columns:
+        parsed = pd.to_datetime(df['Date'], format='%d-%b-%y', errors='coerce')
+        df.loc[:, 'Date'] = parsed.dt.strftime('%d-%b-%Y').where(parsed.notna(), df['Date'])
+
+    required_columns = ['Date', 'Description', 'Credit']
+    missing = [col for col in required_columns if col not in df.columns]
+    if missing:
+        return jsonify({
+            'error': f'Missing required columns: {missing}. Found: {list(df.columns)}'
+        }), 400
+
+    # ── Convert Credit/Debit, keep only positive-credit rows ──────────────
+    # Same cleaning as the Excel reader (strip commas/TZS) so values match.
+    df.loc[:, 'Credit'] = pd.to_numeric(
+        df['Credit'].astype(str)
+                    .str.replace(',', '', regex=False)
+                    .str.replace('TZS', '', regex=False)
+                    .str.strip(),
+        errors='coerce'
+    )
+
+    if 'Debit' in df.columns:
+        df.loc[:, 'Debit'] = pd.to_numeric(
+            df['Debit'].astype(str)
+                       .str.replace(',', '', regex=False)
+                       .str.replace('TZS', '', regex=False)
+                       .str.strip(),
+            errors='coerce'
+        )
+        mask = ((df['Credit'].notna()) & (df['Credit'] > 0) &
+                ((df['Debit'].isna()) | (df['Debit'] == 0)))
+    else:
+        mask = (df['Credit'].notna()) & (df['Credit'] > 0)
+
+    keep_cols = [c for c in ['Date', 'Description', 'Reference Number', 'Credit'] if c in df.columns]
+    transactions_list = df.loc[mask, keep_cols].to_dict('records')
+
+    del df, mask
+    gc.collect()
+
+    print(f"✅ NMB CSV: Found {len(transactions_list)} credit transactions, DataFrame freed")
+    return transactions_list
+
+
 def process_nmb_transactions(filepath):
     """
     🔥 UPDATED: Process NMB bank statement with 3-tier routing:
@@ -2064,95 +2270,19 @@ def process_nmb_transactions(filepath):
     Also includes needs_review / plate suggestion flow (same as CRDB).
     """
     try:
-        print("📊 Processing NMB Excel file...")
-
-        # ── Detect engine: xlrd for .xls, openpyxl for .xlsx ──────────────────
-        filepath_lower = filepath.lower()
-        if filepath_lower.endswith('.xls'):
-            engine = 'xlrd'
+        # 🔥 NEW: Dispatch by file type. CSV is read by read_nmb_csv() and Excel
+        #         by read_nmb_excel(); BOTH return the same transactions_list of
+        #         dicts (keys: Date, Description, Reference Number, Credit) so the
+        #         identical processing pipeline below is reused unchanged.
+        if filepath.lower().endswith('.csv'):
+            transactions_list = read_nmb_csv(filepath)
         else:
-            engine = 'openpyxl'
+            transactions_list = read_nmb_excel(filepath)
 
-        print(f"📂 Reading with engine: {engine}")
+        # read_* helpers return a jsonify(...) error tuple on failure — propagate it
+        if not isinstance(transactions_list, list):
+            return transactions_list
 
-        # ── Auto-detect header row ─────────────────────────────────────────────
-        # NMB statements have variable metadata before the data table.
-        # We scan each row for the word 'Description' which always appears
-        # in the column header row. This works for both .xls and .xlsx.
-        HEADER_ROW = None
-        try:
-            scan_df = pd.read_excel(filepath, engine=engine, header=None, nrows=60)
-            for idx, row in scan_df.iterrows():
-                row_vals = [str(v).strip() for v in row if v is not None and str(v).strip() != 'nan']
-                if 'Description' in row_vals or 'DESCRIPTION' in row_vals:
-                    HEADER_ROW = idx
-                    print(f"✅ NMB header row auto-detected at row {idx} (0-based)")
-                    break
-            del scan_df
-            gc.collect()
-        except Exception as scan_err:
-            print(f"⚠️ Header scan failed: {scan_err} — falling back to row 23")
-
-        if HEADER_ROW is None:
-            HEADER_ROW = 23
-            print(f"⚠️ Header not found in first 60 rows, using default row {HEADER_ROW}")
-
-        # ── Read only the data we need ─────────────────────────────────────────
-        # skiprows skips the metadata; header=0 uses the first row after skipping
-        # as column names. We keep only the 4 columns the processing loop reads.
-        try:
-            df = pd.read_excel(
-                filepath,
-                engine=engine,
-                skiprows=HEADER_ROW,
-                header=0,
-                dtype=str
-            )
-        except Exception as read_err:
-            return jsonify({'error': f'Failed to read NMB file: {str(read_err)}'}), 400
-
-        print(f"Columns found: {list(df.columns)}")
-
-        # NMB columns: Date, Value Date, Cheque Number/Control Number,
-        #              Description, Reference Number, Credit, Debit, Balance
-        required_columns = ['Date', 'Description', 'Credit']
-        missing = [col for col in required_columns if col not in df.columns]
-
-        if missing:
-            return jsonify({
-                'error': f'Missing required columns: {missing}. Found: {list(df.columns)}'
-            }), 400
-
-        # ── Convert Credit/Debit in-place, filter to credit rows only ─────────
-        df.loc[:, 'Credit'] = pd.to_numeric(
-            df['Credit'].str.replace(',', '', regex=False)
-                        .str.replace('TZS', '', regex=False)
-                        .str.strip(),
-            errors='coerce'
-        )
-
-        if 'Debit' in df.columns:
-            df.loc[:, 'Debit'] = pd.to_numeric(
-                df['Debit'].str.replace(',', '', regex=False)
-                           .str.replace('TZS', '', regex=False)
-                           .str.strip(),
-                errors='coerce'
-            )
-            mask = ((df['Credit'].notna()) & (df['Credit'] > 0) &
-                    ((df['Debit'].isna()) | (df['Debit'] == 0)))
-        else:
-            mask = (df['Credit'].notna()) & (df['Credit'] > 0)
-
-        # Keep only the 4 columns the loop actually uses before converting to dicts
-        keep_cols = [c for c in ['Date', 'Description', 'Reference Number', 'Credit'] if c in df.columns]
-        transactions_list = df.loc[mask, keep_cols].to_dict('records')
-
-        # 🔥 Free full df and mask immediately — list-of-dicts is all we need
-        del df, mask
-        gc.collect()
-
-        print(f"✅ NMB Excel: Found {len(transactions_list)} credit transactions, DataFrame freed")
-        
         # Initialize Google Sheets service
         service = get_google_service()
         
