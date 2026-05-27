@@ -31,6 +31,12 @@ else:
     print("⚠️ GOOGLE_CREDENTIALS_JSON not found")
 
 
+# Maximum number of rescue-plate candidates to surface for human review.
+# When _rescue_find_plates returns more than this, the review is skipped and
+# the transaction falls through to fuzzy rescue / FAILED — empirically, the
+# review team always declines these many-candidate reviews, so they're noise.
+MAX_REVIEW_CANDIDATES = int(os.environ.get('MAX_REVIEW_CANDIDATES', 2))
+
 # Google Sheets configuration
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 PASSED_SHEET_ID   = '1rdSRNLdZPT5xXLRgV7wSn1beYwWZp41ZpYoLkbGmt0o'
@@ -1913,8 +1919,8 @@ def process_crdb_transactions(filepath):
                     if not needs_review_data or needs_review_data[-1]['details'] != details:
                         # ── RESCUE before FAILED ──────────────────────────────
                         rescue_plates = _rescue_find_plates(details)
+                        candidate_details = []
                         if rescue_plates:
-                            candidate_details = []
                             for rp in rescue_plates:
                                 cn = lookup_customer_from_cache(rp, 'plate', phone_lookup, plate_lookup)
                                 cn_sav, cid = None, ''
@@ -1923,10 +1929,13 @@ def process_crdb_transactions(filepath):
                                     if cn_sav:
                                         cid = lookup_customer_id_from_cache(rp, 'plate', id_lookup_sav)
                                 candidate_details.append({'plate': rp, 'customer_name': cn or cn_sav or '', 'customer_id': cid, 'target_sheet': 'PASSED' if cn else ('PASSED_SAV' if cn_sav else None)})
+                        if 1 <= len(candidate_details) <= MAX_REVIEW_CANDIDATES:
                             needs_review_data.append({'posting_date': posting_date, 'details': details, 'credit_amount': credit_amount, 'ref_number': ref_number or '', 'review_type': 'choose_plate', 'candidates': candidate_details, 'bank': 'CRDB'})
                             stats['needs_review'] += 1
                             print(f"🔍 RESCUE REVIEW (CRDB): {[c['plate'] for c in candidate_details]}")
                         else:
+                            if len(candidate_details) > MAX_REVIEW_CANDIDATES:
+                                print(f"⏭️ Skipping {len(candidate_details)}-candidate review (too ambiguous): {[c['plate'] for c in candidate_details]}")
                             # ── FUZZY RESCUE before FAILED ─────────────────────
                             fuzzy_cands = try_fuzzy_rescue(details, plate_lookup,
                                                            plate_lookup_sav, id_lookup_sav)
@@ -1946,8 +1955,8 @@ def process_crdb_transactions(filepath):
                 else:
                     # ── RESCUE before FAILED ──────────────────────────────────
                     rescue_plates = _rescue_find_plates(details)
+                    candidate_details = []
                     if rescue_plates:
-                        candidate_details = []
                         for rp in rescue_plates:
                             cn = lookup_customer_from_cache(rp, 'plate', phone_lookup, plate_lookup)
                             cn_sav, cid = None, ''
@@ -1956,10 +1965,13 @@ def process_crdb_transactions(filepath):
                                 if cn_sav:
                                     cid = lookup_customer_id_from_cache(rp, 'plate', id_lookup_sav)
                             candidate_details.append({'plate': rp, 'customer_name': cn or cn_sav or '', 'customer_id': cid, 'target_sheet': 'PASSED' if cn else ('PASSED_SAV' if cn_sav else None)})
+                    if 1 <= len(candidate_details) <= MAX_REVIEW_CANDIDATES:
                         needs_review_data.append({'posting_date': posting_date, 'details': details, 'credit_amount': credit_amount, 'ref_number': ref_number or '', 'review_type': 'choose_plate', 'candidates': candidate_details, 'bank': 'CRDB'})
                         stats['needs_review'] += 1
                         print(f"🔍 RESCUE REVIEW (CRDB): {[c['plate'] for c in candidate_details]}")
                     else:
+                        if len(candidate_details) > MAX_REVIEW_CANDIDATES:
+                            print(f"⏭️ Skipping {len(candidate_details)}-candidate review (too ambiguous): {[c['plate'] for c in candidate_details]}")
                         # ── FUZZY RESCUE before FAILED ─────────────────────────
                         fuzzy_cands = try_fuzzy_rescue(details, plate_lookup,
                                                        plate_lookup_sav, id_lookup_sav)
@@ -2661,8 +2673,8 @@ def process_nmb_transactions(filepath):
                     if not added_to_review:
                         # ── RESCUE before FAILED ──────────────────────────────
                         rescue_plates = _rescue_find_plates(description)
+                        candidate_details = []
                         if rescue_plates:
-                            candidate_details = []
                             for rp in rescue_plates:
                                 cn = lookup_customer_from_cache(rp, 'plate', phone_lookup, plate_lookup)
                                 cn_sav, cid = None, ''
@@ -2671,10 +2683,13 @@ def process_nmb_transactions(filepath):
                                     if cn_sav:
                                         cid = lookup_customer_id_from_cache(rp, 'plate', id_lookup_sav)
                                 candidate_details.append({'plate': rp, 'customer_name': cn or cn_sav or '', 'customer_id': cid, 'target_sheet': 'PASSED' if cn else ('PASSED_SAV_NMB' if cn_sav else None)})
+                        if 1 <= len(candidate_details) <= MAX_REVIEW_CANDIDATES:
                             needs_review_data.append({'posting_date': date, 'details': description, 'credit_amount': credit_amount, 'ref_number': ref_number, 'review_type': 'choose_plate', 'candidates': candidate_details, 'bank': 'NMB'})
                             stats['needs_review'] += 1
                             print(f"🔍 RESCUE REVIEW (NMB): {[c['plate'] for c in candidate_details]}")
                         else:
+                            if len(candidate_details) > MAX_REVIEW_CANDIDATES:
+                                print(f"⏭️ Skipping {len(candidate_details)}-candidate review (NMB, too ambiguous): {[c['plate'] for c in candidate_details]}")
                             # ── FUZZY RESCUE before FAILED ─────────────────────
                             fuzzy_cands = try_fuzzy_rescue(description, plate_lookup,
                                                            plate_lookup_sav, id_lookup_sav)
@@ -2694,8 +2709,8 @@ def process_nmb_transactions(filepath):
                 else:
                     # ── RESCUE before FAILED ──────────────────────────────────
                     rescue_plates = _rescue_find_plates(description)
+                    candidate_details = []
                     if rescue_plates:
-                        candidate_details = []
                         for rp in rescue_plates:
                             cn = lookup_customer_from_cache(rp, 'plate', phone_lookup, plate_lookup)
                             cn_sav, cid = None, ''
@@ -2704,10 +2719,13 @@ def process_nmb_transactions(filepath):
                                 if cn_sav:
                                     cid = lookup_customer_id_from_cache(rp, 'plate', id_lookup_sav)
                             candidate_details.append({'plate': rp, 'customer_name': cn or cn_sav or '', 'customer_id': cid, 'target_sheet': 'PASSED' if cn else ('PASSED_SAV_NMB' if cn_sav else None)})
+                    if 1 <= len(candidate_details) <= MAX_REVIEW_CANDIDATES:
                         needs_review_data.append({'posting_date': date, 'details': description, 'credit_amount': credit_amount, 'ref_number': ref_number, 'review_type': 'choose_plate', 'candidates': candidate_details, 'bank': 'NMB'})
                         stats['needs_review'] += 1
                         print(f"🔍 RESCUE REVIEW (NMB): {[c['plate'] for c in candidate_details]}")
                     else:
+                        if len(candidate_details) > MAX_REVIEW_CANDIDATES:
+                            print(f"⏭️ Skipping {len(candidate_details)}-candidate review (NMB, too ambiguous): {[c['plate'] for c in candidate_details]}")
                         # ── FUZZY RESCUE before FAILED ─────────────────────────
                         fuzzy_cands = try_fuzzy_rescue(description, plate_lookup,
                                                        plate_lookup_sav, id_lookup_sav)
