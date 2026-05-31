@@ -2023,33 +2023,34 @@ def process_crdb_transactions(filepath):
                 highlight_rows = list(range(start_row, start_row + len(fuzzy_passed_data)))
                 apply_green_highlight(service, 'PASSED', highlight_rows)
 
-        # ── Store review data in file instead of session ───────────────────────
+        # ── AUTOMATION 2026-05-31: convert review rows to FAILED and proceed.
+        # No human review in the loop anymore; deferring writes to a pickle
+        # silently dropped ~4M TZS of payments today (the worker reported the
+        # cycle as 'ok' with stats, but the writes never happened). Now any
+        # row that previously needed review just lands in FAILED with the
+        # candidate plates in the reason column so operations can audit.
         if needs_review_data:
-            review_file = os.path.join(app.config['TEMP_FOLDER'], f'review_{datetime.now().timestamp()}.pkl')
-            with open(review_file, 'wb') as f:
-                pickle.dump({
-                    'needs_review': needs_review_data,
-                    'passed_data': passed_data,
-                    'passed_sav_data': passed_sav_data,
-                    'failed_data': failed_data,
-                    'stats': stats,
-                    'last_ids': {
-                        'passed': last_passed_id,
-                        'passed_sav': last_passed_sav_id,
-                        'failed': last_failed_id
-                    },
-                    'bank': 'CRDB'
-                }, f)
-            
-            session['review_file'] = review_file
-            
-            return jsonify({
-                'needs_review': True,
-                'review_data': needs_review_data,
-                'stats': stats,
-                'message': f"Found {len(needs_review_data)} records that need your review before processing"
-            })
-        
+            for rev in needs_review_data:
+                last_failed_id += 1
+                rev_type = rev.get('review_type', 'needs_review')
+                candidates_str = (
+                    ', '.join((c.get('plate') or '') for c in (rev.get('candidates') or []))
+                    if rev.get('candidates') else rev.get('suggested_plate', '')
+                )
+                failed_data.append([
+                    last_failed_id,
+                    rev.get('posting_date', ''),
+                    'CRDB',
+                    rev.get('details', ''),
+                    rev.get('credit_amount', 0),
+                    candidates_str,
+                    f'Auto-converted from review ({rev_type})',
+                    rev.get('ref_number', ''),
+                ])
+                stats['failed'] += 1
+            stats['needs_review'] = 0
+            needs_review_data = []
+
         # ── No reviews needed — append directly ───────────────────────────────
         if passed_data:
             append_to_sheet(service, 'PASSED', passed_data)
@@ -2773,52 +2774,30 @@ def process_nmb_transactions(filepath):
                             stats['failed_nmb'] += 1
                             print(f"❌ FAILED_NMB: No phone/plate found in: {description[:80]} (REF: {ref_number})")
 
-        # ── If review needed, save state and return to frontend ────────────────
+        # ── AUTOMATION 2026-05-31: convert review rows to FAILED_NMB and proceed.
+        # See CRDB path comment above. Auto-converting prevents the entire
+        # batch from being silently deferred when even one row needs review.
         if needs_review_data:
-            review_file = os.path.join(
-                app.config['TEMP_FOLDER'],
-                f'review_{datetime.now().timestamp()}.pkl'
-            )
-            with open(review_file, 'wb') as f:
-                pickle.dump({
-                    'needs_review': needs_review_data,
-                    'passed_data': passed_data,
-                    'passed_nmb_data': passed_nmb_data,
-                    'failed_nmb_data': failed_nmb_data,
-                    'stats': stats,
-                    'last_ids': {
-                        'passed': last_passed_id,
-                        'passed_nmb': last_passed_nmb_id,
-                        'failed_nmb': last_failed_nmb_id
-                    },
-                    'bank': 'NMB',
-                    'use_passed_nmb': True  # 🔥 flag so confirm-reviews writes to NMB sheet
-                }, f)
-
-            session['review_file'] = review_file
-
-            # 🔥 NEW: Flush NMB iPhone buckets immediately even if review needed
-            if bank_passed_data:
-                print(f"\n📱 Writing {len(bank_passed_data)} NMB iPhone rows to BANK_PASSED...")
-                append_to_sheet(service, 'BANK_PASSED', bank_passed_data)
-            if bank_failed_data:
-                print(f"\n📱 Writing {len(bank_failed_data)} NMB iPhone rows to BANK_FAILED...")
-                append_to_sheet(service, 'BANK_FAILED', bank_failed_data)
-
-            # 🔥 NEW: Flush fuzzy-rescued bucket → PASSED_NMB + green highlight
-            if fuzzy_passed_data:
-                print(f"\n🟢 Writing {len(fuzzy_passed_data)} NMB fuzzy-rescued rows to PASSED_NMB...")
-                start_row = get_last_row_number(service, 'PASSED_NMB') + 1
-                if append_to_sheet(service, 'PASSED_NMB', fuzzy_passed_data):
-                    highlight_rows = list(range(start_row, start_row + len(fuzzy_passed_data)))
-                    apply_green_highlight(service, 'PASSED_NMB', highlight_rows)
-
-            return jsonify({
-                'needs_review': True,
-                'review_data': needs_review_data,
-                'stats': stats,
-                'message': f"Found {len(needs_review_data)} NMB records that need your review before processing"
-            })
+            for rev in needs_review_data:
+                last_failed_nmb_id += 1
+                rev_type = rev.get('review_type', 'needs_review')
+                candidates_str = (
+                    ', '.join((c.get('plate') or '') for c in (rev.get('candidates') or []))
+                    if rev.get('candidates') else rev.get('suggested_plate', '')
+                )
+                failed_nmb_data.append([
+                    last_failed_nmb_id,
+                    rev.get('posting_date', ''),
+                    'NMB',
+                    rev.get('details', ''),
+                    rev.get('credit_amount', 0),
+                    candidates_str,
+                    f'Auto-converted from review ({rev_type})',
+                    rev.get('ref_number', ''),
+                ])
+                stats['failed_nmb'] += 1
+            stats['needs_review'] = 0
+            needs_review_data = []
 
         # ── No reviews needed — write directly ─────────────────────────────
 
