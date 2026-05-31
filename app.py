@@ -35,7 +35,7 @@ else:
 # When _rescue_find_plates returns more than this, the review is skipped and
 # the transaction falls through to fuzzy rescue / FAILED — empirically, the
 # review team always declines these many-candidate reviews, so they're noise.
-MAX_REVIEW_CANDIDATES = int(os.environ.get('MAX_REVIEW_CANDIDATES', 2))
+MAX_REVIEW_CANDIDATES = int(os.environ.get('MAX_REVIEW_CANDIDATES', 1))
 
 # Google Sheets configuration
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -1883,11 +1883,26 @@ def process_crdb_transactions(filepath):
             else:
                 # Check for plate suggestions (original logic)
                 plate_suggestions = extract_plate_suggestions(details)
-                
+
                 if plate_suggestions:
+                    # AUTOMATION GUARD: no human review anymore. If the description
+                    # produced more than one plate candidate we can't safely pick
+                    # one — push to FAILED with the candidate list visible.
+                    if len(plate_suggestions) > 1:
+                        last_failed_id += 1
+                        suggested_list = ', '.join(s['suggested'] for s in plate_suggestions)
+                        failed_data.append([
+                            last_failed_id, posting_date, 'CRDB', details, credit_amount,
+                            suggested_list,
+                            f'Multiple plate suggestions ({len(plate_suggestions)})',
+                            ref_number or '',
+                        ])
+                        stats['failed'] += 1
+                        print(f"❌ FAILED (CRDB): multiple plate suggestions ({len(plate_suggestions)}) — {suggested_list}")
+                        continue
                     for suggestion in plate_suggestions:
                         suggested_plate = suggestion['suggested']
-                        
+
                         customer_name = lookup_customer_from_cache(suggested_plate, 'plate', phone_lookup, plate_lookup)
                         customer_name_sav = None
                         customer_id = ''
@@ -2652,6 +2667,20 @@ def process_nmb_transactions(filepath):
                 plate_suggestions = extract_plate_suggestions(description)
 
                 if plate_suggestions:
+                    # AUTOMATION GUARD: no human review anymore. Multiple plate
+                    # candidates → push to FAILED_NMB with the candidate list.
+                    if len(plate_suggestions) > 1:
+                        last_failed_nmb_id += 1
+                        suggested_list = ', '.join(s['suggested'] for s in plate_suggestions)
+                        failed_nmb_data.append([
+                            last_failed_nmb_id, date, 'NMB', description, credit_amount,
+                            suggested_list,
+                            f'Multiple plate suggestions ({len(plate_suggestions)})',
+                            ref_number,
+                        ])
+                        stats['failed_nmb'] += 1
+                        print(f"❌ FAILED_NMB: multiple plate suggestions ({len(plate_suggestions)}) — {suggested_list}")
+                        continue
                     added_to_review = False
                     for suggestion in plate_suggestions:
                         suggested_plate = suggestion['suggested']
