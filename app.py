@@ -79,26 +79,53 @@ def _resolve_sheet(sheet_name):
 def extract_nmb_datetime(description, fallback_date_str):
     """
     Extract date and time embedded inside an NMB description.
-    Pattern found in descriptions: DDMM HH MM SS
-    e.g. '2103 19 32 17'  →  day=21, month=03, time=19:32:17
-    Year is taken from fallback_date_str (e.g. '22  Mar 2026').
-    Returns: 'DD.MM.YYYY HH:MM:SS'  (same format CRDB uses in the sheet)
-    Returns None if pattern not found.
+
+    The bot writes NMB transactions in several shapes. Try the strictest
+    pattern first so the year '2026' inside the message can never be
+    misread as day=20 month=26 (the original 'DDMM HH MM SS' regex
+    greedily matched that and produced '20.26.2026 HH:MM:SS' in the
+    PASSED sheet — Frank then had to manually fix those cells).
+
+      1. DD.MM.YYYY HH MM SS    e.g. 'on 01.06.2026 08 22 15!!'
+         (TIPS-style — date is in the human-readable middle of the line)
+      2. DD MM HH MM SS         e.g. '01 06 10 46 49'   (5 space-sep)
+      3. DDMM HH MM SS          e.g. '2103 19 32 17'    (legacy)
+      4. DD MM YYYY HH MM SS    e.g. '01 06 2026 10 46 49' (defensive)
+
+    Validates DD 1-31 and MM 1-12 before returning. If nothing matches
+    or values are out of range, return None — caller falls back to the
+    statement's Posting Date.
+
+    Returns: 'DD.MM.YYYY HH:MM:SS'.
     """
     if not description:
         return None
 
-    match = re.search(r'\b(\d{2})(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\b', str(description))
-    if not match:
-        return None
+    desc = str(description)
 
-    day     = match.group(1)
-    month   = match.group(2)
-    hours   = match.group(3)
-    minutes = match.group(4)
-    seconds = match.group(5)
+    def _valid(d_str, m_str):
+        try:
+            d, m = int(d_str), int(m_str)
+            return 1 <= d <= 31 and 1 <= m <= 12
+        except ValueError:
+            return False
 
-    # Extract year from fallback date string (e.g. '22  Mar 2026' or '2026-03-22')
+    # 1. DD.MM.YYYY HH MM SS — the "received payment on 01.06.2026 08 22 15" form
+    m1 = re.search(
+        r'\b(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2})\s+(\d{2})\s+(\d{2})\b', desc,
+    )
+    if m1 and _valid(m1.group(1), m1.group(2)):
+        return f"{m1.group(1)}.{m1.group(2)}.{m1.group(3)} {m1.group(4)}:{m1.group(5)}:{m1.group(6)}"
+
+    # 4. DD MM YYYY HH MM SS — same as 1 but space-separated date
+    m4 = re.search(
+        r'\b(\d{2})\s+(\d{2})\s+(20\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\b', desc,
+    )
+    if m4 and _valid(m4.group(1), m4.group(2)):
+        return f"{m4.group(1)}.{m4.group(2)}.{m4.group(3)} {m4.group(4)}:{m4.group(5)}:{m4.group(6)}"
+
+    # Year for forms that don't include it inline — falls back to the
+    # statement's Posting Date or, last resort, the current year.
     year = None
     if fallback_date_str:
         year_match = re.search(r'\b(20\d{2})\b', str(fallback_date_str))
@@ -107,7 +134,20 @@ def extract_nmb_datetime(description, fallback_date_str):
     if not year:
         year = str(datetime.now().year)
 
-    return f"{day}.{month}.{year} {hours}:{minutes}:{seconds}"
+    # 2. DD MM HH MM SS — five space-separated 2-digit groups
+    m2 = re.search(
+        r'\b(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\b(?!\.\d)', desc,
+    )
+    if m2 and _valid(m2.group(1), m2.group(2)):
+        return f"{m2.group(1)}.{m2.group(2)}.{year} {m2.group(3)}:{m2.group(4)}:{m2.group(5)}"
+
+    # 3. DDMM HH MM SS — original legacy form. Validate DD/MM so we
+    #    never write back a "20.26.YYYY" cell again.
+    m3 = re.search(r'\b(\d{2})(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\b', desc)
+    if m3 and _valid(m3.group(1), m3.group(2)):
+        return f"{m3.group(1)}.{m3.group(2)}.{year} {m3.group(3)}:{m3.group(4)}:{m3.group(5)}"
+
+    return None
 
 
 def extract_data_from_pdf(filepath):
