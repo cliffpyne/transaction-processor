@@ -792,16 +792,18 @@ def _find_fuzzy_plate_matches(number, suffix, plate_lookup, plate_lookup_sav,
 
         if len(number) == 3 and len(suffix) == 3:
             if pnum == number and psuf != suffix:
-                # Rule A: 1-letter suffix typo
-                if _letter_diff(suffix, psuf) == 1:
-                    matched = True
-                # Rule B: suffix anagram (letter swap)
-                elif sorted(suffix) == sorted(psuf):
+                # Rule A (Levenshtein-1 suffix typo) — KILLED Frank 2026-06-09.
+                # 1-edit fuzzy was producing wrong-customer matches in PASSED.
+                # if _letter_diff(suffix, psuf) == 1:
+                #     matched = True
+                # Rule B: suffix anagram (letter swap) — kept (NOT strict Levenshtein)
+                if sorted(suffix) == sorted(psuf):
                     matched = True
             elif psuf == suffix and pnum != number:
-                # Rule D: 1-digit number typo
-                if _letter_diff(number, pnum) == 1:
-                    matched = True
+                # Rule D (Levenshtein-1 number typo) — KILLED Frank 2026-06-09.
+                # if _letter_diff(number, pnum) == 1:
+                #     matched = True
+                pass
 
         # Rule C: truncated suffix (2 letters instead of 3)
         elif len(suffix) == 2 and len(number) == 3:
@@ -832,26 +834,63 @@ def _find_fuzzy_plate_matches(number, suffix, plate_lookup, plate_lookup_sav,
 def fuzzy_rescue_to_passed_row(last_passed_id, posting_date, bank, details,
                                 credit_amount, ref_number, fuzzy_candidates):
     """
-    Build a PASSED row from fuzzy match candidates (matches PASSED schema: 9 cols).
-      - Plate column (F): comma-separated plate list
-      - Name column (G):  "PLATE=NAME, PLATE=NAME, ..." pairs
-      - Customer ID (I):  comma-joined IDs from records2 entries (empty if none)
-    """
-    plates_str = ', '.join(c['plate'] for c in fuzzy_candidates)
-    names_str  = ', '.join(f"{c['plate']}={c['name']}" for c in fuzzy_candidates)
-    ids_list   = [c['customer_id'] for c in fuzzy_candidates if c['customer_id']]
-    ids_str    = ', '.join(ids_list) if ids_list else ''
+    Build a PASSED row from a fuzzy match (matches PASSED schema: 9 cols).
 
+    Frank 2026-06-09 rewrite — strict single-candidate-only policy:
+      - len(candidates) == 1 → PASSED row with CLEAN customer name
+                                (no '=' anywhere; the name column holds
+                                ONLY the customer name as if exact-matched).
+      - len(candidates) != 1 → returns None. Caller MUST route to FAILED via
+                                fuzzy_multi_to_failed_row() so the operator
+                                sees the suggestions in FAILED, not PASSED.
+
+    Old behavior wrote 'PLATE=NAME, PLATE=NAME' multi-rows into PASSED, which
+    BRAIN's isUnusedRow() flagged as UNUSED and Frank's invoice-payments app
+    treated as ambiguous. PASSED is now reserved for single-customer rows
+    only.
+    """
+    if len(fuzzy_candidates) != 1:
+        # Caller handles routing to FAILED with the '=' suggestions visible
+        # there for operator review.
+        return None
+
+    c = fuzzy_candidates[0]
     return [
         last_passed_id,
         posting_date,
         bank,
         details,
         credit_amount,
-        plates_str,
-        names_str,
+        c['plate'],
+        c['name'],                          # ← clean name only, NO '=', NO comma joins
         ref_number or '',
-        ids_str,
+        c['customer_id'] or '',
+    ]
+
+
+def fuzzy_multi_to_failed_row(last_failed_id, posting_date, bank, details,
+                               credit_amount, ref_number, fuzzy_candidates):
+    """
+    Frank 2026-06-09 — build a FAILED row for the multi-candidate fuzzy case.
+
+    Used when len(fuzzy_candidates) > 1. The customer column holds
+    'PLATE=NAME, PLATE=NAME, ...' so the operator can SEE the suggestions
+    inside FAILED and pick one by hand. PASSED never sees these.
+    Schema matches the standard FAILED-row layout used elsewhere
+    (last_failed_id, date, bank, details, credit, identifier, reason, ref).
+    """
+    plates_str = ', '.join(c['plate'] for c in fuzzy_candidates)
+    names_str  = ', '.join(f"{c['plate']}={c['name']}" for c in fuzzy_candidates)
+    reason     = f"Multi-candidate fuzzy ({len(fuzzy_candidates)} hits): {names_str}"
+    return [
+        last_failed_id,
+        posting_date,
+        bank,
+        details,
+        credit_amount,
+        plates_str,                         # identifier column = comma-joined plates
+        reason,                             # reason column = '=' suggestion list (operator-visible)
+        ref_number or '',
     ]
 
 
@@ -1845,14 +1884,25 @@ def process_crdb_transactions(filepath):
                                                                plate_lookup_sav, id_lookup_sav)
 
                             if fuzzy_cands:
-                                last_passed_id += 1
-                                fuzzy_row = fuzzy_rescue_to_passed_row(
-                                    last_passed_id, posting_date, 'CRDB', details,
-                                    credit_amount, ref_number, fuzzy_cands
-                                )
-                                fuzzy_passed_data.append(fuzzy_row)
-                                stats['fuzzy_rescued'] += 1
-                                print(f"  🟢 FUZZY→PASSED: {len(fuzzy_cands)} candidate(s) written green")
+                                if len(fuzzy_cands) == 1:
+                                    last_passed_id += 1
+                                    fuzzy_row = fuzzy_rescue_to_passed_row(
+                                        last_passed_id, posting_date, 'CRDB', details,
+                                        credit_amount, ref_number, fuzzy_cands
+                                    )
+                                    fuzzy_passed_data.append(fuzzy_row)
+                                    stats['fuzzy_rescued'] += 1
+                                    print(f"  🟢 FUZZY→PASSED: 1 candidate, written clean (no '=')")
+                                else:
+                                    # Frank 2026-06-09: multi-candidate fuzzy → FAILED with '=' suggestions visible
+                                    last_failed_id += 1
+                                    failed_row = fuzzy_multi_to_failed_row(
+                                        last_failed_id, posting_date, 'CRDB', details,
+                                        credit_amount, ref_number, fuzzy_cands
+                                    )
+                                    failed_data.append(failed_row)
+                                    stats['failed'] += 1
+                                    print(f"  ⚠️ FUZZY MULTI ({len(fuzzy_cands)} cands) → FAILED: {[c['plate'] for c in fuzzy_cands]}")
                                 continue  # move to next transaction
 
                             # Truly not found anywhere — add to FAILED
@@ -1955,14 +2005,25 @@ def process_crdb_transactions(filepath):
                             fuzzy_cands = try_fuzzy_rescue(details, plate_lookup,
                                                            plate_lookup_sav, id_lookup_sav)
                             if fuzzy_cands:
-                                last_passed_id += 1
-                                fuzzy_row = fuzzy_rescue_to_passed_row(
-                                    last_passed_id, posting_date, 'CRDB', details,
-                                    credit_amount, ref_number, fuzzy_cands
-                                )
-                                fuzzy_passed_data.append(fuzzy_row)
-                                stats['fuzzy_rescued'] += 1
-                                print(f"  🟢 FUZZY→PASSED: {len(fuzzy_cands)} candidate(s) written green")
+                                if len(fuzzy_cands) == 1:
+                                    last_passed_id += 1
+                                    fuzzy_row = fuzzy_rescue_to_passed_row(
+                                        last_passed_id, posting_date, 'CRDB', details,
+                                        credit_amount, ref_number, fuzzy_cands
+                                    )
+                                    fuzzy_passed_data.append(fuzzy_row)
+                                    stats['fuzzy_rescued'] += 1
+                                    print(f"  🟢 FUZZY→PASSED: 1 candidate, written clean (no '=')")
+                                else:
+                                    # Frank 2026-06-09: multi-candidate fuzzy → FAILED with '=' suggestions visible
+                                    last_failed_id += 1
+                                    failed_row = fuzzy_multi_to_failed_row(
+                                        last_failed_id, posting_date, 'CRDB', details,
+                                        credit_amount, ref_number, fuzzy_cands
+                                    )
+                                    failed_data.append(failed_row)
+                                    stats['failed'] += 1
+                                    print(f"  ⚠️ FUZZY MULTI ({len(fuzzy_cands)} cands) → FAILED: {[c['plate'] for c in fuzzy_cands]}")
                             else:
                                 last_failed_id += 1
                                 failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
@@ -1991,14 +2052,25 @@ def process_crdb_transactions(filepath):
                         fuzzy_cands = try_fuzzy_rescue(details, plate_lookup,
                                                        plate_lookup_sav, id_lookup_sav)
                         if fuzzy_cands:
-                            last_passed_id += 1
-                            fuzzy_row = fuzzy_rescue_to_passed_row(
-                                last_passed_id, posting_date, 'CRDB', details,
-                                credit_amount, ref_number, fuzzy_cands
-                            )
-                            fuzzy_passed_data.append(fuzzy_row)
-                            stats['fuzzy_rescued'] += 1
-                            print(f"  🟢 FUZZY→PASSED: {len(fuzzy_cands)} candidate(s) written green")
+                            if len(fuzzy_cands) == 1:
+                                last_passed_id += 1
+                                fuzzy_row = fuzzy_rescue_to_passed_row(
+                                    last_passed_id, posting_date, 'CRDB', details,
+                                    credit_amount, ref_number, fuzzy_cands
+                                )
+                                fuzzy_passed_data.append(fuzzy_row)
+                                stats['fuzzy_rescued'] += 1
+                                print(f"  🟢 FUZZY→PASSED: 1 candidate, written clean (no '=')")
+                            else:
+                                # Frank 2026-06-09: multi-candidate fuzzy → FAILED with '=' suggestions visible
+                                last_failed_id += 1
+                                failed_row = fuzzy_multi_to_failed_row(
+                                    last_failed_id, posting_date, 'CRDB', details,
+                                    credit_amount, ref_number, fuzzy_cands
+                                )
+                                failed_data.append(failed_row)
+                                stats['failed'] += 1
+                                print(f"  ⚠️ FUZZY MULTI ({len(fuzzy_cands)} cands) → FAILED: {[c['plate'] for c in fuzzy_cands]}")
                         else:
                             last_failed_id += 1
                             failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
@@ -2628,14 +2700,25 @@ def process_nmb_transactions(filepath):
                                                                plate_lookup_sav, id_lookup_sav)
 
                             if fuzzy_cands:
-                                last_passed_id += 1
-                                fuzzy_row = fuzzy_rescue_to_passed_row(
-                                    last_passed_id, date, 'NMB', description,
-                                    credit_amount, ref_number, fuzzy_cands
-                                )
-                                fuzzy_passed_data.append(fuzzy_row)
-                                stats['fuzzy_rescued'] += 1
-                                print(f"  🟢 FUZZY→PASSED (NMB): {len(fuzzy_cands)} candidate(s) written green")
+                                if len(fuzzy_cands) == 1:
+                                    last_passed_id += 1
+                                    fuzzy_row = fuzzy_rescue_to_passed_row(
+                                        last_passed_id, date, 'NMB', description,
+                                        credit_amount, ref_number, fuzzy_cands
+                                    )
+                                    fuzzy_passed_data.append(fuzzy_row)
+                                    stats['fuzzy_rescued'] += 1
+                                    print(f"  🟢 FUZZY→PASSED (NMB): 1 candidate, written clean (no '=')")
+                                else:
+                                    # Frank 2026-06-09: multi-candidate fuzzy → FAILED_NMB with '=' suggestions visible
+                                    last_failed_nmb_id += 1
+                                    failed_row = fuzzy_multi_to_failed_row(
+                                        last_failed_nmb_id, date, 'NMB', description,
+                                        credit_amount, ref_number, fuzzy_cands
+                                    )
+                                    failed_nmb_data.append(failed_row)
+                                    stats['failed_nmb'] += 1
+                                    print(f"  ⚠️ FUZZY MULTI ({len(fuzzy_cands)} cands, NMB) → FAILED_NMB: {[c['plate'] for c in fuzzy_cands]}")
                                 continue  # move to next transaction
 
                             # Truly not found anywhere → FAILED_NMB
@@ -2724,14 +2807,25 @@ def process_nmb_transactions(filepath):
                             fuzzy_cands = try_fuzzy_rescue(description, plate_lookup,
                                                            plate_lookup_sav, id_lookup_sav)
                             if fuzzy_cands:
-                                last_passed_id += 1
-                                fuzzy_row = fuzzy_rescue_to_passed_row(
-                                    last_passed_id, date, 'NMB', description,
-                                    credit_amount, ref_number, fuzzy_cands
-                                )
-                                fuzzy_passed_data.append(fuzzy_row)
-                                stats['fuzzy_rescued'] += 1
-                                print(f"  🟢 FUZZY→PASSED (NMB): {len(fuzzy_cands)} candidate(s) written green")
+                                if len(fuzzy_cands) == 1:
+                                    last_passed_id += 1
+                                    fuzzy_row = fuzzy_rescue_to_passed_row(
+                                        last_passed_id, date, 'NMB', description,
+                                        credit_amount, ref_number, fuzzy_cands
+                                    )
+                                    fuzzy_passed_data.append(fuzzy_row)
+                                    stats['fuzzy_rescued'] += 1
+                                    print(f"  🟢 FUZZY→PASSED (NMB): 1 candidate, written clean (no '=')")
+                                else:
+                                    # Frank 2026-06-09: multi-candidate fuzzy → FAILED_NMB with '=' suggestions visible
+                                    last_failed_nmb_id += 1
+                                    failed_row = fuzzy_multi_to_failed_row(
+                                        last_failed_nmb_id, date, 'NMB', description,
+                                        credit_amount, ref_number, fuzzy_cands
+                                    )
+                                    failed_nmb_data.append(failed_row)
+                                    stats['failed_nmb'] += 1
+                                    print(f"  ⚠️ FUZZY MULTI ({len(fuzzy_cands)} cands, NMB) → FAILED_NMB: {[c['plate'] for c in fuzzy_cands]}")
                             else:
                                 last_failed_nmb_id += 1
                                 failed_nmb_data.append([last_failed_nmb_id, date, 'NMB', description, credit_amount, 'No phone/plate', 'No identifier', ref_number])
@@ -2760,14 +2854,25 @@ def process_nmb_transactions(filepath):
                         fuzzy_cands = try_fuzzy_rescue(description, plate_lookup,
                                                        plate_lookup_sav, id_lookup_sav)
                         if fuzzy_cands:
-                            last_passed_id += 1
-                            fuzzy_row = fuzzy_rescue_to_passed_row(
-                                last_passed_id, date, 'NMB', description,
-                                credit_amount, ref_number, fuzzy_cands
-                            )
-                            fuzzy_passed_data.append(fuzzy_row)
-                            stats['fuzzy_rescued'] += 1
-                            print(f"  🟢 FUZZY→PASSED (NMB): {len(fuzzy_cands)} candidate(s) written green")
+                            if len(fuzzy_cands) == 1:
+                                last_passed_id += 1
+                                fuzzy_row = fuzzy_rescue_to_passed_row(
+                                    last_passed_id, date, 'NMB', description,
+                                    credit_amount, ref_number, fuzzy_cands
+                                )
+                                fuzzy_passed_data.append(fuzzy_row)
+                                stats['fuzzy_rescued'] += 1
+                                print(f"  🟢 FUZZY→PASSED (NMB): 1 candidate, written clean (no '=')")
+                            else:
+                                # Frank 2026-06-09: multi-candidate fuzzy → FAILED_NMB with '=' suggestions visible
+                                last_failed_nmb_id += 1
+                                failed_row = fuzzy_multi_to_failed_row(
+                                    last_failed_nmb_id, date, 'NMB', description,
+                                    credit_amount, ref_number, fuzzy_cands
+                                )
+                                failed_nmb_data.append(failed_row)
+                                stats['failed_nmb'] += 1
+                                print(f"  ⚠️ FUZZY MULTI ({len(fuzzy_cands)} cands, NMB) → FAILED_NMB: {[c['plate'] for c in fuzzy_cands]}")
                         else:
                             last_failed_nmb_id += 1
                             failed_nmb_data.append([last_failed_nmb_id, date, 'NMB', description, credit_amount, 'No phone/plate', 'No identifier', ref_number])
