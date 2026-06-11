@@ -2401,6 +2401,98 @@ def read_nmb_csv(filepath):
     return transactions_list
 
 
+def read_nmb_pdf(filepath):
+    """
+    🔥 NEW: Read an NMB statement in PDF format and return transactions_list —
+    the SAME structure read_nmb_csv / read_nmb_excel return (list of dicts with
+    keys: Date, Description, Reference Number, Credit) so the identical NMB
+    processing pipeline (duplicate guards, pikipiki/iPhone lookups, rescue,
+    fuzzy, review flow) is reused unchanged.
+
+    NMB PDF layout (multi-page bank-internal export):
+        Each page contains a transaction table with 9 columns:
+            Book Date | Value Date | Trn Br Name | Narration | Xref |
+            Cheque No | Debit | Credit | Balance
+        - Page 1 has the column header row; subsequent pages do not.
+        - Multi-line cells use '\n' inside a single cell — flatten by joining
+          Narration with spaces, Xref with no separator (the break is mid-ref:
+          e.g. '101AGD126160\nE4VM' → '101AGD126160E4VM').
+        - The OPENING / CLOSING BALANCE row sits in the table — skipped by
+          'BALANCE' substring match on Narration.
+        - The final page has a small 2-col summary table — skipped by the
+          9-col guard.
+        - Embedded date+time in the description uses 'DDMM HH:MM:SS' (colons),
+          which the existing extract_nmb_datetime patterns (space-separated)
+          will not match — that is intentional: downstream falls back to the
+          Book Date column, exactly as the sacred path dictates.
+
+    Returns a jsonify(...) error tuple on failure.
+    """
+    print("📄 Processing NMB PDF file...")
+    transactions_list = []
+
+    try:
+        with pdfplumber.open(filepath) as pdf:
+            print(f"  📖 {len(pdf.pages)} page(s)")
+            for page in pdf.pages:
+                for table in page.extract_tables() or []:
+                    # Only the 9-column transaction table interests us.
+                    if not table or len(table[0]) != 9:
+                        continue
+
+                    for row in table:
+                        if not row or len(row) != 9:
+                            continue
+
+                        book_date = (row[0] or '').strip()
+                        narration = (row[3] or '').strip()
+                        xref      = (row[4] or '').strip()
+                        debit_s   = (row[6] or '').strip()
+                        credit_s  = (row[7] or '').strip()
+
+                        # Skip the column header (only on page 1)
+                        if book_date.lower() == 'book date':
+                            continue
+                        # Skip OPENING / CLOSING BALANCE rows
+                        if 'BALANCE' in narration.upper():
+                            continue
+                        # Defensive: a real transaction has a DD/MM/YYYY book date
+                        if not re.search(r'\d{2}/\d{2}/\d{4}', book_date):
+                            continue
+
+                        try:
+                            credit = float(credit_s.replace(',', '').replace(' ', ''))
+                        except ValueError:
+                            credit = 0.0
+                        try:
+                            debit = float(debit_s.replace(',', '').replace(' ', ''))
+                        except ValueError:
+                            debit = 0.0
+
+                        # Same credit-only filter as the Excel/CSV readers
+                        if credit <= 0 or debit > 0:
+                            continue
+
+                        # Flatten newlines: Narration uses spaces, Xref joins
+                        # tightly (the break sits inside a 16-char ref string).
+                        desc = re.sub(r'\s*\n\s*', ' ', narration)
+                        ref  = re.sub(r'\s*\n\s*', '', xref)
+
+                        transactions_list.append({
+                            'Date': book_date,
+                            'Description': desc,
+                            'Reference Number': ref,
+                            'Credit': credit,
+                        })
+    except Exception as read_err:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Failed to read NMB PDF file: {str(read_err)}'}), 400
+
+    print(f"✅ NMB PDF: Found {len(transactions_list)} credit transactions")
+    return transactions_list
+
+
 def process_nmb_transactions(filepath):
     """
     🔥 UPDATED: Process NMB bank statement with 3-tier routing:
@@ -2410,12 +2502,17 @@ def process_nmb_transactions(filepath):
     Also includes needs_review / plate suggestion flow (same as CRDB).
     """
     try:
-        # 🔥 NEW: Dispatch by file type. CSV is read by read_nmb_csv() and Excel
-        #         by read_nmb_excel(); BOTH return the same transactions_list of
-        #         dicts (keys: Date, Description, Reference Number, Credit) so the
-        #         identical processing pipeline below is reused unchanged.
-        if filepath.lower().endswith('.csv'):
+        # 🔥 NEW: Dispatch by file type. CSV → read_nmb_csv(), PDF → read_nmb_pdf(),
+        #         Excel → read_nmb_excel(); ALL THREE return the same
+        #         transactions_list of dicts (keys: Date, Description,
+        #         Reference Number, Credit) so the identical processing pipeline
+        #         below — duplicate guards, lookups, rescue, fuzzy, review — is
+        #         reused unchanged.
+        fp_lower = filepath.lower()
+        if fp_lower.endswith('.csv'):
             transactions_list = read_nmb_csv(filepath)
+        elif fp_lower.endswith('.pdf'):
+            transactions_list = read_nmb_pdf(filepath)
         else:
             transactions_list = read_nmb_excel(filepath)
 
