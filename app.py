@@ -89,8 +89,10 @@ def extract_nmb_datetime(description, fallback_date_str):
       1. DD.MM.YYYY HH MM SS    e.g. 'on 01.06.2026 08 22 15!!'
          (TIPS-style — date is in the human-readable middle of the line)
       2. DD MM HH MM SS         e.g. '01 06 10 46 49'   (5 space-sep)
-      3. DDMM HH MM SS          e.g. '2103 19 32 17'    (legacy)
+      3. DDMM HH MM SS          e.g. '2103 19 32 17'    (legacy CSV)
       4. DD MM YYYY HH MM SS    e.g. '01 06 2026 10 46 49' (defensive)
+      5. DDMM HH:MM:SS          e.g. '1106 16:02:04'    (PDF — time uses
+         colons; date is the leading DDMM, never the year)
 
     Validates DD 1-31 and MM 1-12 before returning. If nothing matches
     or values are out of range, return None — caller falls back to the
@@ -146,6 +148,13 @@ def extract_nmb_datetime(description, fallback_date_str):
     m3 = re.search(r'\b(\d{2})(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\b', desc)
     if m3 and _valid(m3.group(1), m3.group(2)):
         return f"{m3.group(1)}.{m3.group(2)}.{year} {m3.group(3)}:{m3.group(4)}:{m3.group(5)}"
+
+    # 5. DDMM HH:MM:SS — PDF form. Time is colon-separated; the date is
+    #    always the leading 4-digit DDMM, never the year. DD/MM validation
+    #    blocks bogus year-as-date matches (e.g. '2026 23:59:51').
+    m5 = re.search(r'\b(\d{2})(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\b', desc)
+    if m5 and _valid(m5.group(1), m5.group(2)):
+        return f"{m5.group(1)}.{m5.group(2)}.{year} {m5.group(3)}:{m5.group(4)}:{m5.group(5)}"
 
     return None
 
@@ -2459,6 +2468,17 @@ def read_nmb_pdf(filepath):
                         # Defensive: a real transaction has a DD/MM/YYYY book date
                         if not re.search(r'\d{2}/\d{2}/\d{4}', book_date):
                             continue
+
+                        # Normalise Book Date to match the CSV reader's output
+                        # (DD-Mon-YYYY, e.g. '10-Jun-2026'). The shared NMB
+                        # pipeline now sees an identical fallback-date format
+                        # regardless of input source.
+                        try:
+                            book_date = datetime.strptime(
+                                book_date, '%d/%m/%Y'
+                            ).strftime('%d-%b-%Y')
+                        except ValueError:
+                            pass  # leave unchanged if format unexpected
 
                         try:
                             credit = float(credit_s.replace(',', '').replace(' ', ''))
