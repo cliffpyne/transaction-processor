@@ -11,6 +11,7 @@ import json
 import pickle
 from datetime import datetime
 import pdfplumber  # For PDF extraction
+import supabase_writer  # Dual-write mirror to Supabase — no-op unless WRITE_TO_SUPABASE is set
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -1494,8 +1495,19 @@ def append_to_sheet(service, sheet_name, data):
             valueInputOption='USER_ENTERED',
             body={'values': data}
         ).execute()
-        
+
         print(f"Update result: {result.get('updatedRows', 0)} rows added")
+
+        # Mirror into Supabase (no-op unless WRITE_TO_SUPABASE is truthy). This
+        # is the single dual-write point — every callsite in the app is covered
+        # automatically because they all go through append_to_sheet(). Never
+        # raises: a Supabase outage cannot break the sheet write path.
+        supabase_writer.append(sheet_name, {
+            'PASSED': PASSED_SHEET_ID,
+            'NMB':    NMB_SHEET_ID,
+            'IPHONE': IPHONE_SHEET_ID,
+        }, data)
+
         return True
         
     except HttpError as e:
