@@ -343,9 +343,11 @@ def row_to_customers(row, source_tab, variant):
 def post_batch(table, rows):
     if not rows:
         return
+    # No on_conflict — the (source_tab, original_id) unique index was dropped
+    # because original_id gets reset over time and legitimate rows collide.
+    # Duplicate protection is now at the ref_number level (added separately)
+    # and via the app's in-code dedup before writes.
     on_conflict = ''
-    if table == 'transactions':
-        on_conflict = '?on_conflict=source_tab,original_id'
 
     last_body = ''
     for attempt in range(6):
@@ -399,8 +401,10 @@ def migrate_transaction_tab(service, sheet_id, tab_name, source_tab, variant):
     else:
         print('   (empty)'); return 0
 
-    seen_ids = set()
-    id_collisions = 0
+    # No per-tab dedup by original_id anymore — that column collides
+    # legitimately (the app's counter has been reset multiple times in
+    # the sheets). Every row goes to the DB. Duplicate protection now
+    # lives at the ref_number level.
     sent, skipped, start_row = 0, 0, 2
     while True:
         chunk = read_tab_chunk(service, sheet_id, tab_name, start_row, CHUNK_ROWS)
@@ -413,13 +417,6 @@ def migrate_transaction_tab(service, sheet_id, tab_name, source_tab, variant):
             if rec is None:
                 skipped += 1
                 continue
-            oid = rec['original_id']
-            if oid in seen_ids:
-                id_collisions += 1
-                # Skip second occurrence in the same batch. Upsert on final
-                # DB write will overwrite anyway if it crosses batches.
-                continue
-            seen_ids.add(oid)
             batch.append(rec)
 
         for i in range(0, len(batch), BATCH):
@@ -433,8 +430,7 @@ def migrate_transaction_tab(service, sheet_id, tab_name, source_tab, variant):
             break
         start_row = end_row + 1
 
-    tail = f' ⚠️  {id_collisions} duplicate original_ids in this tab' if id_collisions else ''
-    print(f'   ✅ {sent:,} rows (skipped {skipped}){tail}')
+    print(f'   ✅ {sent:,} rows (skipped {skipped})')
     return sent
 
 
