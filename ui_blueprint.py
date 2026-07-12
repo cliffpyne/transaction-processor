@@ -49,6 +49,15 @@ TABLES = {
         'editable':    ['plate', 'phone', 'name', 'customer_id', 'source_tab'],
         'sort_default':'id.desc',
     },
+    'v_customers_enriched': {
+        'columns':     ['id', 'name', 'phone', 'plate', 'customer_id',
+                        'source_tab', 'created_at', 'total_paid_tzs',
+                        'txn_count', 'last_txn_day', 'first_txn_day',
+                        'banks_used'],
+        'search_cols': ['name', 'phone', 'plate', 'customer_id'],
+        'editable':    [],
+        'sort_default':'last_txn_day.desc.nullslast',
+    },
     'transactions': {
         'columns':     ['id', 'original_id', 'transaction_date',
                         'transaction_day', 'posting_date', 'bank',
@@ -116,11 +125,18 @@ def _records_compat(sub=None):
 
 
 # ── SPA shell ────────────────────────────────────────────────────────────────
+_HOME_SUBPAGES = {
+    'customers':    'customers_page.html',
+    # transactions, dedup_alerts, users, record_edits — added as pages ship
+}
+
+
 @ui.route('/home')
-@ui.route('/home/<path:_>')
+@ui.route('/home/<path:sub>')
 @login_required
-def home_page(_=None):
-    return render_template('home.html',
+def home_page(sub=None):
+    template = _HOME_SUBPAGES.get((sub or '').strip('/').split('/')[0], 'home.html')
+    return render_template(template,
                            username=current_user.username,
                            full_name=current_user.full_name,
                            role=current_user.role)
@@ -214,6 +230,38 @@ def _audit(action: str, table_name: str, row_id: int,
 @login_required
 def customers_list():
     return _paginated_query('customers', TABLES['customers'])
+
+
+# Enriched read for the Customers UI page — joins to per-customer aggregates
+# (total paid, txn count, last/first payment day, banks used) via the
+# v_customers_enriched Postgres view.
+@ui.route('/api/customers/enriched', methods=['GET'])
+@login_required
+def customers_enriched_list():
+    return _paginated_query('v_customers_enriched',
+                            TABLES['v_customers_enriched'])
+
+
+# Header stats for the Customers page: total customers + count of those
+# with at least one transaction this month.
+@ui.route('/api/customers/stats', methods=['GET'])
+@login_required
+def customers_stats():
+    total_r = requests.get(
+        f'{SUPABASE_URL}/rest/v1/customers?select=id',
+        headers={**_H, 'Range-Unit': 'items', 'Range': '0-0',
+                 'Prefer': 'count=exact'}, timeout=15)
+    total = int(total_r.headers.get('Content-Range', '0-0/0').split('/')[-1] or 0)
+
+    month_r = requests.get(
+        (f'{SUPABASE_URL}/rest/v1/v_customers_enriched'
+         '?select=id&last_txn_day=gte.'
+         + datetime.utcnow().strftime('%Y-%m-01')),
+        headers={**_H, 'Range-Unit': 'items', 'Range': '0-0',
+                 'Prefer': 'count=exact'}, timeout=15)
+    paying = int(month_r.headers.get('Content-Range', '0-0/0').split('/')[-1] or 0)
+
+    return jsonify({'total': total, 'paying_this_month': paying})
 
 
 @ui.route('/api/customers', methods=['POST'])

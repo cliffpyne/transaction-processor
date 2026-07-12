@@ -99,6 +99,45 @@ CREATE INDEX IF NOT EXISTS idx_cust_phone ON customers(phone);
 CREATE INDEX IF NOT EXISTS idx_cust_tab   ON customers(source_tab);
 
 
+-- ── v_customers_enriched ──────────────────────────────────────────────────
+-- LEFT JOINs each customer to the aggregate stats of transactions that
+-- match on customer_name (case/space-insensitive) OR customer_id (SAV only).
+-- Powers the Customers UI page — one row per customer with:
+--   total_paid_tzs, txn_count, last_txn_day, first_txn_day, banks_used
+CREATE OR REPLACE VIEW v_customers_enriched AS
+WITH tx_by_name AS (
+  SELECT
+    lower(regexp_replace(coalesce(customer_name, ''), '\s+', ' ', 'g')) AS name_key,
+    customer_id,
+    SUM(credit_amount)::numeric(14,2)  AS total_paid_tzs,
+    COUNT(*)                            AS txn_count,
+    MAX(transaction_day)                AS last_txn_day,
+    MIN(transaction_day)                AS first_txn_day,
+    string_agg(DISTINCT bank, ',' ORDER BY bank) AS banks_used
+  FROM transactions
+  WHERE source_tab IN ('PASSED', 'PASSED_SAV_NMB', 'PASSED_NMB', 'CRDBPASSED', 'NMBPASSED')
+  GROUP BY 1, 2
+)
+SELECT
+  c.id,
+  c.name,
+  c.phone,
+  c.plate,
+  c.customer_id,
+  c.source_tab,
+  c.created_at,
+  COALESCE(t.total_paid_tzs, 0)::numeric(14,2) AS total_paid_tzs,
+  COALESCE(t.txn_count, 0)                     AS txn_count,
+  t.last_txn_day,
+  t.first_txn_day,
+  t.banks_used
+FROM customers c
+LEFT JOIN tx_by_name t
+  ON t.name_key = lower(regexp_replace(coalesce(c.name, ''), '\s+', ' ', 'g'))
+ AND (t.customer_id IS NOT DISTINCT FROM c.customer_id
+      OR (t.customer_id IS NULL AND c.customer_id IS NULL));
+
+
 -- ── dedup_alerts ───────────────────────────────────────────────────────────
 -- Populated by the dual-write code whenever Postgres rejects a duplicate
 -- ref_number (once the UNIQUE index is enabled after backfill). Empty =

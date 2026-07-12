@@ -1,0 +1,193 @@
+{% extends "home.html" %}
+{% block content %}
+     <!-- Container -->
+     <div class="kt-container-fixed" id="contentContainer">
+     </div>
+     <!-- End of Container -->
+     <!-- Container -->
+     <div class="kt-container-fixed">
+      <div class="flex flex-wrap items-center lg:items-end justify-between gap-5 pb-7.5">
+       <div class="flex flex-col justify-center gap-2">
+        <h1 class="text-xl font-medium leading-none text-mono">
+         Customers
+        </h1>
+        <div class="flex items-center flex-wrap gap-1.5 font-medium">
+         <span class="text-base text-secondary-foreground">
+          All Customers:
+         </span>
+         <span class="text-base text-ray-800 font-semibold me-2" id="cust_total">
+          —
+         </span>
+         <span class="text-base text-secondary-foreground">
+          Paying This Month
+         </span>
+         <span class="text-base text-foreground font-semibold" id="cust_paying_month">
+          —
+         </span>
+        </div>
+       </div>
+       <div class="flex items-center gap-2.5">
+        <a class="kt-btn kt-btn-outline" href="/api/customers/export">
+         Export CSV
+        </a>
+        <a class="kt-btn kt-btn-primary" href="#" id="add_customer_btn">
+         Add Customer
+        </a>
+       </div>
+      </div>
+     </div>
+     <!-- End of Container -->
+     <!-- Container -->
+     <div class="kt-container-fixed">
+      <div class="grid gap-5 lg:gap-7.5">
+       <div class="kt-card kt-card-grid min-w-full">
+        <div class="kt-card-header flex-wrap gap-2">
+         <h3 class="kt-card-title text-sm" id="cust_showing">
+          Loading customers…
+         </h3>
+         <div class="flex flex-wrap gap-2 lg:gap-5">
+          <div class="flex">
+           <label class="kt-input">
+            <i class="ki-filled ki-magnifier">
+            </i>
+            <input id="cust_search" placeholder="Search name, phone, plate…" type="text" value=""/>
+           </label>
+          </div>
+          <div class="flex flex-wrap gap-2.5">
+           <select class="kt-select w-36" data-kt-select="true" data-kt-select-placeholder="All products" id="cust_product">
+            <option value="">
+             All products
+            </option>
+            <option value="pikipiki_records">
+             Pikipiki Loan
+            </option>
+            <option value="pikipiki_records2">
+             Pikipiki SAV
+            </option>
+            <option value="IPHONE_RECORDS">
+             iPhone
+            </option>
+           </select>
+           <select class="kt-select w-36" data-kt-select="true" data-kt-select-placeholder="Sort by" id="cust_sort">
+            <option value="last_txn_day.desc">
+             Latest payment
+            </option>
+            <option value="created_at.desc">
+             Newly added
+            </option>
+            <option value="total_paid_tzs.desc">
+             Highest paid
+            </option>
+            <option value="txn_count.desc">
+             Most transactions
+            </option>
+           </select>
+           <button class="kt-btn kt-btn-outline kt-btn-primary" id="cust_filters_btn">
+            <i class="ki-filled ki-setting-4">
+            </i>
+            Filters
+           </button>
+          </div>
+         </div>
+        </div>
+        <div class="kt-card-content">
+         <div class="grid" data-kt-datatable="true" data-kt-datatable-page-size="25">
+          <div class="kt-scrollable-x-auto">
+           <table class="kt-table table-auto kt-table-border" data-kt-datatable-table="true">
+            <thead>
+             <tr>
+              <th class="w-[60px] text-center">
+               <input class="kt-checkbox kt-checkbox-sm" data-kt-datatable-check="true" type="checkbox"/>
+              </th>
+              <th class="min-w-[260px]">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Customer
+                </span>
+                <span class="kt-table-col-sort">
+                </span>
+               </span>
+              </th>
+              <th class="min-w-[130px]">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Plate / ID
+                </span>
+                <span class="kt-table-col-sort">
+                </span>
+               </span>
+              </th>
+              <th class="min-w-[130px]">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Product
+                </span>
+                <span class="kt-table-col-sort">
+                </span>
+               </span>
+              </th>
+              <th class="min-w-[150px]">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Total Paid
+                </span>
+                <span class="kt-table-col-sort">
+                </span>
+               </span>
+              </th>
+              <th class="min-w-[150px]">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Last Payment
+                </span>
+                <span class="kt-table-col-sort">
+                </span>
+               </span>
+              </th>
+              <th class="w-[100px] text-center">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Txns
+                </span>
+                <span class="kt-table-col-sort">
+                </span>
+               </span>
+              </th>
+              <th class="w-[60px]">
+              </th>
+             </tr>
+            </thead>
+            <tbody id="cust_tbody">
+             <tr>
+              <td class="text-center text-secondary-foreground py-6" colspan="8">
+               Loading customers…
+              </td>
+             </tr>
+            </tbody>
+           </table>
+          </div>
+          <div class="kt-card-footer justify-center md:justify-between flex-col md:flex-row gap-5 text-secondary-foreground text-sm font-medium">
+           <div class="flex items-center gap-2 order-2 md:order-1">
+            Show
+            <select class="kt-select w-16" data-kt-datatable-size="true" data-kt-select="" name="perpage" id="cust_perpage">
+             <option value="25">25</option>
+             <option value="50">50</option>
+             <option value="100">100</option>
+            </select>
+            per page
+           </div>
+           <div class="flex items-center gap-4 order-1 md:order-2">
+            <span data-kt-datatable-info="true" id="cust_info">
+            </span>
+            <div class="kt-datatable-pagination" data-kt-datatable-pagination="true" id="cust_pager">
+            </div>
+           </div>
+          </div>
+         </div>
+        </div>
+       </div>
+      </div>
+     </div>
+     <!-- End of Container -->
+     <script src="/static/customers_page.js" defer></script>
+{% endblock %}
