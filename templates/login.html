@@ -1,33 +1,29 @@
-<!-- Elegansky — Sign In -->
 <!DOCTYPE html>
 <html class="h-full" data-kt-theme="true" data-kt-theme-mode="light" dir="ltr" lang="en">
- <head>
-  <title>
-   Elegansky — Sign in
-  </title>
+ <head>Elegansky</title>
   <meta charset="utf-8"/>
-  <meta content="follow, index" name="robots"/>
-  <meta content="width=device-width, initial-scale=1, shrink-to-fit=no" name="viewport"/>
-  <meta content="Sign in page using Tailwind CSS" name="description"/>
+  <meta content="follow, index" name="robots"/><meta content="width=device-width, initial-scale=1, shrink-to-fit=no" name="viewport"/>
+  <meta content="Sign in page, using Tailwind CSS" name="description"/>
   <meta content="@keenthemes" name="twitter:site"/>
   <meta content="@keenthemes" name="twitter:creator"/>
   <meta content="summary_large_image" name="twitter:card"/>
-  <meta content="Elegansky — Sign in" name="twitter:title"/>
-  <meta content="Sign in page using Tailwind CSS" name="twitter:description"/>
-  <meta content="/static/img/og-image.png" name="twitter:image"/>
-  <meta content="en_US" property="og:locale"/>
+  <meta content="Metronic - Tailwind CSS Sign In" name="twitter:title"/>
+  <meta content="Sign in page, using Tailwind CSS" name="twitter:description"/>
+  <meta content="assets/media/app/og-image.png" name="twitter:image"/><meta content="en_US" property="og:locale"/>
   <meta content="website" property="og:type"/>
   <meta content="@keenthemes" property="og:site_name"/>
-  <meta content="Elegansky — Sign in" property="og:title"/>
-  <meta content="Sign in page using Tailwind CSS" property="og:description"/>
-  <meta content="/static/img/og-image.png" property="og:image"/>
-  <link href="/static/img/apple-touch-icon.png" rel="apple-touch-icon" sizes="180x180"/>
-  <link href="/static/img/favicon-32x32.png" rel="icon" sizes="32x32" type="image/png"/>
-  <link href="/static/img/favicon-16x16.png" rel="icon" sizes="16x16" type="image/png"/>
-  <link href="/static/img/favicon.ico" rel="shortcut icon"/>
+  <meta content="Metronic - Tailwind CSS Sign In" property="og:title"/>
+  <meta content="Sign in page, using Tailwind CSS" property="og:description"/>
+  <meta content="assets/media/app/og-image.png" property="og:image"/>
+  <link href="/static/demo/assets/media/app/apple-touch-icon.png" rel="apple-touch-icon" sizes="180x180"/>
+  <link href="/static/demo/assets/media/app/favicon-32x32.png" rel="icon" sizes="32x32" type="image/png"/>
+  <link href="/static/demo/assets/media/app/favicon-16x16.png" rel="icon" sizes="16x16" type="image/png"/>
+  <link href="/static/demo/assets/media/app/favicon.ico" rel="shortcut icon"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-  <link href="/static/metronic/vendors/keenicons/styles.bundle.css" rel="stylesheet"/>
-  <link href="/static/metronic/css/styles.css" rel="stylesheet"/>
+  <link href="/static/demo/assets/vendors/apexcharts/apexcharts.css" rel="stylesheet"/>
+  <link href="/static/demo/assets/vendors/keenicons/styles.bundle.css" rel="stylesheet"/>
+  <link href="/static/demo/assets/css/styles.css" rel="stylesheet"/>
+  <script src="/static/demo/assets/js/elegansky-loader.js"></script>
  </head>
  <body class="antialiased flex h-full text-base text-foreground bg-background">
   <!-- Theme Mode -->
@@ -59,105 +55,129 @@
   <!-- End of Theme Mode -->
   <!-- Page -->
   <style>
-   .page-bg {
-			background-image: url('/static/img/auth-bg.png');
+   .branded-bg {
+			background-image:url('/static/demo/assets/media/images/2600x1600/1.png');
 		}
-		.dark .page-bg {
-			background-image: url('/static/img/auth-bg-dark.png');
+		.dark .branded-bg {
+			background-image: url('/static/demo/assets/media/images/2600x1600/1-dark.png');
 		}
   </style>
-  <div class="flex flex-col items-center justify-center grow bg-center bg-no-repeat page-bg">
-   <a href="/" class="mb-5 inline-flex items-center gap-2.5">
-    <img src="/static/img/elegansky-logo.png" alt="Elegansky" class="h-9 w-9 object-contain"/>
-    <span class="text-lg font-bold tracking-tight text-mono">ELEGANSKY</span>
-   </a>
-   <div class="kt-card max-w-[370px] w-full">
-    <form action="/login" class="kt-card-content flex flex-col gap-5 p-10" id="sign_in_form" method="POST">
+  <div class="grid lg:grid-cols-2 grow">
+   <div class="flex justify-center items-center p-8 lg:p-10 order-2 lg:order-1">
+    <div class="kt-card max-w-[370px] w-full">
+     <form action="/login" class="kt-card-content flex flex-col gap-5 p-10" id="sign_in_form" method="POST">
+      
      {% if error %}
      <div class="kt-alert kt-alert-destructive" role="alert">
       <span class="kt-alert-icon"><i class="ki-filled ki-shield-cross"></i></span>
       <div class="kt-alert-content"><div class="kt-alert-description">{{ error }}</div></div>
      </div>
      {% endif %}
-     <div class="text-center mb-2.5">
-      <h3 class="text-lg font-medium text-mono leading-none mb-2.5">
-       Sign in
-      </h3>
-      <div class="flex items-center justify-center font-medium">
-       <span class="text-sm text-secondary-foreground me-1.5">
-        Need an account?
+    <div class="text-center mb-2.5">
+       <h3 class="text-lg font-medium text-mono leading-none mb-2.5">
+        Sign in
+       </h3>
+       <div class="flex items-center justify-center font-medium">
+        <span class="text-sm text-secondary-foreground me-1.5">
+         Need an account?
+        </span>
+        <a class="text-sm link" href="#">
+         Sign up
+        </a>
+       </div>
+      </div>
+      <div class="grid grid-cols-2 gap-2.5">
+       <a class="kt-btn kt-btn-outline justify-center" href="#">
+        <img alt="" class="size-3.5 shrink-0" src="/static/demo/assets/media/brand-logos/google.svg"/>
+        Use Google
+       </a>
+       <a class="kt-btn kt-btn-outline justify-center" href="#">
+        <img alt="" class="size-3.5 shrink-0 dark:hidden" src="/static/demo/assets/media/brand-logos/apple-black.svg"/>
+        <img alt="" class="size-3.5 shrink-0 light:hidden" src="/static/demo/assets/media/brand-logos/apple-white.svg"/>
+        Use Apple
+       </a>
+      </div>
+      <div class="flex items-center gap-2">
+       <span class="border-t border-border w-full">
        </span>
-       <a class="text-sm link" href="#">
-        Sign up
-       </a>
+       <span class="text-xs text-muted-foreground font-medium uppercase">
+        Or
+       </span>
+       <span class="border-t border-border w-full">
+       </span>
       </div>
-     </div>
-     <div class="grid grid-cols-2 gap-2.5">
-      <a class="kt-btn kt-btn-outline justify-center" href="#">
-       <img alt="" class="size-3.5 shrink-0" src="/static/metronic/media/brand-logos/google.svg"/>
-       Use Google
-      </a>
-      <a class="kt-btn kt-btn-outline justify-center" href="#">
-       <img alt="" class="size-3.5 shrink-0 dark:hidden" src="/static/metronic/media/brand-logos/apple-black.svg"/>
-       <img alt="" class="size-3.5 shrink-0 light:hidden" src="/static/metronic/media/brand-logos/apple-white.svg"/>
-       Use Apple
-      </a>
-     </div>
-     <div class="flex items-center gap-2">
-      <span class="border-t border-border w-full">
-      </span>
-      <span class="text-xs text-muted-foreground font-medium uppercase">
-       Or
-      </span>
-      <span class="border-t border-border w-full">
-      </span>
-     </div>
-     <div class="flex flex-col gap-1">
-      <label class="kt-form-label font-normal text-mono">
-       Username
-      </label>
-      <input class="kt-input" name="username" placeholder="your.username" type="text" value="" required autocomplete="username" autocapitalize="off" spellcheck="false"/>
-     </div>
-     <div class="flex flex-col gap-1">
-      <div class="flex items-center justify-between gap-1">
+      <div class="flex flex-col gap-1">
        <label class="kt-form-label font-normal text-mono">
-        Password
+        Username
        </label>
-       <a class="text-sm kt-link shrink-0" href="#">
-        Forgot Password?
-       </a>
+       <input class="kt-input" name="username" placeholder="your.username" type="text" value="" required autocomplete="username" autocapitalize="off" spellcheck="false"/>
       </div>
-      <div class="kt-input" data-kt-toggle-password="true">
-       <input name="password" placeholder="Enter Password" type="password" value=""/>
-       <button class="kt-btn kt-btn-sm kt-btn-ghost kt-btn-icon bg-transparent! -me-1.5" data-kt-toggle-password-trigger="true" type="button">
-        <span class="kt-toggle-password-active:hidden">
-         <i class="ki-filled ki-eye text-muted-foreground">
-         </i>
-        </span>
-        <span class="hidden kt-toggle-password-active:block">
-         <i class="ki-filled ki-eye-slash text-muted-foreground">
-         </i>
-        </span>
-       </button>
+      <div class="flex flex-col gap-1">
+       <div class="flex items-center justify-between gap-1">
+        <label class="kt-form-label font-normal text-mono">
+         Password
+        </label>
+        <a class="text-sm kt-link shrink-0" href="#">
+         Forgot Password?
+        </a>
+       </div>
+       <div class="kt-input" data-kt-toggle-password="true">
+        <input name="password" placeholder="Enter Password" type="password" value=""/>
+        <button class="kt-btn kt-btn-sm kt-btn-ghost kt-btn-icon bg-transparent! -me-1.5" data-kt-toggle-password-trigger="true" type="button">
+         <span class="kt-toggle-password-active:hidden">
+          <i class="ki-filled ki-eye text-muted-foreground">
+          </i>
+         </span>
+         <span class="hidden kt-toggle-password-active:block">
+          <i class="ki-filled ki-eye-slash text-muted-foreground">
+          </i>
+         </span>
+        </button>
+       </div>
+      </div>
+      <label class="kt-label">
+       <input class="kt-checkbox kt-checkbox-sm" name="check" type="checkbox" value="1"/>
+       <span class="kt-checkbox-label">
+        Remember me
+       </span>
+      </label>
+      <button class="kt-btn kt-btn-primary flex justify-center grow">
+       Sign In
+      </button>
+     </form>
+    </div>
+   </div>
+   <div class="lg:rounded-xl lg:border lg:border-border lg:m-5 order-1 lg:order-2 bg-top xxl:bg-center xl:bg-cover bg-no-repeat branded-bg">
+    <div class="flex flex-col p-8 lg:p-16 gap-4">
+     <a href="html/demo1.html">
+      <img class="h-[28px] max-w-none" src="/static/demo/assets/media/app/mini-logo.svg"/>
+     </a>
+     <div class="flex flex-col gap-3">
+      <h3 class="text-2xl font-semibold text-mono">
+       Secure Access Portal
+      </h3>
+      <div class="text-base font-medium text-secondary-foreground">
+       A robust authentication gateway ensuring
+       <br/>
+       secure
+       <span class="text-mono font-semibold">
+        efficient user access
+       </span>
+       to the Metronic
+       <br/>
+       Dashboard interface.
       </div>
      </div>
-     <label class="kt-label">
-      <input class="kt-checkbox kt-checkbox-sm" name="check" type="checkbox" value="1"/>
-      <span class="kt-checkbox-label">
-       Remember me
-      </span>
-     </label>
-     <button class="kt-btn kt-btn-primary flex justify-center grow">
-      Sign In
-     </button>
-    </form>
+    </div>
    </div>
   </div>
   <!-- End of Page -->
   <!-- Scripts -->
-  <script src="/static/metronic/js/core.bundle.js">
+  <script src="/static/demo/assets/js/core.bundle.js">
   </script>
-  <script src="/static/metronic/vendors/ktui/ktui.min.js">
+  <script src="/static/demo/assets/vendors/ktui/ktui.min.js">
+  </script>
+  <script src="/static/demo/assets/vendors/apexcharts/apexcharts.min.js">
   </script>
   <!-- End of Scripts -->
  </body>
