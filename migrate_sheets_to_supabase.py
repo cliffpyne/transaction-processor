@@ -436,11 +436,12 @@ def row_to_customers(row, source_tab, variant):
 def post_batch(table, rows):
     if not rows:
         return
-    # No on_conflict — the (source_tab, original_id) unique index was dropped
-    # because original_id gets reset over time and legitimate rows collide.
-    # Duplicate protection is now at the ref_number level (added separately)
-    # and via the app's in-code dedup before writes.
-    on_conflict = ''
+    # For transactions, upsert on ref_number so re-runs or sheet exports that
+    # replay past rows merge silently against the partial UNIQUE index on
+    # ref_number instead of tripping 409. Rows with NULL/empty ref_number
+    # sidestep the index and still land as fresh inserts. Customers and
+    # dedup_alerts don't have this constraint.
+    on_conflict = '?on_conflict=ref_number' if table == 'transactions' else ''
 
     last_body = ''
     for attempt in range(6):

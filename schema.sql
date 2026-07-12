@@ -89,11 +89,22 @@ CREATE INDEX IF NOT EXISTS idx_tx_created
 CREATE UNIQUE INDEX IF NOT EXISTS ux_tx_source_original
   ON transactions(source_tab, original_id);
 
--- Deliberately NOT adding a UNIQUE on ref_number yet — we run the backfill
--- FIRST, then query for historical dedup leaks, then add it once cleaned:
+-- Partial UNIQUE on ref_number — our primary DB-level dedup guard. NULLs
+-- and empty strings are excluded so failed rows (which often have no ref)
+-- can still land. Runs in the app path via ?on_conflict=ref_number
+-- upserts, so any duplicate write merges instead of failing.
 --
---   CREATE UNIQUE INDEX ux_tx_ref_unique ON transactions(ref_number)
---     WHERE ref_number IS NOT NULL AND ref_number <> '';
+-- Before applying, deduplicate existing rows (keep newest per ref_number):
+--
+--   DELETE FROM transactions t
+--    USING transactions t2
+--    WHERE t.ref_number = t2.ref_number
+--      AND t.ref_number IS NOT NULL
+--      AND t.ref_number <> ''
+--      AND t.id < t2.id;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_tx_ref_unique
+  ON transactions(ref_number)
+  WHERE ref_number IS NOT NULL AND ref_number <> '';
 
 
 -- ── customers ──────────────────────────────────────────────────────────────
