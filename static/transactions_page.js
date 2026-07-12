@@ -108,12 +108,14 @@
     return { label: bb || '—', cls: 'kt-badge-secondary' };
   };
 
-  // Column layout differs on the Iliyopata tab: two dates + rescued-by
+  // Column layout differs on the Iliyopata tab: two dates + rescued-by.
+  // No Actions column — the whole row is clickable and opens the details
+  // drawer; Rescue lives inside the drawer for FAILED rows.
   const columnsForCurrent = () => {
     if (state.product === 'iliyopata') {
-      return ['sel', 'ref', 'status', 'newdate', 'olddate', 'bank', 'customer', 'description', 'amount', 'rescuedby', 'actions'];
+      return ['sel', 'ref', 'status', 'newdate', 'olddate', 'bank', 'customer', 'description', 'amount', 'rescuedby'];
     }
-    return ['sel', 'ref', 'status', 'date', 'bank', 'customer', 'description', 'amount', 'actions'];
+    return ['sel', 'ref', 'status', 'date', 'bank', 'customer', 'description', 'amount'];
   };
 
   const HEADERS = {
@@ -177,29 +179,15 @@
         return `<td class="text-foreground font-semibold text-end">${fmtMoney(r.credit_amount)}<span class="text-secondary-foreground font-normal"> TZS</span></td>`;
       case 'rescuedby':
         return `<td class="text-secondary-foreground text-sm">${esc(r.moved_by_username || '—')}</td>`;
-      case 'actions': {
-        if (FAILED_TABS.has(r.source_tab)) {
-          return `<td class="text-center">
-                    <button class="kt-btn kt-btn-sm kt-btn-outline kt-btn-primary" data-rescue-id="${r.id}"
-                            data-ref="${esc(r.ref_number || '')}" data-amount="${esc(r.credit_amount || 0)}">
-                      Rescue
-                    </button>
-                  </td>`;
-        }
-        return `<td class="text-center">
-                  <button class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost" data-details-id="${r.id}"
-                          data-kt-drawer-toggle="#drawers_txn_details">
-                    <i class="ki-filled ki-eye text-lg"></i>
-                  </button>
-                </td>`;
-      }
     }
     return '<td></td>';
   };
 
   const renderRow = (r) => {
     const cols = columnsForCurrent();
-    return `<tr data-id="${r.id}">${cols.map(c => cellFor(c, r)).join('')}</tr>`;
+    return `<tr data-id="${r.id}" data-kt-drawer-toggle="#drawers_txn_details" style="cursor:pointer">
+      ${cols.map(c => cellFor(c, r)).join('')}
+    </tr>`;
   };
 
   const renderPager = (page, lastPage) => {
@@ -383,14 +371,26 @@
       $td.movedBy.textContent = r.moved_by_username || '—';
       $td.movedAt.textContent = r.moved_at ? new Date(r.moved_at).toLocaleString('en-GB') : '—';
     }
+    // Rescue button — only shown for FAILED rows.
+    const $rescueBtn = document.getElementById('td_rescue_btn');
+    if ($rescueBtn) {
+      if (FAILED_TABS.has(r.source_tab)) {
+        $rescueBtn.style.display = '';
+        $rescueBtn.dataset.rescueId = r.id;
+        $rescueBtn.dataset.ref = r.ref_number || '';
+        $rescueBtn.dataset.amount = r.credit_amount || 0;
+      } else {
+        $rescueBtn.style.display = 'none';
+      }
+    }
   };
 
   const wireDetailButtons = () => {
-    document.querySelectorAll('button[data-details-id]').forEach(b => {
-      b.addEventListener('click', () => {
-        populateDetails(rowsById[b.dataset.detailsId]);
-        // Metronic's ktui drawer handles the open animation via
-        // data-kt-drawer-toggle — the button already carries it.
+    document.querySelectorAll('#txn_tbody tr[data-id]').forEach(tr => {
+      tr.addEventListener('click', (e) => {
+        // Ignore clicks on the row-select checkbox
+        if (e.target.closest('input[type="checkbox"]')) return;
+        populateDetails(rowsById[tr.dataset.id]);
       });
     });
   };
@@ -415,10 +415,23 @@
   };
 
   const wireRescueButtons = () => {
+    // Legacy inline row buttons (kept for future); currently only the
+    // drawer's Rescue button surfaces this action.
     document.querySelectorAll('button[data-rescue-id]').forEach(b => {
       b.addEventListener('click', () => openRescue(b));
     });
   };
+
+  // Wire the drawer's Rescue button once (persistent element).
+  {
+    const $btn = document.getElementById('td_rescue_btn');
+    if ($btn) {
+      $btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openRescue($btn);
+      });
+    }
+  }
 
   const PRODUCT_LABEL_SHORT = {
     'BODA_RECORDS':   'Boda',
