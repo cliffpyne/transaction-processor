@@ -3459,6 +3459,33 @@ def run_migration():
     })
 
 
+@app.route('/admin/wipe-transactions', methods=['POST'])
+def wipe_transactions():
+    """One-shot: DELETE FROM transactions in Supabase. Gated by
+    MIGRATION_TOKEN. Used before re-running the migration when we need
+    to backfill columns (like transaction_date time) that require a
+    fresh ingest. Does NOT touch customers or dedup_alerts."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    url  = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key  = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    if not url or not key:
+        return jsonify({'error': 'supabase_env_missing'}), 500
+    r = requests.delete(
+        f'{url}/rest/v1/transactions?id=gte.0',
+        headers={
+            'apikey': key,
+            'Authorization': f'Bearer {key}',
+            'Prefer': 'return=minimal, count=exact',
+        },
+        timeout=120,
+    )
+    if not r.ok:
+        return jsonify({'error': r.text[:400], 'status': r.status_code}), 500
+    deleted = r.headers.get('Content-Range', '0-0/0').split('/')[-1]
+    return jsonify({'deleted': int(deleted or 0)})
+
+
 @app.route('/admin/seed-users', methods=['POST'])
 def seed_users_endpoint():
     """One-shot seed of the initial UI accounts. Idempotent (upsert). Gated
