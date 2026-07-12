@@ -3476,14 +3476,13 @@ def wipe_transactions():
         headers={
             'apikey': key,
             'Authorization': f'Bearer {key}',
-            'Prefer': 'return=minimal, count=exact',
+            'Prefer': 'return=minimal',
         },
-        timeout=120,
+        timeout=600,
     )
     if not r.ok:
         return jsonify({'error': r.text[:400], 'status': r.status_code}), 500
-    deleted = r.headers.get('Content-Range', '0-0/0').split('/')[-1]
-    return jsonify({'deleted': int(deleted or 0)})
+    return jsonify({'ok': True, 'status': r.status_code})
 
 
 @app.route('/admin/seed-users', methods=['POST'])
