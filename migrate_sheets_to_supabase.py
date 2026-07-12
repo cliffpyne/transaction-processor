@@ -281,6 +281,12 @@ def _is_header_or_blank(row):
     return col_a in _HEADER_A or col_b in _HEADER_B
 
 
+# Only migrate rows dated on or after this cutoff — the sheet's historical
+# tail is full of malformed hand-edited entries that we don't want in the
+# clean DB. Everything before this date is dropped.
+MIGRATION_START_DAY = '2026-07-01'
+
+
 def row_to_transaction(row, source_tab, source_sheet_id, variant):
     def cell(i):
         return row[i] if i < len(row) else None
@@ -319,10 +325,16 @@ def row_to_transaction(row, source_tab, source_sheet_id, variant):
 
     is_fuzzy = variant == 'passed_9col' and identifier is not None and ',' in identifier
 
+    # Skip everything older than the cutoff — historical sheet tail has a lot
+    # of hand-edited garbage. Rows whose date fails to parse also drop.
+    tx_day = parse_transaction_day(tx_date_text)
+    if not tx_day or tx_day < MIGRATION_START_DAY:
+        return None
+
     return {
         'original_id':      original_id,
         'transaction_date': tx_date_text,
-        'transaction_day':  parse_transaction_day(tx_date_text),
+        'transaction_day':  tx_day,
         'posting_date':     None,
         'bank':             bank or 'UNKNOWN',
         'description':      description,

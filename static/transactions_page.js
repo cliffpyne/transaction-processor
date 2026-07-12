@@ -60,8 +60,13 @@
   const parseTxnDate = (raw) => {
     if (!raw) return null;
     const s = String(raw).trim();
-    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    // DD.MM.YYYY[ HH:MM[:SS]] — canonical bank-processor format
+    let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (m) return { y: +m[3], mo: +m[2] - 1, d: +m[1], h: m[4] ? +m[4] : null, mi: m[5] ? +m[5] : 0 };
+    // ISO YYYY-MM-DD[ HH:MM[:SS]]
+    m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if (m) return { y: +m[1], mo: +m[2] - 1, d: +m[3], h: m[4] ? +m[4] : null, mi: m[5] ? +m[5] : 0 };
+    // DD-Mon-YY[YY] [HH:MM[:SS]]
     m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if (m) {
       const mo = MONTHS[m[2].toLowerCase()];
