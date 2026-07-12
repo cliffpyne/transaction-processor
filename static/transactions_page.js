@@ -388,8 +388,9 @@
     $td.heroDate.innerHTML       = fmtDate(r.transaction_date, r.description);
     // Reset ring class then set the state colour. Icon is always the
     // unisex ki-user silhouette; only the tint changes.
-    $td.avatarWrap.className = `flex items-center justify-center rounded-full border-4 bg-background size-[128px] shrink-0 ${av.ring}`;
-    $td.avatarIcon.className = `ki-filled ki-user text-5xl ${av.tint}`;
+    $td.avatarWrap.className = `flex items-center justify-center rounded-full border-4 bg-background size-[160px] shrink-0 ${av.ring}`;
+    $td.avatarIcon.className = `ki-filled ki-user text-6xl ${av.tint}`;
+    $td.avatarIcon.style.fontSize = '88px';
 
     // Amount
     $td.amount.textContent = fmtMoney(r.credit_amount);

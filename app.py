@@ -3538,6 +3538,67 @@ def wipe_status():
         return jsonify(dict(_WIPE_STATE))
 
 
+@app.route('/admin/sheet-totals', methods=['GET'])
+def admin_sheet_totals():
+    """Token-gated: read the sheets directly and sum column E (Credit) per
+    (bank, day) for the last N days. Compared against /admin/daily-totals
+    to reconcile the DB against what the sheet actually says.
+
+    Uses UNFORMATTED_VALUE so column E arrives as a real number, and
+    parses column B with the same parse_transaction_day logic the
+    migration uses. Only PASSED-family tabs are summed."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    days = min(60, max(1, int(request.args.get('days', 10))))
+    from_day = (datetime.utcnow() - timedelta(days=days - 1)).strftime('%Y-%m-%d')
+
+    from migrate_sheets_to_supabase import parse_transaction_day
+    service = get_google_service()
+    if not service:
+        return jsonify({'error': 'google_service_failed'}), 500
+
+    # (sheet_id, tab_name, bank_label)
+    tabs = [
+        (PASSED_SHEET_ID, 'PASSED',         'CRDB'),
+        (PASSED_SHEET_ID, 'PASSED_SAV',     'CRDB'),
+        (NMB_SHEET_ID,    'PASSED',         'NMB'),
+        (NMB_SHEET_ID,    'PASSED_SAV_NMB', 'NMB'),
+        (IPHONE_SHEET_ID, 'BANK_PASSED',    'IPHONE'),
+    ]
+    buckets: dict = {}
+    per_tab: dict = {}
+    for sheet_id, tab, bank in tabs:
+        try:
+            resp = service.spreadsheets().values().get(
+                spreadsheetId=sheet_id,
+                range=f"'{tab}'!B:E",
+                valueRenderOption='UNFORMATTED_VALUE',
+            ).execute()
+        except Exception as e:
+            per_tab[f'{bank}:{tab}'] = f'error: {str(e)[:120]}'
+            continue
+        rows = resp.get('values', [])
+        tab_seen = 0
+        for row in rows:
+            if not row or len(row) < 4:
+                continue
+            date_val = row[0]
+            credit   = row[3] if len(row) > 3 else None
+            if not isinstance(credit, (int, float)):
+                continue
+            day = parse_transaction_day(date_val)
+            if not day or day < from_day:
+                continue
+            buckets.setdefault(bank, {}).setdefault(day, 0.0)
+            buckets[bank][day] += float(credit)
+            tab_seen += 1
+        per_tab[f'{bank}:{tab}'] = tab_seen
+    for b in buckets:
+        for d in buckets[b]:
+            buckets[b][d] = round(buckets[b][d], 2)
+    return jsonify({'from': from_day, 'buckets': buckets, 'per_tab_row_counts': per_tab})
+
+
 @app.route('/admin/daily-totals', methods=['GET'])
 def admin_daily_totals():
     """Token-gated: sum(credit_amount) per (bank, transaction_day) for the
