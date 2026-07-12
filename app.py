@@ -3538,6 +3538,51 @@ def wipe_status():
         return jsonify(dict(_WIPE_STATE))
 
 
+@app.route('/admin/sheet-range', methods=['GET'])
+def admin_sheet_range():
+    """Token-gated: dump a raw slice of any sheet tab so we can eyeball the
+    rows the user is expecting to see. Query params:
+      sheet = crdb | nmb | iphone | pikipiki
+      tab   = the tab name (e.g. PASSED, PASSED_SAV, PASSED_NMB, ...)
+      from  = first row (inclusive, 1-based)
+      to    = last row (inclusive, 1-based)
+    Returns: {rows: [[…]], sum_col_e: N, count: N}."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    sheet_key = (request.args.get('sheet') or '').lower()
+    tab       = request.args.get('tab') or ''
+    fr        = int(request.args.get('from') or 1)
+    to        = int(request.args.get('to') or fr)
+    sheet_ids = {'crdb': PASSED_SHEET_ID, 'nmb': NMB_SHEET_ID,
+                 'iphone': IPHONE_SHEET_ID, 'pikipiki': PIKIPIKI_SHEET_ID}
+    sheet_id = sheet_ids.get(sheet_key)
+    if not sheet_id or not tab:
+        return jsonify({'error': 'sheet + tab required',
+                        'valid_sheets': list(sheet_ids)}), 400
+    service = get_google_service()
+    if not service:
+        return jsonify({'error': 'google_service_failed'}), 500
+    resp = service.spreadsheets().values().get(
+        spreadsheetId=sheet_id,
+        range=f"'{tab}'!A{fr}:I{to}",
+        valueRenderOption='UNFORMATTED_VALUE',
+    ).execute()
+    rows = resp.get('values', [])
+    sum_e = 0.0
+    for row in rows:
+        if len(row) > 4 and isinstance(row[4], (int, float)):
+            sum_e += float(row[4])
+    return jsonify({
+        'sheet': sheet_key,
+        'tab': tab,
+        'from': fr,
+        'to': to,
+        'count': len(rows),
+        'sum_col_e': round(sum_e, 2),
+        'rows': rows,
+    })
+
+
 @app.route('/admin/sheet-totals', methods=['GET'])
 def admin_sheet_totals():
     """Token-gated: read the sheets directly and sum column E (Credit) per
