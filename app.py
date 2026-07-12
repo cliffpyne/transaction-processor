@@ -3402,6 +3402,7 @@ def demo_index():
 # ─────────────────────────────────────────────────────────────────────────────
 import subprocess
 import threading
+import requests
 
 _MIGRATION_LOG_PATH = '/tmp/migration.log'
 _MIGRATION_STATE = {'running': False, 'started_at': None, 'finished_at': None,
