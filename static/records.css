@@ -234,3 +234,57 @@ body.role-admin div.nav-admin { display: block; }
 #toast.hidden { display: none; }
 #toast.ok  { border-color: color-mix(in oklch, #10b981 45%, var(--border)); color: #059669; }
 #toast.err { border-color: color-mix(in oklch, #ef4444 45%, var(--border)); color: #dc2626; }
+
+
+/* ── Transactions view: pills, live strip, live dot ─────────────────────── */
+.mono         { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; }
+.muted        { color: var(--muted-foreground); }
+.fresh        { color: #10b981; font-weight: 600; }
+
+.pill {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: 999px;
+  font-size: .68rem; font-weight: 600; letter-spacing: .04em;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pill-bank-crdb   { background: rgba(16, 185, 129, .12);  color: #059669; }
+.pill-bank-nmb    { background: rgba(59, 130, 246, .12);  color: #2563eb; }
+.pill-bank-other  { background: rgba(148, 163, 184, .15); color: #475569; }
+.pill-status-ok   { background: rgba(16, 185, 129, .12);  color: #059669; }
+.pill-status-bad  { background: rgba(239, 68, 68, .12);   color: #dc2626; }
+.pill-status-sav  { background: rgba(139, 92, 246, .12);  color: #7c3aed; }
+.pill-status-other{ background: rgba(148, 163, 184, .15); color: #475569; }
+
+.live-strip {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px;
+  padding: 14px 18px; margin: 0 0 12px 0;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.live-strip-metrics { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
+.live-strip .metric { display: flex; flex-direction: column; gap: 2px; }
+.live-strip .metric-label {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted-foreground); font-weight: 500;
+}
+.live-strip .metric-value {
+  font-size: 1rem; font-weight: 600; color: var(--foreground);
+}
+.live-strip .metric-value.mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .95rem; }
+
+.live-strip-dot {
+  display: flex; align-items: center; gap: 8px;
+  font-size: .78rem; color: var(--muted-foreground);
+}
+.live-dot {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: #10b981;
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, .55);
+  animation: livePulse 1.8s infinite;
+}
+@keyframes livePulse {
+  0%   { box-shadow: 0 0 0 0    rgba(16, 185, 129, .55); }
+  70%  { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);   }
+  100% { box-shadow: 0 0 0 0    rgba(16, 185, 129, 0);   }
+}
