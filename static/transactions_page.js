@@ -19,11 +19,14 @@
   const state = {
     page: 1, size: 25, search: '',
     product: '', bank: '', status: '',
-    // Sort by the actual transaction time so Boda's CRDB+NMB rows come
-    // back interleaved chronologically instead of grouped by insertion
-    // order (which is bank-by-bank). transaction_date is now stored as an
-    // ISO 'YYYY-MM-DD HH:MM:SS' string, so text-sort is time-sort.
-    sort: 'transaction_date.desc.nullslast',
+    // Primary sort on transaction_day (real DATE column, always ISO)
+    // handles cross-day ordering uniformly regardless of how the sheet
+    // stored the raw date. transaction_date (text) is the tiebreaker
+    // within the same day so time-of-day still orders correctly.
+    // Text-sort of transaction_date alone was unreliable because NMB
+    // rows store '31-May-2026' while CRDB rows store '2026-05-31 …',
+    // and text compares "3" > "2" so NMB rows floated above CRDB.
+    sort: 'transaction_day.desc.nullslast,transaction_date.desc.nullslast',
     dayFrom: '', dayTo: '',
     total: 0,
   };

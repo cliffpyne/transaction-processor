@@ -94,12 +94,14 @@
          <div class="flex flex-wrap gap-2 items-center">
           <div class="flex items-center gap-1.5">
            <label class="text-sm text-secondary-foreground shrink-0">From</label>
-           <input class="kt-input h-8 text-sm shrink-0 cursor-pointer" id="txn_from" type="datetime-local" style="width:200px"
+           <input class="kt-input h-8 text-sm shrink-0 cursor-pointer" id="txn_from" type="datetime-local"
+                  style="width:220px;padding-right:10px"
                   onclick="try{this.showPicker()}catch(e){}"/>
           </div>
           <div class="flex items-center gap-1.5">
            <label class="text-sm text-secondary-foreground shrink-0">To</label>
-           <input class="kt-input h-8 text-sm shrink-0 cursor-pointer" id="txn_to" type="datetime-local" style="width:200px"
+           <input class="kt-input h-8 text-sm shrink-0 cursor-pointer" id="txn_to" type="datetime-local"
+                  style="width:220px;padding-right:10px"
                   onclick="try{this.showPicker()}catch(e){}"/>
           </div>
           <button class="kt-btn kt-btn-sm kt-btn-outline shrink-0" id="txn_range_clear">Clear</button>
@@ -141,10 +143,10 @@
             </option>
            </select>
            <select class="kt-select w-36" data-kt-select="true" data-kt-select-placeholder="Sort by" id="txn_sort">
-            <option value="transaction_date.desc.nullslast">
+            <option value="transaction_day.desc.nullslast,transaction_date.desc.nullslast">
              Newest first
             </option>
-            <option value="transaction_date.asc.nullslast">
+            <option value="transaction_day.asc.nullslast,transaction_date.asc.nullslast">
              Oldest first
             </option>
             <option value="credit_amount.desc.nullslast">
