@@ -55,6 +55,22 @@ CREATE TABLE IF NOT EXISTS transactions (
   created_at        timestamptz NOT NULL DEFAULT now()
 );
 
+-- ── Iliyopata (rescued failed rows) ──────────────────────────────────────
+-- When an officer picks the correct customer for a *FAILED row, we rewrite
+-- transaction_date to now so the downstream invoice processor sees it as a
+-- fresh transaction and won't skip it as stale, preserve the original in
+-- old_transaction_date, and record who moved it for audit.
+ALTER TABLE transactions
+  ADD COLUMN IF NOT EXISTS old_transaction_date text,
+  ADD COLUMN IF NOT EXISTS moved_by_user_id     bigint,
+  ADD COLUMN IF NOT EXISTS moved_by_username    text,
+  ADD COLUMN IF NOT EXISTS moved_at             timestamptz;
+
+CREATE INDEX IF NOT EXISTS idx_tx_moved_at
+  ON transactions(moved_at DESC)
+  WHERE moved_at IS NOT NULL;
+
+
 -- Fast dedup lookup (the hot path — fires 288×/day)
 CREATE INDEX IF NOT EXISTS idx_tx_ref
   ON transactions(ref_number);

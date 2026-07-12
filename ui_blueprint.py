@@ -55,7 +55,9 @@ TABLES = {
                         'description', 'credit_amount', 'identifier',
                         'customer_name', 'ref_number', 'customer_id',
                         'fail_reason', 'is_fuzzy_rescued', 'source_tab',
-                        'source_sheet_id', 'created_at'],
+                        'source_sheet_id', 'created_at',
+                        'old_transaction_date', 'moved_by_user_id',
+                        'moved_by_username', 'moved_at'],
         'search_cols': ['description', 'identifier', 'customer_name',
                         'ref_number', 'source_tab', 'bank'],
         'editable':    [],  # never edited via UI
@@ -301,11 +303,115 @@ def customers_delete(row_id):
     return jsonify({'deleted': True})
 
 
-# ── transactions (read-only) ─────────────────────────────────────────────────
+# ── transactions (read + rescue) ─────────────────────────────────────────────
 @ui.route('/api/transactions', methods=['GET'])
 @login_required
 def transactions_list():
     return _paginated_query('transactions', TABLES['transactions'])
+
+
+# Search customers for the rescue picker. No product filter — an iPhone
+# FAILED often turns out to be a Boda customer (they forgot the plate/phone
+# in the deposit narration), so officers must be able to pick anyone.
+@ui.route('/api/customers/search', methods=['GET'])
+@login_required
+def customers_search():
+    q = (request.args.get('q') or '').strip()
+    if not q:
+        return jsonify({'data': []})
+    # OR across name / phone / plate / customer_id (SAVCOM ID)
+    escaped = q.replace(',', '').replace('*', '%').replace(' ', '%')
+    or_terms = ','.join(
+        f'{col}.ilike.*{escaped}*'
+        for col in ('name', 'phone', 'plate', 'customer_id')
+    )
+    r = requests.get(
+        f'{SUPABASE_URL}/rest/v1/customers'
+        f'?select=id,name,phone,plate,customer_id,source_tab'
+        f'&or=({or_terms})'
+        f'&or=(name.not.is.null,plate.not.is.null)'  # skip garbage rows
+        f'&order=name.asc.nullslast'
+        f'&limit=20',
+        headers=_H, timeout=15,
+    )
+    if not r.ok:
+        return jsonify({'error': r.text[:400]}), 500
+    return jsonify({'data': r.json()})
+
+
+# Rescue: move a FAILED transaction to *ILIYOPATA, stamping the picked
+# customer's name and rewriting transaction_date to now. Any logged-in user
+# can do this (branch officers are viewers).
+_ILIYOPATA_TARGET = {
+    'IPHONE_RECORDS': 'IPHONEILIYOPATA',
+    # BODA_RECORDS + SAVCOM_RECORDS both collapse to BODAILIYOPATA — bank
+    # column already tells you CRDB vs NMB.
+    'BODA_RECORDS':   'BODAILIYOPATA',
+    'SAVCOM_RECORDS': 'BODAILIYOPATA',
+}
+_FAILED_SOURCE_TABS = {'CRDBFAILED', 'NMBFAILED', 'IPHONEFAILED'}
+
+
+@ui.route('/api/transactions/<int:row_id>/rescue', methods=['POST'])
+@login_required
+def transactions_rescue(row_id):
+    payload = request.get_json(silent=True) or {}
+    customer_id = payload.get('customer_id')
+    if not customer_id:
+        return jsonify({'error': 'customer_id required'}), 400
+
+    # Fetch txn + customer in parallel
+    tx_r = requests.get(
+        f'{SUPABASE_URL}/rest/v1/transactions?id=eq.{row_id}'
+        '&select=id,source_tab,transaction_date,customer_name,ref_number',
+        headers=_H, timeout=15,
+    )
+    cust_r = requests.get(
+        f'{SUPABASE_URL}/rest/v1/customers?id=eq.{customer_id}'
+        '&select=id,name,source_tab',
+        headers=_H, timeout=15,
+    )
+    if not tx_r.ok or not cust_r.ok:
+        return jsonify({'error': 'lookup_failed'}), 500
+
+    tx = (tx_r.json() or [None])[0]
+    cust = (cust_r.json() or [None])[0]
+    if not tx:
+        return jsonify({'error': 'transaction not found'}), 404
+    if not cust:
+        return jsonify({'error': 'customer not found'}), 404
+    if tx['source_tab'] not in _FAILED_SOURCE_TABS:
+        return jsonify({'error': 'not a failed row',
+                        'current_state': tx['source_tab']}), 409
+    target_tab = _ILIYOPATA_TARGET.get(cust['source_tab'])
+    if not target_tab:
+        return jsonify({'error': 'unknown customer source_tab',
+                        'source_tab': cust['source_tab']}), 400
+
+    now = datetime.utcnow()
+    now_iso   = now.strftime('%Y-%m-%d %H:%M:%S')
+    today_iso = now.strftime('%Y-%m-%d')
+
+    update = {
+        'old_transaction_date': tx.get('transaction_date'),
+        'transaction_date':     now_iso,
+        'transaction_day':      today_iso,
+        'customer_name':        cust.get('name'),
+        'source_tab':           target_tab,
+        'moved_by_user_id':     int(current_user.id),
+        'moved_by_username':    current_user.username,
+        'moved_at':             now.isoformat() + 'Z',
+    }
+    r = requests.patch(
+        f'{SUPABASE_URL}/rest/v1/transactions?id=eq.{row_id}',
+        headers={**_H, 'Prefer': 'return=representation'},
+        json=update, timeout=15,
+    )
+    if not r.ok:
+        return jsonify({'error': r.text[:400]}), 500
+    after = (r.json() or [None])[0]
+    _audit('RESCUE', 'transactions', row_id, before=tx, after=after)
+    return jsonify(after)
 
 
 # ── dedup_alerts (read-only) ─────────────────────────────────────────────────
