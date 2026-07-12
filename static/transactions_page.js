@@ -126,6 +126,9 @@
           <span class="kt-badge kt-badge-sm kt-badge-outline ${bk.cls}">${esc(bk.label)}</span>
         </td>
         <td class="text-foreground font-normal">${customerCell}</td>
+        <td class="text-secondary-foreground text-sm" title="${esc(r.description || '')}">
+          <div class="max-w-[420px] truncate">${esc(r.description || '—')}</div>
+        </td>
         <td class="text-foreground font-semibold text-end">${fmtMoney(r.credit_amount)}<span class="text-secondary-foreground font-normal"> TZS</span></td>
         <td class="text-center">
           <button class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost">
@@ -211,7 +214,7 @@
     }
 
     $tbody.innerHTML =
-      '<tr><td class="text-center text-secondary-foreground py-6" colspan="8">Loading…</td></tr>';
+      '<tr><td class="text-center text-secondary-foreground py-6" colspan="9">Loading…</td></tr>';
 
     let json;
     try {
@@ -221,7 +224,7 @@
       if (!r.ok) throw new Error(json.error || r.statusText);
     } catch (e) {
       $tbody.innerHTML =
-        `<tr><td class="text-center text-destructive py-6" colspan="8">Failed to load: ${esc(e.message)}</td></tr>`;
+        `<tr><td class="text-center text-destructive py-6" colspan="9">Failed to load: ${esc(e.message)}</td></tr>`;
       return;
     }
 
@@ -231,7 +234,7 @@
 
     if (!rows.length) {
       $tbody.innerHTML =
-        '<tr><td class="text-center text-secondary-foreground py-6" colspan="8">No transactions found.</td></tr>';
+        '<tr><td class="text-center text-secondary-foreground py-6" colspan="9">No transactions found.</td></tr>';
     } else {
       $tbody.innerHTML = rows.map(renderRow).join('');
     }
