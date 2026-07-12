@@ -326,66 +326,103 @@
 
   // ── Details drawer — populate fields for the picked row ─────────────────
   const $td = {
-    amount:      document.getElementById('td_amount'),
-    date:        document.getElementById('td_date'),
-    description: document.getElementById('td_description'),
-    ref:         document.getElementById('td_ref'),
-    customer:    document.getElementById('td_customer'),
-    identifier:  document.getElementById('td_identifier'),
-    customerId:  document.getElementById('td_customer_id'),
-    failReason:  document.getElementById('td_fail_reason'),
-    oldDate:     document.getElementById('td_old_date'),
-    oldDateRow:  document.getElementById('td_old_date_row'),
-    movedBy:     document.getElementById('td_moved_by'),
-    movedByRow:  document.getElementById('td_moved_by_row'),
-    movedAt:     document.getElementById('td_moved_at'),
-    movedAtRow:  document.getElementById('td_moved_at_row'),
-    sourceTab:   document.getElementById('td_source_tab'),
-    originalId:  document.getElementById('td_original_id'),
-    createdAt:   document.getElementById('td_created_at'),
-    statusWrap:  document.getElementById('td_status_pill_wrap'),
-    bankWrap:    document.getElementById('td_bank_pill_wrap'),
+    heroName:     document.getElementById('td_hero_name'),
+    heroVerified: document.getElementById('td_hero_verified'),
+    heroBankWrap: document.getElementById('td_hero_bank_wrap'),
+    heroDate:     document.getElementById('td_hero_date'),
+    heroStatusWrap: document.getElementById('td_hero_status_wrap'),
+    avatarWrap:   document.getElementById('td_avatar_wrap'),
+    avatarIcon:   document.getElementById('td_avatar_icon'),
+    amount:       document.getElementById('td_amount'),
+    description:  document.getElementById('td_description'),
+    ref:          document.getElementById('td_ref'),
+    identifier:   document.getElementById('td_identifier'),
+    customerId:      document.getElementById('td_customer_id'),
+    customerIdRow:   document.getElementById('td_customer_id_row'),
+    failReason:      document.getElementById('td_fail_reason'),
+    failReasonRow:   document.getElementById('td_fail_reason_row'),
+    oldDate:      document.getElementById('td_old_date'),
+    oldDateRow:   document.getElementById('td_old_date_row'),
+    movedBy:      document.getElementById('td_moved_by'),
+    movedByRow:   document.getElementById('td_moved_by_row'),
+    movedAt:      document.getElementById('td_moved_at'),
+    movedAtRow:   document.getElementById('td_moved_at_row'),
+    sourceTab:    document.getElementById('td_source_tab'),
+    originalId:   document.getElementById('td_original_id'),
+    createdAt:    document.getElementById('td_created_at'),
+    footer:       document.getElementById('td_footer'),
+    rescueBtn:    document.getElementById('td_rescue_btn'),
+  };
+
+  // Avatar ring colour + icon key off the transaction state so the hero card
+  // reads at a glance (green tick for passed, red cross for failed, blue
+  // shield for iliyopata).
+  const avatarStyleFor = (source_tab) => {
+    const s = String(source_tab || '').toUpperCase();
+    if (s.endsWith('FAILED'))    return { ring: 'border-destructive/40',        icon: 'ki-cross-circle',    tint: 'text-destructive' };
+    if (s.endsWith('ILIYOPATA')) return { ring: 'border-info/40',               icon: 'ki-shield-tick',     tint: 'text-info' };
+    if (s.endsWith('PASSED') || s.endsWith('SAVCOM'))
+                                 return { ring: 'border-success/40',            icon: 'ki-check-circle',    tint: 'text-success' };
+    return { ring: 'border-border', icon: 'ki-financial-schedule', tint: 'text-secondary-foreground' };
   };
 
   const populateDetails = (r) => {
     if (!r) return;
     const st = statusPill(r.source_tab);
     const bk = bankPill(r.bank);
-    $td.amount.innerHTML = `${fmtMoney(r.credit_amount)} <span class="text-lg text-secondary-foreground font-normal">TZS</span>`;
-    $td.date.innerHTML   = fmtDate(r.transaction_date, r.description);
+    const av = avatarStyleFor(r.source_tab);
+
+    // Hero
+    $td.heroName.textContent = r.customer_name || (FAILED_TABS.has(r.source_tab) ? (r.fail_reason || 'Unmatched') : '(no name)');
+    $td.heroVerified.style.display = (r.customer_name && !FAILED_TABS.has(r.source_tab)) ? '' : 'none';
+    $td.heroBankWrap.innerHTML   = `<span class="kt-badge kt-badge-sm kt-badge-outline ${bk.cls}">${esc(bk.label)}</span>`;
+    $td.heroStatusWrap.innerHTML = `<span class="kt-badge kt-badge-sm kt-badge-outline ${st.cls}">${esc(st.label)}</span>`;
+    $td.heroDate.innerHTML       = fmtDate(r.transaction_date, r.description);
+    // Reset ring class then set the state colour
+    $td.avatarWrap.className = `flex items-center justify-center rounded-full border-2 bg-background size-[92px] shrink-0 ${av.ring}`;
+    $td.avatarIcon.className = `ki-filled ${av.icon} text-3xl ${av.tint}`;
+
+    // Amount
+    $td.amount.textContent = fmtMoney(r.credit_amount);
+    // Body
     $td.description.textContent = r.description || '—';
     $td.ref.textContent = r.ref_number || '—';
-    $td.customer.textContent = r.customer_name || '—';
     $td.identifier.textContent = r.identifier || '—';
-    $td.customerId.textContent = r.customer_id || '—';
-    $td.failReason.textContent = r.fail_reason || '—';
-    $td.failReason.parentElement.parentElement.style.display = r.fail_reason ? '' : 'none';
+    if (r.customer_id) {
+      $td.customerIdRow.style.display = '';
+      $td.customerId.textContent = r.customer_id;
+    } else {
+      $td.customerIdRow.style.display = 'none';
+    }
+    if (r.fail_reason) {
+      $td.failReasonRow.style.display = '';
+      $td.failReason.textContent = r.fail_reason;
+    } else {
+      $td.failReasonRow.style.display = 'none';
+    }
     $td.sourceTab.textContent = r.source_tab || '—';
     $td.originalId.textContent = r.original_id != null ? String(r.original_id) : '—';
     $td.createdAt.textContent = r.created_at ? new Date(r.created_at).toLocaleString('en-GB') : '—';
-    $td.statusWrap.innerHTML = `<span class="kt-badge kt-badge-sm kt-badge-outline ${st.cls}">${esc(st.label)}</span>`;
-    $td.bankWrap.innerHTML = `<span class="kt-badge kt-badge-sm kt-badge-outline ${bk.cls}">${esc(bk.label)}</span>`;
+
     // Iliyopata-only rows
     const isIly = ILIYOPATA_TABS.has(r.source_tab);
     $td.oldDateRow.style.display = isIly ? '' : 'none';
     $td.movedByRow.style.display = isIly ? '' : 'none';
     $td.movedAtRow.style.display = isIly ? '' : 'none';
     if (isIly) {
-      $td.oldDate.innerHTML = fmtDate(r.old_transaction_date, r.description);
+      $td.oldDate.innerHTML   = fmtDate(r.old_transaction_date, r.description);
       $td.movedBy.textContent = r.moved_by_username || '—';
       $td.movedAt.textContent = r.moved_at ? new Date(r.moved_at).toLocaleString('en-GB') : '—';
     }
-    // Rescue button — only shown for FAILED rows.
-    const $rescueBtn = document.getElementById('td_rescue_btn');
-    if ($rescueBtn) {
-      if (FAILED_TABS.has(r.source_tab)) {
-        $rescueBtn.style.display = '';
-        $rescueBtn.dataset.rescueId = r.id;
-        $rescueBtn.dataset.ref = r.ref_number || '';
-        $rescueBtn.dataset.amount = r.credit_amount || 0;
-      } else {
-        $rescueBtn.style.display = 'none';
-      }
+
+    // Rescue button — footer only shown for FAILED rows.
+    if (FAILED_TABS.has(r.source_tab)) {
+      $td.footer.style.display = '';
+      $td.rescueBtn.dataset.rescueId = r.id;
+      $td.rescueBtn.dataset.ref = r.ref_number || '';
+      $td.rescueBtn.dataset.amount = r.credit_amount || 0;
+    } else {
+      $td.footer.style.display = 'none';
     }
   };
 
