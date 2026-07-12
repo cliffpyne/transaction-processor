@@ -95,9 +95,9 @@ def login_page():
         if user is None:
             return render_template('login.html', error='Invalid username or password'), 401
         login_user(user, remember=True)
-        return redirect('/records')
+        return redirect('/home')
     if current_user.is_authenticated:
-        return redirect('/records')
+        return redirect('/home')
     return render_template('login.html', error=None)
 
 
@@ -107,12 +107,20 @@ def logout_page():
     return redirect('/login')
 
 
-# ── SPA shell ────────────────────────────────────────────────────────────────
+# Backwards-compat: any lingering /records bookmarks land on /home.
 @ui.route('/records')
-@ui.route('/records/<path:_>')
+@ui.route('/records/<path:sub>')
+def _records_compat(sub=None):
+    target = '/home' + (('/' + sub) if sub else '') + (request.query_string.decode() and '?' + request.query_string.decode() or '')
+    return redirect(target, code=301)
+
+
+# ── SPA shell ────────────────────────────────────────────────────────────────
+@ui.route('/home')
+@ui.route('/home/<path:_>')
 @login_required
-def records_page(_=None):
-    return render_template('records.html',
+def home_page(_=None):
+    return render_template('home.html',
                            username=current_user.username,
                            full_name=current_user.full_name,
                            role=current_user.role)
