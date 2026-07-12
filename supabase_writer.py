@@ -206,12 +206,13 @@ def append(logical_tab, sheet_ids, rows):
         else:
             records = [_row_to_record_9col(r, new_source_tab, source_sheet_id) for r in rows]
 
-        # Upsert on ref_number so a duplicate write merges silently instead
-        # of raising 409 against the partial UNIQUE index on ref_number.
-        # ref_number is our primary DB-level dedup guard; rows with NULL
-        # or empty ref_number are excluded from the index and still insert.
+        # No on_conflict — PostgREST needs a non-partial unique constraint
+        # to accept ON CONFLICT (ref_number), and ours is partial (excludes
+        # NULL / empty ref). App-side dedup on ref_number prevents duplicate
+        # writes; the partial UNIQUE is a hard backstop that will 409 any
+        # duplicate that slips through, which we log below.
         r = requests.post(
-            f'{SUPABASE_URL}/rest/v1/transactions?on_conflict=ref_number',
+            f'{SUPABASE_URL}/rest/v1/transactions',
             headers=_HEADERS,
             json=records,
             timeout=15,

@@ -404,12 +404,12 @@ def row_to_customers(row, source_tab, variant):
 def post_batch(table, rows):
     if not rows:
         return
-    # For transactions, upsert on ref_number so re-runs or sheet exports that
-    # replay past rows merge silently against the partial UNIQUE index on
-    # ref_number instead of tripping 409. Rows with NULL/empty ref_number
-    # sidestep the index and still land as fresh inserts. Customers and
-    # dedup_alerts don't have this constraint.
-    on_conflict = '?on_conflict=ref_number' if table == 'transactions' else ''
+    # No on_conflict — PostgREST's ON CONFLICT (ref_number) requires a
+    # non-partial unique constraint, but ours is a partial index (excludes
+    # NULL / empty ref). The migration wipes first, so no duplicates can
+    # arise within a single run anyway; the partial UNIQUE still guards
+    # the live path.
+    on_conflict = ''
 
     last_body = ''
     for attempt in range(6):
