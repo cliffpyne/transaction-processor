@@ -338,7 +338,14 @@ def row_to_customers(row, source_tab, variant):
         name        = s_or_none(cell(2))
         phone       = str(cell(3) or '').replace(' ', '').replace('-', '') or None
         customer_id = s_or_none(cell(4))
-        if not plate and not phone and not name:
+        # Treat placeholder phones like '0' / '00' as null — the sheet has
+        # thousands of rows where phone is literally '0' and everything else
+        # is blank. Those aren't real customers.
+        if phone and phone.strip('0') == '':
+            phone = None
+        # Real customer must have at least a name or a plate. Phone alone
+        # (even a real one) isn't enough to identify a customer.
+        if not plate and not name:
             return []
         return [{
             'plate':       plate,
@@ -356,6 +363,9 @@ def row_to_customers(row, source_tab, variant):
         for i in (1, 2):
             raw = s_or_none(cell(i))
             if not raw:
+                continue
+            # Same '0'-placeholder rule for iPhone phone columns.
+            if raw.replace(' ', '').replace('-', '').strip('0') == '':
                 continue
             rows.append({
                 'plate':       None,

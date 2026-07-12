@@ -134,8 +134,14 @@ def home_page(sub=None):
 
 
 # ── REST API — generic list endpoint ────────────────────────────────────────
-def _paginated_query(table: str, cfg: dict):
-    """Turn Tabulator's query params into a PostgREST query."""
+def _paginated_query(table: str, cfg: dict, always_where=None):
+    """Turn Tabulator's query params into a PostgREST query.
+
+    `always_where` — optional list of PostgREST filter fragments (e.g.
+    'or=(name.not.is.null,plate.not.is.null)') that are ANDed onto every
+    request. Used by /api/customers to hide garbage rows the sheet
+    import created before we tightened the row validator.
+    """
     page = max(1, int(request.args.get('page', 1)))
     size = min(200, max(1, int(request.args.get('size', 50))))
     offset = (page - 1) * size
@@ -149,6 +155,8 @@ def _paginated_query(table: str, cfg: dict):
     # Build PostgREST query
     parts = ['select=' + ','.join(cfg['columns']),
              f'order={order}']
+    if always_where:
+        parts.extend(always_where)
 
     # Global search — OR across configured text columns using `ilike`
     q = (request.args.get('search') or '').strip()
@@ -217,10 +225,18 @@ def _audit(action: str, table_name: str, row_id: int,
 
 
 # ── customers CRUD ───────────────────────────────────────────────────────────
+# Sheet imports before we tightened row_to_customers produced ~9k Boda rows
+# where the only populated field was a placeholder phone of "0". Hide those:
+# a real customer must have either a name or a plate. Phone alone doesn't
+# count.
+_CUSTOMER_VALID_ROW = ['or=(name.not.is.null,plate.not.is.null)']
+
+
 @ui.route('/api/customers', methods=['GET'])
 @login_required
 def customers_list():
-    return _paginated_query('customers', TABLES['customers'])
+    return _paginated_query('customers', TABLES['customers'],
+                            always_where=_CUSTOMER_VALID_ROW)
 
 
 
