@@ -185,7 +185,11 @@
 
   const renderRow = (r) => {
     const cols = columnsForCurrent();
-    return `<tr data-id="${r.id}" data-kt-drawer-toggle="#drawers_txn_details" style="cursor:pointer">
+    // No data-kt-drawer-toggle on the tr — ktui only binds hooks that were
+    // in the DOM at init time. We handle the open by clicking a persistent
+    // hidden trigger button (#td_trigger) after populating the fields, so
+    // Metronic's ktui gets the overlay+blur exactly like the demo.
+    return `<tr data-id="${r.id}" style="cursor:pointer">
       ${cols.map(c => cellFor(c, r)).join('')}
     </tr>`;
   };
@@ -385,12 +389,17 @@
     }
   };
 
+  const $trigger = document.getElementById('td_trigger');
+
   const wireDetailButtons = () => {
     document.querySelectorAll('#txn_tbody tr[data-id]').forEach(tr => {
       tr.addEventListener('click', (e) => {
         // Ignore clicks on the row-select checkbox
         if (e.target.closest('input[type="checkbox"]')) return;
         populateDetails(rowsById[tr.dataset.id]);
+        // Fire ktui's toggle via the persistent trigger, so we inherit
+        // Metronic's overlay + backdrop-blur + slide-in animation.
+        if ($trigger) $trigger.click();
       });
     });
   };

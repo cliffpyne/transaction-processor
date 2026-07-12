@@ -203,6 +203,12 @@
      </div>
      <!-- End of Container -->
 
+     <!-- Hidden trigger — present at page load so ktui wires its click
+          handler. JS clicks this after populating fields so the drawer
+          slides in with Metronic's own overlay+blur, verbatim demo -->
+     <button id="td_trigger" data-kt-drawer-toggle="#drawers_txn_details"
+             style="display:none" aria-hidden="true"></button>
+
      <!-- Transaction Details Drawer — verbatim demo structure -->
      <div class="hidden kt-drawer kt-drawer-end kt-card flex-col max-w-[90%] w-[520px] top-5 bottom-5 end-5 rounded-xl border border-border" data-kt-drawer="true" data-kt-drawer-container="body" id="drawers_txn_details">
       <div class="kt-card-header px-5">
