@@ -33,7 +33,7 @@ import socket
 import sys
 import time
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import requests
 from google.oauth2 import service_account
@@ -174,23 +174,6 @@ def s_or_none(v):
     return s if s else None
 
 
-# Google Sheets stores dates internally as serial numbers (days since
-# 1899-12-30, with a bug-compatible offset). With valueRenderOption=
-# UNFORMATTED_VALUE the API returns that raw number, so we can recover the
-# time-of-day even when the cell is formatted as date-only.
-_SHEETS_EPOCH = datetime(1899, 12, 30)
-
-
-def _serial_to_iso(v):
-    """Convert a Google Sheets serial-number date/datetime to
-    'YYYY-MM-DD HH:MM:SS'. Returns None for non-numeric input."""
-    if not isinstance(v, (int, float)) or isinstance(v, bool):
-        return None
-    # Sanity range: 1970-01-01 (≈25569) to 2100-01-01 (≈73050).
-    if v < 25000 or v > 80000:
-        return None
-    dt = _SHEETS_EPOCH + timedelta(days=float(v))
-    return dt.strftime('%Y-%m-%d %H:%M:%S')
 
 
 # ── Content-based classifiers for the FAILED variant ──────────────────────
@@ -253,43 +236,16 @@ def get_sheets():
     return build('sheets', 'v4', credentials=creds)
 
 
-def _merge_unformatted_dates(service, sheet_id, tab_name, rows, start_row):
-    """Follow-up read of column B with valueRenderOption=UNFORMATTED_VALUE
-    so we get the raw datetime serial (preserving time-of-day even when the
-    cell is formatted as date-only), then splice each ISO timestamp back
-    into row[1]. Column A/C/…/I stay on their FORMATTED_VALUE read so that
-    e.g. mobile numbers keep their leading zeros.
-    """
-    if not rows:
-        return rows
-    end_row = start_row + len(rows) - 1
-    result = service.spreadsheets().values().get(
-        spreadsheetId=sheet_id,
-        range=f"'{tab_name}'!B{start_row}:B{end_row}",
-        valueRenderOption='UNFORMATTED_VALUE',
-    ).execute()
-    dates = result.get('values', [])
-    for i, row in enumerate(rows):
-        if i >= len(dates) or not dates[i]:
-            continue
-        iso = _serial_to_iso(dates[i][0])
-        if iso is None:
-            continue
-        while len(row) <= 1:
-            row.append(None)
-        row[1] = iso
-    return rows
-
-
 def read_tab(service, sheet_id, tab_name):
-    """Read a whole tab. Kept for compatibility with the customer-tab path,
-    which is small (< 10k rows). Transaction tabs go through read_tab_chunk."""
+    """Read a whole tab as its user-visible values (FORMATTED_VALUE, the
+    default). Column B carries whatever the sheet's Date cell displays —
+    that is the source of truth; we never second-guess it by pulling the
+    underlying serial (locale-misparsed 11/6 → Nov 6 was exactly why)."""
     result = service.spreadsheets().values().get(
         spreadsheetId=sheet_id,
         range=f"'{tab_name}'!A:I",
     ).execute()
-    rows = result.get('values', [])
-    return _merge_unformatted_dates(service, sheet_id, tab_name, rows, 1)
+    return result.get('values', [])
 
 
 def read_tab_chunk(service, sheet_id, tab_name, start_row, chunk_rows):
@@ -301,8 +257,7 @@ def read_tab_chunk(service, sheet_id, tab_name, start_row, chunk_rows):
         spreadsheetId=sheet_id,
         range=range_str,
     ).execute()
-    rows = result.get('values', [])
-    return _merge_unformatted_dates(service, sheet_id, tab_name, rows, start_row)
+    return result.get('values', [])
 
 
 # ── Row converters ─────────────────────────────────────────────────────────
@@ -338,10 +293,11 @@ def row_to_transaction(row, source_tab, source_sheet_id, variant):
     # NULL is a legal value and the row still lands in the DB.
     original_id = parse_int(cell(0))
 
-    # cell(1) is the date column. read_tab_chunk has already replaced it
-    # with an ISO 'YYYY-MM-DD HH:MM:SS' string via a follow-up UNFORMATTED
-    # read, so time-of-day is preserved even when the cell format shows
-    # date only. Falls back to the raw text for cells that were text-typed.
+    # cell(1) is the date column — take the sheet's display value verbatim
+    # for every bank. The live transaction processor already writes
+    # correctly-formatted date+time into column B on both CRDB and NMB
+    # rows (via extract_nmb_datetime for NMB, pandas Timestamp for CRDB);
+    # our job here is only to mirror what's already on the sheet.
     tx_date_text = s_or_none(cell(1))
     bank         = s_or_none(cell(2))
     description  = str(cell(3) or '')
