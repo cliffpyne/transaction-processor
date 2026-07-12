@@ -251,13 +251,37 @@ def read_tab_chunk(service, sheet_id, tab_name, start_row, chunk_rows):
 
 
 # ── Row converters ─────────────────────────────────────────────────────────
+_HEADER_A = {
+    'id', 'sn', 'no', 'no.', '#', 'original_id', 'row', 'row id',
+    'refnumber',   # PASSED sheet historical header
+}
+_HEADER_B = {'date', 'trans date', 'transaction date'}
+
+
+def _is_header_or_blank(row):
+    """True if the row is the sheet header or completely empty. Anything else
+    (including rows with garbage in column A like NMB's stray '23-Jun-40'
+    strings) must be treated as real data — we've lost too many valid rows
+    by mistaking them for headers."""
+    if not row or not any((str(v).strip() for v in row)):
+        return True
+    col_a = str(row[0]).strip().lower() if len(row) > 0 else ''
+    col_b = str(row[1]).strip().lower() if len(row) > 1 else ''
+    # Header rows always land as A ∈ known-header-values or B == "date"
+    return col_a in _HEADER_A or col_b in _HEADER_B
+
+
 def row_to_transaction(row, source_tab, source_sheet_id, variant):
     def cell(i):
         return row[i] if i < len(row) else None
 
+    if _is_header_or_blank(row):
+        return None
+
+    # original_id may be None (bad data like '23-Jun-40' in column A).
+    # That's OK — the (source_tab, original_id) UNIQUE was dropped, so
+    # NULL is a legal value and the row still lands in the DB.
     original_id = parse_int(cell(0))
-    if original_id is None:
-        return None  # header or blank
 
     tx_date_text = s_or_none(cell(1))
     bank         = s_or_none(cell(2))
