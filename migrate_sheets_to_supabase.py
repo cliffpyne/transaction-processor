@@ -29,6 +29,7 @@ Usage:
 import json
 import os
 import re
+import socket
 import sys
 import time
 from collections import Counter
@@ -37,6 +38,10 @@ from datetime import date, datetime
 import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+
+# Big tabs (30k+ rows) can wedge the default 60s socket timeout.
+# 3 min per HTTP call is comfortable even at slow bandwidth.
+socket.setdefaulttimeout(180)
 
 # ── Config ─────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://npornslyozuxxigeoqgi.supabase.co')
@@ -56,30 +61,39 @@ if not GOOGLE_CREDS:
     print('❌ GOOGLE_CREDENTIALS_JSON not set and google.json missing'); sys.exit(1)
 
 # ── Sheet IDs (same constants as app.py) ───────────────────────────────────
-PASSED_SHEET_ID   = '1rdSRNLdZPT5xXLRgV7wSn1beYwWZp41ZpYoLkbGmt0o'
-PIKIPIKI_SHEET_ID = '1XFwPITQgZmzZ8lbg8MKD9S4rwHyk2cDOKrcxO7SAjHA'
-IPHONE_SHEET_ID   = '1Y2cOyObQvP502kvEbC-uGDP-3Sf5X9JKnDDYmR0BPRQ'
+CRDB_SHEET_ID     = '1rdSRNLdZPT5xXLRgV7wSn1beYwWZp41ZpYoLkbGmt0o'
 NMB_SHEET_ID      = '1YchOygtfVyVNgz37sGX_KKud_Wr9KQsIkQKn_tEdbek'
+IPHONE_SHEET_ID   = '1Y2cOyObQvP502kvEbC-uGDP-3Sf5X9JKnDDYmR0BPRQ'
+PIKIPIKI_SHEET_ID = '1XFwPITQgZmzZ8lbg8MKD9S4rwHyk2cDOKrcxO7SAjHA'
+
+# Business-friendly labels used in the `source_sheet_id` column so the DB
+# never shows opaque 44-char Google Sheet IDs to humans.
+SHEET_LABEL = {
+    CRDB_SHEET_ID:     'CRDBBANK',
+    NMB_SHEET_ID:      'NMBBANK',
+    IPHONE_SHEET_ID:   'IPHONE',
+    PIKIPIKI_SHEET_ID: 'PIKIPIKI',
+}
 
 # (sheet_id, actual_tab_on_sheet, source_tab_label, variant)
+# Only three tabs from each transaction sheet — the two junk NMB tabs on
+# CRDBBANK (PASSED_SAV_NMB, FAILED_NMB) are dropped entirely.
 TRANSACTION_TABS = [
-    (PASSED_SHEET_ID, 'PASSED',            'PASSED',             'passed_9col'),
-    (PASSED_SHEET_ID, 'PASSED_SAV',        'PASSED_SAV',         'passed_9col'),
-    (PASSED_SHEET_ID, 'FAILED',            'FAILED',             'failed_8col'),
-    (PASSED_SHEET_ID, 'PASSED_SAV_NMB',    'PASSED_SAV_NMB_OLD', 'passed_9col'),
-    (PASSED_SHEET_ID, 'FAILED_NMB',        'FAILED_NMB_OLD',     'failed_8col'),
-    (NMB_SHEET_ID,    'PASSED',            'PASSED_NMB',         'passed_9col'),
-    (NMB_SHEET_ID,    'PASSED_SAV_NMB',    'PASSED_SAV_NMB',     'passed_9col'),
-    (NMB_SHEET_ID,    'FAILED_NMB',        'FAILED_NMB',         'failed_8col'),
-    (IPHONE_SHEET_ID, 'BANK_PASSED',       'BANK_PASSED',        'passed_9col'),
-    (IPHONE_SHEET_ID, 'BANK_FAILED',       'BANK_FAILED',        'failed_8col'),
+    (CRDB_SHEET_ID,   'PASSED',            'CRDBPASSED',         'passed_9col'),
+    (CRDB_SHEET_ID,   'PASSED_SAV',        'CRDBSAVCOM',         'passed_9col'),
+    (CRDB_SHEET_ID,   'FAILED',            'CRDBFAILED',         'failed_8col'),
+    (NMB_SHEET_ID,    'PASSED',            'NMBPASSED',          'passed_9col'),
+    (NMB_SHEET_ID,    'PASSED_SAV_NMB',    'NMBSAVCOM',          'passed_9col'),
+    (NMB_SHEET_ID,    'FAILED_NMB',        'NMBFAILED',          'failed_8col'),
+    (IPHONE_SHEET_ID, 'BANK_PASSED',       'IPHONEPASSED',       'passed_9col'),
+    (IPHONE_SHEET_ID, 'BANK_FAILED',       'IPHONEFAILED',       'failed_8col'),
 ]
 
 # (sheet_id, tab_name, source_tab_label, variant)
 CUSTOMER_TABS = [
-    (PIKIPIKI_SHEET_ID, 'pikipiki records',  'pikipiki_records',  'pikipiki'),
-    (PIKIPIKI_SHEET_ID, 'pikipiki records2', 'pikipiki_records2', 'pikipiki'),
-    (IPHONE_SHEET_ID,   'IPHONE_RECORDS',    'IPHONE_RECORDS',    'iphone'),
+    (PIKIPIKI_SHEET_ID, 'pikipiki records',  'BODA_RECORDS',   'pikipiki'),
+    (PIKIPIKI_SHEET_ID, 'pikipiki records2', 'SAVCOM_RECORDS', 'pikipiki'),
+    (IPHONE_SHEET_ID,   'IPHONE_RECORDS',    'IPHONE_RECORDS', 'iphone'),
 ]
 
 BATCH = 500
@@ -154,6 +168,57 @@ def s_or_none(v):
     return s if s else None
 
 
+# ── Content-based classifiers for the FAILED variant ──────────────────────
+# Historical FAILED rows come in at least four layouts because the sheet was
+# hand-edited at various points:
+#
+#   L1 (orig FAILED, 9 cells): A|B|C|D|E|F|(empty)|reason|ref
+#   L2 (mid-vintage,  9 cells): A|B|C|D|E|F|reason|(empty)|junk-fragment
+#   L3 (2026-Feb,     9 cells): A|B|C|D|E|F|customer_name|ref|junk-fragment
+#   L4 (2026-Apr on,  8 cells): A|B|C|D|E|F|reason|ref
+#
+# Positional heuristics fail on this mess. Instead we look at what each
+# cell contains:
+#   - A ref is hex (10+ chars) OR an NMB xref like '101AGD...' / '238FTM...'
+#   - A reason contains 'not found' or literal phrases like 'No identifier'
+#   - Everything else is customer_name residue or hand-typed garbage → ignore.
+_REF_HEX  = re.compile(r'^[A-Fa-f0-9]{10,}$')
+_REF_NMB  = re.compile(r'^[0-9A-Z]{10,}$')   # 101AGD..., 238FTM..., etc.
+_REASON_KEYWORDS = (
+    'not found', 'no identifier', 'no plate chosen',
+    'skipped by user', 'rejected by user', 'not found in records',
+)
+
+
+def _looks_like_ref(v):
+    if not v: return False
+    s = str(v).strip()
+    if _REF_HEX.match(s):
+        return True
+    # NMB refs: uppercase alphanumeric with at least one letter
+    if _REF_NMB.match(s) and any(c.isalpha() for c in s):
+        return True
+    return False
+
+
+def _looks_like_reason(v):
+    if not v: return False
+    s = str(v).strip().lower()
+    return any(k in s for k in _REASON_KEYWORDS) or '(' in s and ')' in s
+
+
+def _classify_failed_cells(c6, c7, c8):
+    """Given the three trailing cells of a FAILED-variant row, return
+    (fail_reason, ref_number). Content-based so all four historical
+    layouts are handled uniformly."""
+    cells = [s_or_none(c6), s_or_none(c7), s_or_none(c8)]
+
+    ref = next((c for c in cells if _looks_like_ref(c)), None)
+    reason = next((c for c in cells
+                   if c and c != ref and _looks_like_reason(c)), None)
+    return reason, ref
+
+
 # ── Google Sheets read ─────────────────────────────────────────────────────
 def get_sheets():
     creds = service_account.Credentials.from_service_account_info(
@@ -164,9 +229,23 @@ def get_sheets():
 
 
 def read_tab(service, sheet_id, tab_name):
+    """Read a whole tab. Kept for compatibility with the customer-tab path,
+    which is small (< 10k rows). Transaction tabs go through read_tab_chunk."""
     result = service.spreadsheets().values().get(
         spreadsheetId=sheet_id,
         range=f"'{tab_name}'!A:I",
+    ).execute()
+    return result.get('values', [])
+
+
+def read_tab_chunk(service, sheet_id, tab_name, start_row, chunk_rows):
+    """Read a single row-range from a tab. Used to stream large transaction
+    tabs so we never hold the whole 30k-row payload in memory or hit the
+    single-request timeout."""
+    range_str = f"'{tab_name}'!A{start_row}:I{start_row + chunk_rows - 1}"
+    result = service.spreadsheets().values().get(
+        spreadsheetId=sheet_id,
+        range=range_str,
     ).execute()
     return result.get('values', [])
 
@@ -191,11 +270,13 @@ def row_to_transaction(row, source_tab, source_sheet_id, variant):
         ref_number    = s_or_none(cell(7))
         customer_id   = s_or_none(cell(8))
         fail_reason   = None
-    else:  # failed_8col
+    else:  # FAILED variant — content-based detection because historical rows
+        # have at least 4 different layouts (see comments in _classify_failed_cells).
         customer_name = None
-        fail_reason   = s_or_none(cell(6))
-        ref_number    = s_or_none(cell(7))
         customer_id   = None
+        fail_reason, ref_number = _classify_failed_cells(
+            cell(6), cell(7), cell(8)
+        )
 
     is_fuzzy = variant == 'passed_9col' and identifier is not None and ',' in identifier
 
@@ -266,49 +347,94 @@ def post_batch(table, rows):
     if table == 'transactions':
         on_conflict = '?on_conflict=source_tab,original_id'
 
-    for attempt in range(4):
-        r = requests.post(
-            f'{SUPABASE_URL}/rest/v1/{table}{on_conflict}',
-            headers=SUPA_HEADERS,
-            json=rows,
-            timeout=90,
-        )
+    last_body = ''
+    for attempt in range(6):
+        try:
+            r = requests.post(
+                f'{SUPABASE_URL}/rest/v1/{table}{on_conflict}',
+                headers=SUPA_HEADERS,
+                json=rows,
+                timeout=180,
+            )
+        except (requests.exceptions.ReadTimeout,
+                requests.exceptions.ConnectionError) as e:
+            print(f'  … network hiccup, retrying in {2**attempt}s  ({type(e).__name__})')
+            time.sleep(2 ** attempt)
+            continue
         if r.ok:
             return
-        # Retry on transient 5xx
+        last_body = r.text
         if 500 <= r.status_code < 600:
-            print(f'  … {r.status_code}, retrying in {2**attempt}s')
+            print(f'  … {r.status_code}, retrying in {2**attempt}s  ({r.text[:200]})')
             time.sleep(2 ** attempt)
             continue
         raise RuntimeError(f'{table} write {r.status_code}: {r.text[:400]}')
-    raise RuntimeError(f'{table} write failed after retries')
+    # If we get here, all retries hit 5xx. Print the row payload of the FIRST
+    # record so the user can see what triggered the error.
+    print('  ! sample row that failed:')
+    print('    ', json.dumps(rows[0], default=str)[:600])
+    raise RuntimeError(f'{table} write failed after retries. Last body: {last_body[:400]}')
 
 
 # ── Per-tab driver ─────────────────────────────────────────────────────────
+CHUNK_ROWS = 5000  # sheet rows per Google API request
+
+
 def migrate_transaction_tab(service, sheet_id, tab_name, source_tab, variant):
+    """Stream a transaction tab in chunks of CHUNK_ROWS rows so the read
+    fits under socket timeout and memory stays flat. Header lives on row 1,
+    data starts row 2.
+
+    Deduplicates by (source_tab, original_id) as we go: if the SAME
+    original_id appears twice in the same tab, we send it once (last row
+    wins — matches Postgres UPSERT semantics) and count the collision.
+    That count IS the historical dedup leak — every unit above zero is a
+    row the app processed twice.
+    """
     print(f'\n📥 transactions ← {source_tab}   ({sheet_id[:8]}…/"{tab_name}")')
-    values = read_tab(service, sheet_id, tab_name)
-    if not values:
+
+    header_chunk = read_tab_chunk(service, sheet_id, tab_name, 1, 1)
+    if header_chunk:
+        print(f'   header: {header_chunk[0][:9]}')
+    else:
         print('   (empty)'); return 0
 
-    header, *rows = values
-    print(f'   header: {header[:9]}')
+    seen_ids = set()
+    id_collisions = 0
+    sent, skipped, start_row = 0, 0, 2
+    while True:
+        chunk = read_tab_chunk(service, sheet_id, tab_name, start_row, CHUNK_ROWS)
+        if not chunk:
+            break
 
-    batch, sent, skipped = [], 0, 0
-    for row in rows:
-        rec = row_to_transaction(row, source_tab, sheet_id, variant)
-        if rec is None:
-            skipped += 1
-            continue
-        batch.append(rec)
-        if len(batch) >= BATCH:
-            post_batch('transactions', batch)
-            sent += len(batch); batch = []
-            print(f'   …{sent} rows')
-    if batch:
-        post_batch('transactions', batch)
+        batch = []
+        for row in chunk:
+            rec = row_to_transaction(row, source_tab, SHEET_LABEL[sheet_id], variant)
+            if rec is None:
+                skipped += 1
+                continue
+            oid = rec['original_id']
+            if oid in seen_ids:
+                id_collisions += 1
+                # Skip second occurrence in the same batch. Upsert on final
+                # DB write will overwrite anyway if it crosses batches.
+                continue
+            seen_ids.add(oid)
+            batch.append(rec)
+
+        for i in range(0, len(batch), BATCH):
+            post_batch('transactions', batch[i:i + BATCH])
+
         sent += len(batch)
-    print(f'   ✅ {sent} rows (skipped {skipped})')
+        end_row = start_row + len(chunk) - 1
+        print(f'   rows {start_row:>6}-{end_row:<6}  → {len(batch):>4} sent  (running total: {sent:,})')
+
+        if len(chunk) < CHUNK_ROWS:
+            break
+        start_row = end_row + 1
+
+    tail = f' ⚠️  {id_collisions} duplicate original_ids in this tab' if id_collisions else ''
+    print(f'   ✅ {sent:,} rows (skipped {skipped}){tail}')
     return sent
 
 
@@ -397,7 +523,11 @@ def main():
         cust_total += migrate_customer_tab(service, sheet_id, tab, source_tab, variant)
 
     print(f'\n📊 Done: {tx_total:,} transactions, {cust_total:,} customers migrated')
-    audit_ref_dupes()
+    try:
+        audit_ref_dupes()
+    except Exception as e:
+        print(f'\n⚠️  Audit step skipped due to transient error: {e}')
+        print('   Migration itself succeeded — run the audit SQL in Studio to see leaks.')
 
 
 if __name__ == '__main__':

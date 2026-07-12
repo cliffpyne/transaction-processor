@@ -39,18 +39,32 @@ _FAILED_TABS = {
     'FAILED', 'FAILED_NMB', 'FAILED_NMB_OLD', 'BANK_FAILED',
 }
 
-# Sheet-ID resolver — MUST stay in sync with app.py's _resolve_sheet.
-# Maps logical tab name → which sheet ID it lives on (looked up in the
-# `sheet_ids` dict the caller passes in).
-_SHEET_ROUTING = {
-    'BANK_PASSED':        'IPHONE',
-    'BANK_FAILED':        'IPHONE',
-    'PASSED_NMB':         'NMB',
-    'PASSED_SAV_NMB':     'NMB',
-    'FAILED_NMB':         'NMB',
-    'PASSED_SAV_NMB_OLD': 'PASSED',
-    'FAILED_NMB_OLD':     'PASSED',
-    # anything else → 'PASSED'
+# Translate app.py's logical sheet_name → the business-friendly source_tab
+# value stored in Supabase. This MUST match the naming used by the migration
+# script (migrate_sheets_to_supabase.py). If a tab is not in this map, the
+# write is silently dropped (used for the two decommissioned _OLD NMB tabs).
+_TAB_RENAME = {
+    'PASSED':         'CRDBPASSED',
+    'PASSED_SAV':     'CRDBSAVCOM',
+    'FAILED':         'CRDBFAILED',
+    'PASSED_NMB':     'NMBPASSED',
+    'PASSED_SAV_NMB': 'NMBSAVCOM',
+    'FAILED_NMB':     'NMBFAILED',
+    'BANK_PASSED':    'IPHONEPASSED',
+    'BANK_FAILED':    'IPHONEFAILED',
+    # PASSED_SAV_NMB_OLD, FAILED_NMB_OLD deliberately absent → mirror skipped
+}
+
+# Which "bank" (source_sheet_id business label) each logical tab writes to.
+_TAB_TO_BANK = {
+    'PASSED':         'CRDBBANK',
+    'PASSED_SAV':     'CRDBBANK',
+    'FAILED':         'CRDBBANK',
+    'PASSED_NMB':     'NMBBANK',
+    'PASSED_SAV_NMB': 'NMBBANK',
+    'FAILED_NMB':     'NMBBANK',
+    'BANK_PASSED':    'IPHONE',
+    'BANK_FAILED':    'IPHONE',
 }
 
 
@@ -159,24 +173,32 @@ def append(logical_tab, sheet_ids, rows):
     Mirror rows into Supabase's `transactions` table.
 
     logical_tab: the same string app.py passes to append_to_sheet
-                 ('PASSED', 'PASSED_NMB', 'BANK_FAILED', …). Becomes
-                 the row's source_tab column.
-    sheet_ids:   {'PASSED': <id>, 'NMB': <id>, 'IPHONE': <id>}
+                 ('PASSED', 'PASSED_NMB', 'BANK_FAILED', …). Translated
+                 via _TAB_RENAME to the business-friendly source_tab
+                 column value (e.g. 'CRDBPASSED').
+    sheet_ids:   IGNORED — kept in the signature for backwards compat.
+                 source_sheet_id now comes from _TAB_TO_BANK instead.
     rows:        list of lists — the exact row payload app.py built.
+
+    Silently drops the mirror if logical_tab is not in _TAB_RENAME
+    (e.g. the decommissioned _OLD NMB tabs).
     """
     if not ENABLED or not SUPABASE_URL or not SUPABASE_KEY:
         return
     if not rows:
         return
 
-    try:
-        kind = _SHEET_ROUTING.get(logical_tab, 'PASSED')
-        source_sheet_id = sheet_ids.get(kind, '')
+    new_source_tab = _TAB_RENAME.get(logical_tab)
+    if not new_source_tab:
+        return  # Unknown / deprecated tab — skip mirror
 
+    source_sheet_id = _TAB_TO_BANK.get(logical_tab, '')
+
+    try:
         if logical_tab in _FAILED_TABS:
-            records = [_row_to_record_8col(r, logical_tab, source_sheet_id) for r in rows]
+            records = [_row_to_record_8col(r, new_source_tab, source_sheet_id) for r in rows]
         else:
-            records = [_row_to_record_9col(r, logical_tab, source_sheet_id) for r in rows]
+            records = [_row_to_record_9col(r, new_source_tab, source_sheet_id) for r in rows]
 
         r = requests.post(
             f'{SUPABASE_URL}/rest/v1/transactions?on_conflict=source_tab,original_id',
@@ -185,9 +207,9 @@ def append(logical_tab, sheet_ids, rows):
             timeout=15,
         )
         if not r.ok:
-            print(f'  ⚠️ Supabase mirror {logical_tab} → {r.status_code}: {r.text[:200]}')
+            print(f'  ⚠️ Supabase mirror {new_source_tab} → {r.status_code}: {r.text[:200]}')
         else:
-            print(f'  📡 Supabase mirror: {len(records)} rows → {logical_tab}')
+            print(f'  📡 Supabase mirror: {len(records)} rows → {new_source_tab}')
     except Exception as e:
-        print(f'  ⚠️ Supabase mirror exception ({logical_tab}): {e}')
+        print(f'  ⚠️ Supabase mirror exception ({new_source_tab}): {e}')
         traceback.print_exc()

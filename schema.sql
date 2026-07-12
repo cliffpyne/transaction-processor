@@ -67,11 +67,11 @@ CREATE INDEX IF NOT EXISTS idx_tx_audit
 CREATE INDEX IF NOT EXISTS idx_tx_created
   ON transactions(created_at DESC);
 
--- Idempotency for the migration script + re-runs (source_tab, original_id)
--- is unique per sheet tab. Partial so blank/null original_ids don't collide.
+-- Idempotency for the migration script + re-runs (source_tab, original_id).
+-- Non-partial so PostgREST's ON CONFLICT clause matches it. Rows with
+-- NULL original_id are filtered out before writing (headers/blank rows).
 CREATE UNIQUE INDEX IF NOT EXISTS ux_tx_source_original
-  ON transactions(source_tab, original_id)
-  WHERE original_id IS NOT NULL;
+  ON transactions(source_tab, original_id);
 
 -- Deliberately NOT adding a UNIQUE on ref_number yet — we run the backfill
 -- FIRST, then query for historical dedup leaks, then add it once cleaned:
