@@ -1,0 +1,206 @@
+{% extends "home.html" %}
+{% block content %}
+     <!-- Container -->
+     <div class="kt-container-fixed" id="contentContainer">
+     </div>
+     <!-- End of Container -->
+
+     <!-- Top sub-nav — product tabs -->
+     <div class="flex items-center flex-wrap md:flex-nowrap lg:items-end justify-between border-b border-b-border gap-3 lg:gap-6 mb-5 lg:mb-10">
+      <div class="kt-container-fixed" id="hero_container">
+       <div class="grid">
+        <div class="kt-scrollable-x-auto">
+         <div class="kt-menu gap-3" data-kt-menu="true" id="txn_producttabs">
+          <div class="kt-menu-item border-b-2 border-b-transparent kt-menu-item-here:border-b-primary kt-menu-item-here" data-product="">
+           <a class="kt-menu-link gap-1.5 pb-2 lg:pb-4 px-2" href="#">
+            <span class="kt-menu-title text-nowrap font-medium text-sm text-secondary-foreground kt-menu-item-here:text-primary kt-menu-item-here:font-semibold kt-menu-link-hover:text-primary">
+             All
+            </span>
+           </a>
+          </div>
+          <div class="kt-menu-item border-b-2 border-b-transparent kt-menu-item-here:border-b-primary" data-product="boda">
+           <a class="kt-menu-link gap-1.5 pb-2 lg:pb-4 px-2" href="#">
+            <span class="kt-menu-title text-nowrap font-medium text-sm text-secondary-foreground kt-menu-item-here:text-primary kt-menu-item-here:font-semibold kt-menu-link-hover:text-primary">
+             Boda
+            </span>
+           </a>
+          </div>
+          <div class="kt-menu-item border-b-2 border-b-transparent kt-menu-item-here:border-b-primary" data-product="iphone">
+           <a class="kt-menu-link gap-1.5 pb-2 lg:pb-4 px-2" href="#">
+            <span class="kt-menu-title text-nowrap font-medium text-sm text-secondary-foreground kt-menu-item-here:text-primary kt-menu-item-here:font-semibold kt-menu-link-hover:text-primary">
+             iPhone
+            </span>
+           </a>
+          </div>
+         </div>
+        </div>
+       </div>
+      </div>
+     </div>
+     <!-- End of sub-nav -->
+
+     <!-- Container -->
+     <div class="kt-container-fixed">
+      <div class="flex flex-wrap items-center lg:items-end justify-between gap-5 pb-7.5">
+       <div class="flex flex-col justify-center gap-2">
+        <h1 class="text-xl font-medium leading-none text-mono">
+         Transactions
+        </h1>
+        <div class="flex items-center gap-2 text-sm font-normal text-secondary-foreground">
+         Bank credits captured from CRDB and NMB
+        </div>
+       </div>
+       <div class="flex items-center gap-2.5">
+        <a class="kt-btn kt-btn-outline" href="/api/transactions/export">
+         Export CSV
+        </a>
+       </div>
+      </div>
+     </div>
+     <!-- End of Container -->
+     <!-- Container -->
+     <div class="kt-container-fixed">
+      <div class="grid gap-5 lg:gap-7.5">
+       <div class="kt-card kt-card-grid min-w-full">
+        <div class="kt-card-header flex-wrap gap-2">
+         <h3 class="kt-card-title text-sm" id="txn_showing">
+          Loading transactions…
+         </h3>
+         <div class="flex flex-wrap gap-2 lg:gap-5">
+          <div class="flex">
+           <label class="kt-input">
+            <i class="ki-filled ki-magnifier">
+            </i>
+            <input id="txn_search" placeholder="Search customer, ref, description…" type="text" value=""/>
+           </label>
+          </div>
+          <div class="flex flex-wrap gap-2.5">
+           <select class="kt-select w-32" data-kt-select="true" data-kt-select-placeholder="All banks" id="txn_bank">
+            <option value="">
+             All banks
+            </option>
+            <option value="CRDB">
+             CRDB
+            </option>
+            <option value="NMB">
+             NMB
+            </option>
+           </select>
+           <select class="kt-select w-36" data-kt-select="true" data-kt-select-placeholder="All statuses" id="txn_status">
+            <option value="">
+             All statuses
+            </option>
+            <option value="passed">
+             Passed
+            </option>
+            <option value="failed">
+             Failed
+            </option>
+           </select>
+           <select class="kt-select w-36" data-kt-select="true" data-kt-select-placeholder="Sort by" id="txn_sort">
+            <option value="id.desc">
+             Newest first
+            </option>
+            <option value="id.asc">
+             Oldest first
+            </option>
+            <option value="credit_amount.desc.nullslast">
+             Highest amount
+            </option>
+            <option value="transaction_day.desc.nullslast">
+             Latest date
+            </option>
+           </select>
+          </div>
+         </div>
+        </div>
+        <div class="kt-card-table">
+         <div class="grid">
+          <div class="kt-scrollable-x-auto">
+           <table class="kt-table kt-table-border">
+            <thead>
+             <tr>
+              <th class="w-14">
+               <input class="kt-checkbox kt-checkbox-sm" type="checkbox"/>
+              </th>
+              <th class="min-w-[180px]">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Ref Number
+                </span>
+               </span>
+              </th>
+              <th class="w-[130px]">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Status
+                </span>
+               </span>
+              </th>
+              <th class="min-w-[140px]">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Date
+                </span>
+               </span>
+              </th>
+              <th class="w-[110px]">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Bank
+                </span>
+               </span>
+              </th>
+              <th class="min-w-[220px]">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Customer
+                </span>
+               </span>
+              </th>
+              <th class="w-[170px] text-end">
+               <span class="kt-table-col">
+                <span class="kt-table-col-label">
+                 Amount
+                </span>
+               </span>
+              </th>
+              <th class="w-[80px]">
+              </th>
+             </tr>
+            </thead>
+            <tbody id="txn_tbody">
+             <tr>
+              <td class="text-center text-secondary-foreground py-6" colspan="8">
+               Loading transactions…
+              </td>
+             </tr>
+            </tbody>
+           </table>
+          </div>
+          <div class="kt-card-footer justify-center md:justify-between flex-col md:flex-row gap-5 text-secondary-foreground text-sm font-medium">
+           <div class="flex items-center gap-2 order-2 md:order-1">
+            Show
+            <select class="kt-select w-16" id="txn_perpage">
+             <option value="25">25</option>
+             <option value="50">50</option>
+             <option value="100">100</option>
+            </select>
+            per page
+           </div>
+           <div class="flex items-center gap-4 order-1 md:order-2">
+            <span id="txn_info">
+            </span>
+            <div class="flex items-center gap-1" id="txn_pager">
+            </div>
+           </div>
+          </div>
+         </div>
+        </div>
+       </div>
+      </div>
+     </div>
+     <!-- End of Container -->
+
+     <script src="/static/transactions_page.js" defer></script>
+{% endblock %}

@@ -118,7 +118,8 @@ def _records_compat(sub=None):
 # ── SPA shell ────────────────────────────────────────────────────────────────
 _HOME_SUBPAGES = {
     'customers':    'customers_page.html',
-    # transactions, dedup_alerts, users, record_edits — added as pages ship
+    'transactions': 'transactions_page.html',
+    # dedup_alerts, users, record_edits — added as pages ship
 }
 
 
@@ -176,6 +177,12 @@ def _paginated_query(table: str, cfg: dict, always_where=None):
         if value and field in cfg['columns']:
             if ftype in ('like', 'ilike'):
                 parts.append(f'{field}=ilike.*{value.replace("*", "%")}*')
+            elif ftype == 'in':
+                # `value` is a comma-separated list of exact matches.
+                # PostgREST wants field=in.(a,b,c).
+                items = ','.join(v.strip() for v in value.split(',') if v.strip())
+                if items:
+                    parts.append(f'{field}=in.({items})')
             else:
                 parts.append(f'{field}=eq.{value}')
         i += 1
