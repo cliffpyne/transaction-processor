@@ -26,6 +26,20 @@ USERS = [
     ('Cdenis',    '0713227668Cliford_',    'Clifford Dennis',        'admin'),
     ('Ongozi',    'Mlaki@4321',            'Oscar Ngozi',            'editor'),
     ('Elegensky', 'Admin@1234',            'Elegansky Microfinance', 'viewer'),
+
+    # Viewer accounts — username = full name in CAPS, password = first
+    # name in CAPS. Same-first-name viewers share the first-name password
+    # by design (usernames stay distinct).
+    ('NATUJAEL MGONJA',       'NATUJAEL', 'Natujael Mgonja',       'viewer'),
+    ('AGRICOLA BODA',         'AGRICOLA', 'Agricola Boda',         'viewer'),
+    ('VICTORIA FRANK BODA',   'VICTORIA', 'Victoria Frank Boda',   'viewer'),
+    ('MONICA BODA',           'MONICA',   'Monica Boda',           'viewer'),
+    ('EDITHA BODA NEW',       'EDITHA',   'Editha Boda New',       'viewer'),
+    ('APRUNA THOMAS BODA',    'APRUNA',   'Apruna Thomas Boda',    'viewer'),
+    ('EPPIFANY KALUA',        'EPPIFANY', 'Eppifany Kalua',        'viewer'),
+    ('MWASITI JUMANNE BODA',  'MWASITI',  'Mwasiti Jumanne Boda',  'viewer'),
+    ('MWANZANI SAID',         'MWANZANI', 'Mwanzani Said',         'viewer'),
+    ('EDITHA KAMANZI BODA',   'EDITHA',   'Editha Kamanzi Boda',   'viewer'),
 ]
 
 HEADERS = {
