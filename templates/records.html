@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PikiPiki · Records</title>
+<link href="https://unpkg.com/tabulator-tables@5.6.4/dist/css/tabulator_midnight.min.css" rel="stylesheet">
+<link href="/static/records.css" rel="stylesheet">
+</head>
+<body>
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">PP</div>
+      <div class="brand-name">PikiPiki</div>
+    </div>
+
+    <nav id="nav">
+      <a href="#customers"     class="nav-item" data-view="customers">Customers</a>
+      <a href="#transactions"  class="nav-item" data-view="transactions">Transactions</a>
+      <a href="#dedup_alerts"  class="nav-item" data-view="dedup_alerts">Dedup Alerts</a>
+      <a href="#users"         class="nav-item nav-admin" data-view="users">Users</a>
+      <a href="#audit"         class="nav-item nav-admin" data-view="record_edits">Audit Log</a>
+    </nav>
+
+    <div id="user-block">
+      <div class="user-name">{{ full_name }}</div>
+      <div class="user-meta"><span class="role role-{{ role }}">{{ role }}</span> · @{{ username }}</div>
+      <a href="/logout" class="signout">Sign out</a>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header id="topbar">
+      <h1 id="viewTitle">Customers</h1>
+      <div class="topbar-actions">
+        <input id="searchBox" type="search" placeholder="Search…" autocomplete="off">
+        <button id="btnAdd" class="btn btn-primary" hidden>+ Add</button>
+        <button id="btnReload" class="btn">Refresh</button>
+      </div>
+    </header>
+
+    <div id="grid"></div>
+  </main>
+
+  <div id="modal" class="hidden">
+    <div class="modal-card">
+      <h2 id="modalTitle">Add row</h2>
+      <form id="modalForm"></form>
+      <div class="modal-actions">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" id="modalSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+
+  <script>
+    window.__ME__ = { username: "{{ username }}", full_name: "{{ full_name }}", role: "{{ role }}" };
+  </script>
+  <script src="https://unpkg.com/tabulator-tables@5.6.4/dist/js/tabulator.min.js"></script>
+  <script src="/static/records.js"></script>
+</body>
+</html>

@@ -12,9 +12,15 @@ import pickle
 from datetime import datetime
 import pdfplumber  # For PDF extraction
 import supabase_writer  # Dual-write mirror to Supabase — no-op unless WRITE_TO_SUPABASE is set
+from auth import login_manager
+from ui_blueprint import ui as ui_blueprint
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+# ── UI: Flask-Login + records blueprint ──────────────────────────────────────
+login_manager.init_app(app)
+app.register_blueprint(ui_blueprint)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['TEMP_FOLDER'] = 'temp_reviews'
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB — handles large NMB/CRDB Excel files
@@ -3440,6 +3446,30 @@ def run_migration():
         'log_url': '/admin/migration-log',
         'started_at': _MIGRATION_STATE['started_at'],
     })
+
+
+@app.route('/admin/seed-users', methods=['POST'])
+def seed_users_endpoint():
+    """One-shot seed of the initial UI accounts. Idempotent (upsert). Gated
+    by MIGRATION_TOKEN so it can be safely re-hit after adding new admins."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    try:
+        result = subprocess.run(
+            ['python3', '-u', 'seed_users.py'],
+            capture_output=True, text=True, env=os.environ.copy(),
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            timeout=60,
+        )
+        return jsonify({
+            'returncode': result.returncode,
+            'stdout':     result.stdout,
+            'stderr':     result.stderr,
+        }), (200 if result.returncode == 0 else 500)
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'timeout'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/admin/migration-log', methods=['GET'])
