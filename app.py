@@ -3615,30 +3615,43 @@ def admin_daily_totals():
         'CRDBPASSED,CRDBSAVCOM,NMBPASSED,NMBSAVCOM,'
         'IPHONEPASSED,BODAILIYOPATA,IPHONEILIYOPATA'
     )
-    r = requests.get(
-        f'{url}/rest/v1/transactions'
-        f'?select=bank,transaction_day,credit_amount'
-        f'&transaction_day=gte.{from_day}'
-        f'&source_tab=in.({passed_tabs})'
-        f'&limit=100000',
-        headers={'apikey': key, 'Authorization': f'Bearer {key}'},
-        timeout=60,
-    )
-    if not r.ok:
-        return jsonify({'error': r.text[:400]}), 500
-    rows = r.json()
+    # PostgREST caps a single response at ~1000 rows, so page through with
+    # Range headers until we've read every matching row for the window.
     buckets: dict = {}
-    for row in rows:
-        b = (row.get('bank') or 'UNKNOWN').upper()
-        d = row.get('transaction_day') or 'null'
-        amt = float(row.get('credit_amount') or 0)
-        buckets.setdefault(b, {}).setdefault(d, 0.0)
-        buckets[b][d] += amt
-    # Round to 2 decimals
+    total_rows = 0
+    page = 1000
+    offset = 0
+    while True:
+        r = requests.get(
+            f'{url}/rest/v1/transactions'
+            f'?select=bank,transaction_day,credit_amount'
+            f'&transaction_day=gte.{from_day}'
+            f'&source_tab=in.({passed_tabs})'
+            f'&order=id.asc',
+            headers={'apikey': key, 'Authorization': f'Bearer {key}',
+                     'Range-Unit': 'items',
+                     'Range': f'{offset}-{offset + page - 1}'},
+            timeout=60,
+        )
+        if r.status_code not in (200, 206):
+            return jsonify({'error': r.text[:400]}), 500
+        chunk = r.json()
+        if not chunk:
+            break
+        for row in chunk:
+            b = (row.get('bank') or 'UNKNOWN').upper()
+            d = row.get('transaction_day') or 'null'
+            amt = float(row.get('credit_amount') or 0)
+            buckets.setdefault(b, {}).setdefault(d, 0.0)
+            buckets[b][d] += amt
+        total_rows += len(chunk)
+        if len(chunk) < page:
+            break
+        offset += page
     for b in buckets:
         for d in buckets[b]:
             buckets[b][d] = round(buckets[b][d], 2)
-    return jsonify({'from': from_day, 'buckets': buckets, 'total_rows': len(rows)})
+    return jsonify({'from': from_day, 'buckets': buckets, 'total_rows': total_rows})
 
 
 @app.route('/admin/tx-sample', methods=['GET'])
