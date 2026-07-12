@@ -2483,9 +2483,11 @@ def read_nmb_pdf(filepath):
                         # Skip OPENING / CLOSING BALANCE rows
                         if 'BALANCE' in narration.upper():
                             continue
-                        # Defensive: a real transaction has a DD/MM/YYYY book date
-                        if not re.search(r'\d{2}/\d{2}/\d{4}', book_date):
-                            continue
+                        # No strict date filter — NMB occasionally writes
+                        # dates like '9-Jul-26' (unpadded day, 2-digit year)
+                        # that don't match the standard dd/mm/yyyy pattern.
+                        # We accept whatever's there; downstream parsers
+                        # handle the format variations.
 
                         # Normalise Book Date to match the CSV reader's output
                         # (DD-Mon-YYYY, e.g. '10-Jun-2026'). The shared NMB

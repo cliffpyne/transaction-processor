@@ -110,37 +110,43 @@ SUPA_HEADERS = {
 def parse_transaction_day(s):
     """Best-effort DATE parse from every sheet-date format we know.
     Returns 'YYYY-MM-DD' string (Supabase-friendly) or None.
+
+    Accepts padded AND unpadded day/month (NMB writes '9-Jul-26' single-digit
+    day, 2-digit year — same as '09-Jul-2026'). Also accepts CSV pandas
+    output like '2026-07-11 15:29:16' and NMB PDF's '11/07/2026'.
     """
     if not s:
         return None
     s = str(s).strip()
 
-    # ISO: 2026-06-11 or 2026-06-11 15:29:16
-    m = re.match(r'^(\d{4})-(\d{2})-(\d{2})', s)
-    if m:
-        try: return date(int(m[1]), int(m[2]), int(m[3])).isoformat()
-        except ValueError: return None
+    # First try strptime on the first token — it's tolerant of unpadded d/m
+    first = s.split()[0] if s else ''
+    if first:
+        for fmt in ('%Y-%m-%d', '%d-%b-%Y', '%d-%b-%y',
+                    '%d/%m/%Y', '%d/%m/%y',
+                    '%d.%m.%Y', '%d.%m.%y',
+                    '%d-%m-%Y', '%d-%m-%y'):
+            try: return datetime.strptime(first, fmt).date().isoformat()
+            except ValueError: pass
 
-    # DD.MM.YYYY [HH:MM:SS]  (NMB happy path)
-    m = re.match(r'^(\d{2})\.(\d{2})\.(\d{4})', s)
-    if m:
-        try: return date(int(m[3]), int(m[2]), int(m[1])).isoformat()
-        except ValueError: return None
+    # Space-separated forms: '11 Jun 2026', '9 Jul 2026', '9 Jul 26'
+    parts = s.split()[:3]
+    if len(parts) == 3:
+        for fmt in ('%d %b %Y', '%d %b %y'):
+            try: return datetime.strptime(' '.join(parts), fmt).date().isoformat()
+            except ValueError: pass
 
-    # DD/MM/YYYY
-    m = re.match(r'^(\d{2})/(\d{2})/(\d{4})', s)
-    if m:
-        try: return date(int(m[3]), int(m[2]), int(m[1])).isoformat()
-        except ValueError: return None
-
-    # DD-Mon-YYYY, DD Mon YYYY, DD-Mon-YY  (CSV/PDF fallback)
-    first_token = s.split()[0] if s else ''
-    for fmt in ('%d-%b-%Y', '%d-%b-%y'):
-        try: return datetime.strptime(first_token, fmt).date().isoformat()
-        except ValueError: pass
-    # Space-separated form: '11 Jun 2026'
-    try: return datetime.strptime(' '.join(s.split()[:3]), '%d %b %Y').date().isoformat()
-    except (ValueError, IndexError): pass
+    # Regex fallbacks for oddly-formatted first tokens embedded in longer strings.
+    for pat, ymd in (
+        (r'(\d{4})-(\d{1,2})-(\d{1,2})', (1, 2, 3)),
+        (r'(\d{1,2})\.(\d{1,2})\.(\d{4})', (3, 2, 1)),
+        (r'(\d{1,2})/(\d{1,2})/(\d{4})',   (3, 2, 1)),
+        (r'(\d{1,2})-(\d{1,2})-(\d{4})',   (3, 2, 1)),
+    ):
+        m = re.search(pat, s)
+        if m:
+            try: return date(int(m[ymd[0]]), int(m[ymd[1]]), int(m[ymd[2]])).isoformat()
+            except ValueError: pass
 
     return None
 

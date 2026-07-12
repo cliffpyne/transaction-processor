@@ -70,34 +70,40 @@ _TAB_TO_BANK = {
 
 def _parse_day(s):
     """Best-effort DATE parse from any sheet-date string. Returns
-    'YYYY-MM-DD' or None. Same logic as the migration script."""
+    'YYYY-MM-DD' or None. Same logic as migrate_sheets_to_supabase.py.
+
+    Accepts padded AND unpadded day/month (NMB writes '9-Jul-26' with
+    single-digit day / 2-digit year — same as '09-Jul-2026'). Falls back
+    to embedded-date regex before giving up."""
     if not s:
         return None
     s = str(s).strip()
 
-    m = re.match(r'^(\d{4})-(\d{2})-(\d{2})', s)
-    if m:
-        try: return date(int(m[1]), int(m[2]), int(m[3])).isoformat()
-        except ValueError: return None
+    first = s.split()[0] if s else ''
+    if first:
+        for fmt in ('%Y-%m-%d', '%d-%b-%Y', '%d-%b-%y',
+                    '%d/%m/%Y', '%d/%m/%y',
+                    '%d.%m.%Y', '%d.%m.%y',
+                    '%d-%m-%Y', '%d-%m-%y'):
+            try: return datetime.strptime(first, fmt).date().isoformat()
+            except ValueError: pass
 
-    m = re.match(r'^(\d{2})\.(\d{2})\.(\d{4})', s)
-    if m:
-        try: return date(int(m[3]), int(m[2]), int(m[1])).isoformat()
-        except ValueError: return None
+    parts = s.split()[:3]
+    if len(parts) == 3:
+        for fmt in ('%d %b %Y', '%d %b %y'):
+            try: return datetime.strptime(' '.join(parts), fmt).date().isoformat()
+            except ValueError: pass
 
-    m = re.match(r'^(\d{2})/(\d{2})/(\d{4})', s)
-    if m:
-        try: return date(int(m[3]), int(m[2]), int(m[1])).isoformat()
-        except ValueError: return None
-
-    first_token = s.split()[0] if s else ''
-    for fmt in ('%d-%b-%Y', '%d-%b-%y'):
-        try: return datetime.strptime(first_token, fmt).date().isoformat()
-        except ValueError: pass
-    try:
-        return datetime.strptime(' '.join(s.split()[:3]), '%d %b %Y').date().isoformat()
-    except (ValueError, IndexError):
-        pass
+    for pat, ymd in (
+        (r'(\d{4})-(\d{1,2})-(\d{1,2})',   (1, 2, 3)),
+        (r'(\d{1,2})\.(\d{1,2})\.(\d{4})', (3, 2, 1)),
+        (r'(\d{1,2})/(\d{1,2})/(\d{4})',   (3, 2, 1)),
+        (r'(\d{1,2})-(\d{1,2})-(\d{4})',   (3, 2, 1)),
+    ):
+        m = re.search(pat, s)
+        if m:
+            try: return date(int(m[ymd[0]]), int(m[ymd[1]]), int(m[ymd[2]])).isoformat()
+            except ValueError: pass
     return None
 
 
