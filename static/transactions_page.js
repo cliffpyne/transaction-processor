@@ -126,8 +126,8 @@
           <span class="kt-badge kt-badge-sm kt-badge-outline ${bk.cls}">${esc(bk.label)}</span>
         </td>
         <td class="text-foreground font-normal">${customerCell}</td>
-        <td class="text-secondary-foreground text-sm" title="${esc(r.description || '')}">
-          <div class="max-w-[420px] truncate">${esc(r.description || '—')}</div>
+        <td class="text-secondary-foreground text-sm align-top py-2" title="${esc(r.description || '')}">
+          <div class="max-w-[420px] line-clamp-3 whitespace-normal leading-snug">${esc(r.description || '—')}</div>
         </td>
         <td class="text-foreground font-semibold text-end">${fmtMoney(r.credit_amount)}<span class="text-secondary-foreground font-normal"> TZS</span></td>
         <td class="text-center">
