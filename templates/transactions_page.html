@@ -6,28 +6,40 @@
      <!-- End of Container -->
 
      <!-- Top sub-nav — product tabs -->
+     <style>
+      /* Metronic's kt-menu-item-here Tailwind variants sometimes get stripped
+         by ktui's init pass. We drive the active state with a plain class so
+         the blue text + underline always render. */
+      #txn_producttabs .txn-tab.is-active {
+       border-bottom-color: var(--color-primary);
+      }
+      #txn_producttabs .txn-tab.is-active .kt-menu-title {
+       color: var(--color-primary);
+       font-weight: 600;
+      }
+     </style>
      <div class="flex items-center flex-wrap md:flex-nowrap lg:items-end justify-between border-b border-b-border gap-3 lg:gap-6 mb-5 lg:mb-10">
       <div class="kt-container-fixed" id="hero_container">
        <div class="grid">
         <div class="kt-scrollable-x-auto">
-         <div class="kt-menu gap-3" data-kt-menu="true" id="txn_producttabs">
-          <div class="kt-menu-item border-b-2 border-b-transparent kt-menu-item-here:border-b-primary kt-menu-item-here" data-product="">
+         <div class="flex gap-3" id="txn_producttabs">
+          <div class="txn-tab kt-menu-item border-b-2 border-b-transparent is-active" data-product="">
            <a class="kt-menu-link gap-1.5 pb-2 lg:pb-4 px-2" href="#">
-            <span class="kt-menu-title text-nowrap font-medium text-sm text-secondary-foreground kt-menu-item-here:text-primary kt-menu-item-here:font-semibold kt-menu-link-hover:text-primary">
+            <span class="kt-menu-title text-nowrap font-medium text-sm text-secondary-foreground">
              All
             </span>
            </a>
           </div>
-          <div class="kt-menu-item border-b-2 border-b-transparent kt-menu-item-here:border-b-primary" data-product="boda">
+          <div class="txn-tab kt-menu-item border-b-2 border-b-transparent" data-product="boda">
            <a class="kt-menu-link gap-1.5 pb-2 lg:pb-4 px-2" href="#">
-            <span class="kt-menu-title text-nowrap font-medium text-sm text-secondary-foreground kt-menu-item-here:text-primary kt-menu-item-here:font-semibold kt-menu-link-hover:text-primary">
+            <span class="kt-menu-title text-nowrap font-medium text-sm text-secondary-foreground">
              Boda
             </span>
            </a>
           </div>
-          <div class="kt-menu-item border-b-2 border-b-transparent kt-menu-item-here:border-b-primary" data-product="iphone">
+          <div class="txn-tab kt-menu-item border-b-2 border-b-transparent" data-product="iphone">
            <a class="kt-menu-link gap-1.5 pb-2 lg:pb-4 px-2" href="#">
-            <span class="kt-menu-title text-nowrap font-medium text-sm text-secondary-foreground kt-menu-item-here:text-primary kt-menu-item-here:font-semibold kt-menu-link-hover:text-primary">
+            <span class="kt-menu-title text-nowrap font-medium text-sm text-secondary-foreground">
              iPhone
             </span>
            </a>

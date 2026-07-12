@@ -254,13 +254,13 @@
   const setActiveTab = (product) => {
     state.product = product;
     state.page = 1;
-    $tabs.querySelectorAll('.kt-menu-item').forEach(el => {
-      el.classList.toggle('kt-menu-item-here', el.dataset.product === product);
+    $tabs.querySelectorAll('.txn-tab').forEach(el => {
+      el.classList.toggle('is-active', el.dataset.product === product);
     });
     load();
   };
 
-  $tabs.querySelectorAll('.kt-menu-item').forEach(el => {
+  $tabs.querySelectorAll('.txn-tab').forEach(el => {
     el.addEventListener('click', (e) => {
       e.preventDefault();
       setActiveTab(el.dataset.product || '');
