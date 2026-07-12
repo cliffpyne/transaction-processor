@@ -3376,5 +3376,104 @@ def check_auth():
     except Exception as e:
         return jsonify({'authenticated': False, 'error': str(e)}), 500
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Remote migration runner — trigger migrate_sheets_to_supabase.py FROM Render
+# so local-ISP hiccups can never block the sync. Auth: X-Migration-Token
+# header (also accepted as ?token=… for browser convenience) matched against
+# MIGRATION_TOKEN env var.
+# ─────────────────────────────────────────────────────────────────────────────
+import subprocess
+import threading
+
+_MIGRATION_LOG_PATH = '/tmp/migration.log'
+_MIGRATION_STATE = {'running': False, 'started_at': None, 'finished_at': None,
+                    'returncode': None}
+_MIGRATION_LOCK = threading.Lock()
+
+
+def _migration_token_ok():
+    expected = os.environ.get('MIGRATION_TOKEN', '')
+    if not expected:
+        return False
+    provided = (request.headers.get('X-Migration-Token')
+                or request.args.get('token', ''))
+    return provided == expected
+
+
+def _run_migration_worker():
+    """Spawn the migration script as a subprocess, capturing stdout+stderr
+    to _MIGRATION_LOG_PATH. Runs on a background thread."""
+    with open(_MIGRATION_LOG_PATH, 'w') as log:
+        log.write(f"=== migration started {datetime.now().isoformat()} ===\n")
+        log.flush()
+        env = os.environ.copy()
+        proc = subprocess.Popen(
+            ['python3', '-u', 'migrate_sheets_to_supabase.py'],
+            stdout=log, stderr=subprocess.STDOUT, env=env,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        proc.wait()
+    with _MIGRATION_LOCK:
+        _MIGRATION_STATE['running'] = False
+        _MIGRATION_STATE['finished_at'] = datetime.now().isoformat()
+        _MIGRATION_STATE['returncode'] = proc.returncode
+
+
+@app.route('/admin/run-migration', methods=['POST'])
+def run_migration():
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    with _MIGRATION_LOCK:
+        if _MIGRATION_STATE['running']:
+            return jsonify({
+                'status': 'already_running',
+                'started_at': _MIGRATION_STATE['started_at'],
+            }), 409
+        _MIGRATION_STATE['running'] = True
+        _MIGRATION_STATE['started_at'] = datetime.now().isoformat()
+        _MIGRATION_STATE['finished_at'] = None
+        _MIGRATION_STATE['returncode'] = None
+    threading.Thread(target=_run_migration_worker, daemon=True).start()
+    return jsonify({
+        'status': 'started',
+        'log_url': '/admin/migration-log',
+        'started_at': _MIGRATION_STATE['started_at'],
+    })
+
+
+@app.route('/admin/migration-log', methods=['GET'])
+def migration_log():
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    log = ''
+    if os.path.exists(_MIGRATION_LOG_PATH):
+        try:
+            with open(_MIGRATION_LOG_PATH) as f:
+                log = f.read()
+        except Exception as e:
+            log = f'(could not read log: {e})'
+    with _MIGRATION_LOCK:
+        state = dict(_MIGRATION_STATE)
+
+    # Browser view: return HTML that auto-refreshes so you can watch it live.
+    # For programmatic use (Accept: application/json), return JSON.
+    if 'application/json' in request.headers.get('Accept', ''):
+        return jsonify({'state': state, 'log': log})
+
+    from flask import Response
+    refresh = '<meta http-equiv="refresh" content="3">' if state['running'] else ''
+    running_note = ('<b style="color:#0a0">RUNNING</b>' if state['running']
+                    else f"<b>done · returncode={state['returncode']}</b>")
+    html = f"""<!doctype html><html><head>{refresh}
+      <title>migration log</title>
+      <style>body{{font-family:monospace;background:#111;color:#eee;padding:14px;font-size:12px}}
+             pre{{white-space:pre-wrap;line-height:1.35}}</style></head>
+    <body>{running_note} · started {state['started_at']} · finished {state['finished_at']}<hr>
+    <pre>{(log or "(no log yet)").replace('<','&lt;').replace('>','&gt;')}</pre>
+    </body></html>"""
+    return Response(html, mimetype='text/html')
+
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
