@@ -44,6 +44,13 @@
             </span>
            </a>
           </div>
+          <div class="txn-tab kt-menu-item border-b-2 border-b-transparent" data-product="iliyopata">
+           <a class="kt-menu-link gap-1.5 pb-2 lg:pb-4 px-2" href="#">
+            <span class="kt-menu-title text-nowrap font-medium text-sm text-secondary-foreground">
+             Iliyopata
+            </span>
+           </a>
+          </div>
          </div>
         </div>
        </div>
@@ -132,17 +139,17 @@
             </option>
            </select>
            <select class="kt-select w-36" data-kt-select="true" data-kt-select-placeholder="Sort by" id="txn_sort">
-            <option value="id.desc">
+            <option value="transaction_date.desc.nullslast">
              Newest first
             </option>
-            <option value="id.asc">
+            <option value="transaction_date.asc.nullslast">
              Oldest first
             </option>
             <option value="credit_amount.desc.nullslast">
              Highest amount
             </option>
-            <option value="transaction_day.desc.nullslast">
-             Latest date
+            <option value="credit_amount.asc.nullslast">
+             Lowest amount
             </option>
            </select>
           </div>
@@ -152,63 +159,10 @@
          <div class="grid">
           <div class="kt-scrollable-x-auto">
            <table class="kt-table kt-table-border">
-            <thead>
-             <tr>
-              <th class="w-14">
-               <input class="kt-checkbox kt-checkbox-sm" type="checkbox"/>
-              </th>
-              <th class="min-w-[180px]">
-               <span class="kt-table-col">
-                <span class="kt-table-col-label">
-                 Ref Number
-                </span>
-               </span>
-              </th>
-              <th class="w-[130px]">
-               <span class="kt-table-col">
-                <span class="kt-table-col-label">
-                 Status
-                </span>
-               </span>
-              </th>
-              <th class="min-w-[140px]">
-               <span class="kt-table-col">
-                <span class="kt-table-col-label">
-                 Date
-                </span>
-               </span>
-              </th>
-              <th class="w-[110px]">
-               <span class="kt-table-col">
-                <span class="kt-table-col-label">
-                 Bank
-                </span>
-               </span>
-              </th>
-              <th class="min-w-[200px]">
-               <span class="kt-table-col">
-                <span class="kt-table-col-label">
-                 Customer
-                </span>
-               </span>
-              </th>
-              <th class="min-w-[280px]">
-               <span class="kt-table-col">
-                <span class="kt-table-col-label">
-                 Description
-                </span>
-               </span>
-              </th>
-              <th class="w-[170px] text-end">
-               <span class="kt-table-col">
-                <span class="kt-table-col-label">
-                 Amount
-                </span>
-               </span>
-              </th>
-              <th class="w-[80px]">
-              </th>
-             </tr>
+            <thead id="txn_thead">
+             <!-- Columns rendered by JS so the Iliyopata tab can show
+                  New Date / Old Date / Rescued by while the other tabs
+                  keep a single Date column. -->
             </thead>
             <tbody id="txn_tbody">
              <tr>
@@ -222,10 +176,14 @@
           <div class="kt-card-footer justify-center md:justify-between flex-col md:flex-row gap-5 text-secondary-foreground text-sm font-medium">
            <div class="flex items-center gap-2 order-2 md:order-1">
             Show
-            <select class="kt-select w-16" id="txn_perpage">
+            <select class="kt-select w-20" id="txn_perpage">
              <option value="25">25</option>
              <option value="50">50</option>
              <option value="100">100</option>
+             <option value="500">500</option>
+             <option value="1000">1000</option>
+             <option value="1500">1500</option>
+             <option value="2000">2000</option>
             </select>
             per page
            </div>
@@ -242,6 +200,32 @@
       </div>
      </div>
      <!-- End of Container -->
+
+     <!-- Rescue modal — pick a customer for a FAILED transaction -->
+     <div class="fixed inset-0 z-50 hidden bg-black/40 items-center justify-center p-4" id="rescue_backdrop">
+      <div class="bg-background rounded-lg shadow-2xl w-full max-w-[520px] p-5 border border-border">
+       <div class="flex items-start justify-between mb-4">
+        <div>
+         <h3 class="text-lg font-semibold text-mono">Move to Iliyopata</h3>
+         <p class="text-sm text-secondary-foreground" id="rescue_subtitle">Pick the customer.</p>
+        </div>
+        <button class="kt-btn kt-btn-icon kt-btn-ghost" id="rescue_close">
+         <i class="ki-filled ki-cross"></i>
+        </button>
+       </div>
+       <label class="kt-input mb-2">
+        <i class="ki-filled ki-magnifier"></i>
+        <input id="rescue_search" placeholder="Search name, phone, plate…" type="text" autocomplete="off"/>
+       </label>
+       <div class="border border-border rounded max-h-[300px] overflow-y-auto" id="rescue_results">
+        <div class="text-sm text-secondary-foreground p-3 text-center">Start typing to search…</div>
+       </div>
+       <div class="flex justify-end gap-2 mt-4">
+        <button class="kt-btn kt-btn-outline" id="rescue_cancel">Cancel</button>
+        <button class="kt-btn kt-btn-primary" id="rescue_confirm" disabled>Move</button>
+       </div>
+      </div>
+     </div>
 
      <script src="/static/transactions_page.js" defer></script>
 {% endblock %}

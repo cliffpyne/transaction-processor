@@ -1,11 +1,11 @@
-// Transactions page — /api/transactions, product tabs (Boda / iPhone / All),
-// bank + status filters, search, sort, paging.
+// Transactions page — product tabs (All / Boda / iPhone / Iliyopata),
+// bank + status filters, search, sort, date range, rescue modal.
 
 (function () {
-  // Product → source_tab groupings
   const PRODUCT_TABS = {
-    'boda':   ['CRDBPASSED', 'CRDBFAILED', 'NMBPASSED', 'NMBFAILED'],
-    'iphone': ['IPHONEPASSED', 'IPHONEFAILED'],
+    'boda':      ['CRDBPASSED', 'CRDBFAILED', 'NMBPASSED', 'NMBFAILED', 'BODAILIYOPATA'],
+    'iphone':    ['IPHONEPASSED', 'IPHONEFAILED', 'IPHONEILIYOPATA'],
+    'iliyopata': ['BODAILIYOPATA', 'IPHONEILIYOPATA'],
   };
 
   const STATUS_MATCH = {
@@ -13,21 +13,23 @@
     'failed': ['CRDBFAILED', 'NMBFAILED', 'IPHONEFAILED'],
   };
 
+  const FAILED_TABS = new Set(['CRDBFAILED', 'NMBFAILED', 'IPHONEFAILED']);
+  const ILIYOPATA_TABS = new Set(['BODAILIYOPATA', 'IPHONEILIYOPATA']);
+
   const state = {
-    page:    1,
-    size:    25,
-    search:  '',
-    product: '',
-    bank:    '',
-    status:  '',
-    sort:    'id.desc',
-    // Date range — inclusive gte/lte on transaction_day. ISO date strings.
-    dayFrom: '',
-    dayTo:   '',
-    total:   0,
+    page: 1, size: 25, search: '',
+    product: '', bank: '', status: '',
+    // Sort by the actual transaction time so Boda's CRDB+NMB rows come
+    // back interleaved chronologically instead of grouped by insertion
+    // order (which is bank-by-bank). transaction_date is now stored as an
+    // ISO 'YYYY-MM-DD HH:MM:SS' string, so text-sort is time-sort.
+    sort: 'transaction_date.desc.nullslast',
+    dayFrom: '', dayTo: '',
+    total: 0,
   };
 
   const $tbody   = document.getElementById('txn_tbody');
+  const $thead   = document.getElementById('txn_thead');
   const $showing = document.getElementById('txn_showing');
   const $info    = document.getElementById('txn_info');
   const $pager   = document.getElementById('txn_pager');
@@ -46,27 +48,17 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 
-  const fmtMoney = (n) => {
-    const v = Number(n || 0);
-    return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
-  };
+  const fmtMoney = (n) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const pad2 = (n) => String(n).padStart(2, '0');
 
-  // Parse the sheet's transaction_date text. Common shapes:
-  //   "9-Jul-26 07:35:12"        (unpadded day, 2-digit year, 24h time)
-  //   "09-Jul-2026 07:35:12"     (padded day, 4-digit year)
-  //   "2026-07-09 07:35:12"      (ISO-ish)
-  //   "9-Jul-26"                 (date only)
-  // Returns {date: 'DD MMM YYYY', time: 'HH:MM' | null} or null on failure.
   const MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
   const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   const parseTxnDate = (raw) => {
     if (!raw) return null;
     const s = String(raw).trim();
-    // ISO YYYY-MM-DD[ HH:MM[:SS]]
     let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if (m) return { y: +m[1], mo: +m[2] - 1, d: +m[3], h: m[4] ? +m[4] : null, mi: m[5] ? +m[5] : 0 };
-    // DD-Mon-YY[YY] [HH:MM[:SS]]
     m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if (m) {
       const mo = MONTHS[m[2].toLowerCase()];
@@ -77,35 +69,23 @@
     return null;
   };
 
-  const pad2 = (n) => String(n).padStart(2, '0');
-
-  // Sheet's transaction_date is date-only; the actual clock time is embedded
-  // in the description. Two shapes we've seen:
-  //   NMB: "... 1207 19 44 35 agency ..."     — DDMM HH MM SS (space-separated)
-  //   Any: "... 19:44:35 ..."                 — plain HH:MM:SS
-  // Return {h, mi} or null.
   const timeFromDescription = (desc) => {
     if (!desc) return null;
     const s = String(desc);
-    // Colon-separated HH:MM[:SS]
     let m = s.match(/\b([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\b/);
     if (m) return { h: +m[1], mi: +m[2] };
-    // NMB style: DDMM HH MM SS (four leading digits then three 2-digit groups)
     m = s.match(/\b\d{4}\s+([01]?\d|2[0-3])\s+([0-5]\d)\s+([0-5]\d)\b/);
     if (m) return { h: +m[1], mi: +m[2] };
-    // Bare HH MM SS (three 2-digit groups constrained to valid time)
     m = s.match(/\b([01]?\d|2[0-3])\s+([0-5]\d)\s+([0-5]\d)\b/);
     if (m) return { h: +m[1], mi: +m[2] };
     return null;
   };
 
-  // Show either transaction_date (with time) or transaction_day (date only).
-  // If date-only, try to lift a time out of description.
-  const fmtDateCell = (r) => {
-    const p = parseTxnDate(r.transaction_date) || parseTxnDate(r.transaction_day);
-    if (!p) return esc(r.transaction_date || r.transaction_day || '—');
+  const fmtDate = (rawDate, desc) => {
+    const p = parseTxnDate(rawDate);
+    if (!p) return esc(rawDate || '—');
     if (p.h == null) {
-      const t = timeFromDescription(r.description);
+      const t = timeFromDescription(desc);
       if (t) { p.h = t.h; p.mi = t.mi; }
     }
     const datePart = `${pad2(p.d)} ${MONTH_ABBR[p.mo]} ${p.y}`;
@@ -113,10 +93,10 @@
     return `${datePart} <span class="text-secondary-foreground">·</span> ${pad2(p.h)}:${pad2(p.mi)}`;
   };
 
-  // source_tab → status pill
   const statusPill = (src) => {
     const s = String(src || '').toUpperCase();
-    if (s.endsWith('FAILED'))  return { label: 'Failed',  cls: 'kt-badge-destructive' };
+    if (s.endsWith('FAILED'))    return { label: 'Failed',    cls: 'kt-badge-destructive' };
+    if (s.endsWith('ILIYOPATA')) return { label: 'Iliyopata', cls: 'kt-badge-info' };
     if (s.endsWith('PASSED') || s.endsWith('SAVCOM')) return { label: 'Passed', cls: 'kt-badge-success' };
     return { label: s || '—', cls: 'kt-badge-secondary' };
   };
@@ -128,40 +108,97 @@
     return { label: bb || '—', cls: 'kt-badge-secondary' };
   };
 
+  // Column layout differs on the Iliyopata tab: two dates + rescued-by
+  const columnsForCurrent = () => {
+    if (state.product === 'iliyopata') {
+      return ['sel', 'ref', 'status', 'newdate', 'olddate', 'bank', 'customer', 'description', 'amount', 'rescuedby', 'actions'];
+    }
+    return ['sel', 'ref', 'status', 'date', 'bank', 'customer', 'description', 'amount', 'actions'];
+  };
+
+  const HEADERS = {
+    sel:       { label: '', width: 'w-14' },
+    ref:       { label: 'Ref Number',  width: 'min-w-[180px]' },
+    status:    { label: 'Status',      width: 'w-[130px]' },
+    date:      { label: 'Date',        width: 'min-w-[160px]' },
+    newdate:   { label: 'New Date',    width: 'min-w-[160px]' },
+    olddate:   { label: 'Old Date',    width: 'min-w-[160px]' },
+    bank:      { label: 'Bank',        width: 'w-[110px]' },
+    customer:  { label: 'Customer',    width: 'min-w-[200px]' },
+    description:{ label: 'Description',width: 'min-w-[280px]' },
+    amount:    { label: 'Amount',      width: 'w-[170px] text-end' },
+    rescuedby: { label: 'Rescued by',  width: 'min-w-[150px]' },
+    actions:   { label: '',            width: 'w-[100px]' },
+  };
+
+  const renderHead = () => {
+    const cols = columnsForCurrent();
+    $thead.innerHTML = '<tr>' + cols.map(c => {
+      const h = HEADERS[c];
+      if (c === 'sel')     return `<th class="${h.width}"><input class="kt-checkbox kt-checkbox-sm" type="checkbox"/></th>`;
+      if (c === 'actions') return `<th class="${h.width}"></th>`;
+      return `<th class="${h.width}"><span class="kt-table-col"><span class="kt-table-col-label">${h.label}</span></span></th>`;
+    }).join('') + '</tr>';
+  };
+
+  const cellFor = (col, r) => {
+    switch (col) {
+      case 'sel':
+        return `<td><input class="kt-checkbox kt-checkbox-sm" type="checkbox" value="${r.id}"/></td>`;
+      case 'ref':
+        return `<td class="text-foreground font-medium">${esc(r.ref_number || '—')}</td>`;
+      case 'status': {
+        const st = statusPill(r.source_tab);
+        return `<td><span class="kt-badge kt-badge-sm kt-badge-outline ${st.cls}">${esc(st.label)}</span></td>`;
+      }
+      case 'date':
+      case 'newdate':
+        return `<td class="text-foreground font-normal">${fmtDate(r.transaction_date, r.description)}</td>`;
+      case 'olddate':
+        return `<td class="text-secondary-foreground text-sm">${fmtDate(r.old_transaction_date, r.description)}</td>`;
+      case 'bank': {
+        const bk = bankPill(r.bank);
+        return `<td><span class="kt-badge kt-badge-sm kt-badge-outline ${bk.cls}">${esc(bk.label)}</span></td>`;
+      }
+      case 'customer': {
+        const isFailed = FAILED_TABS.has(r.source_tab);
+        const cell = r.customer_name
+          ? esc(r.customer_name)
+          : (isFailed && r.fail_reason
+              ? `<span class="text-destructive text-xs">${esc(r.fail_reason)}</span>`
+              : '<span class="text-muted-foreground">—</span>');
+        return `<td class="text-foreground font-normal">${cell}</td>`;
+      }
+      case 'description':
+        return `<td class="text-secondary-foreground text-sm align-top py-2" title="${esc(r.description || '')}">
+                  <div style="max-width:420px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.3;">${esc(r.description || '—')}</div>
+                </td>`;
+      case 'amount':
+        return `<td class="text-foreground font-semibold text-end">${fmtMoney(r.credit_amount)}<span class="text-secondary-foreground font-normal"> TZS</span></td>`;
+      case 'rescuedby':
+        return `<td class="text-secondary-foreground text-sm">${esc(r.moved_by_username || '—')}</td>`;
+      case 'actions': {
+        if (FAILED_TABS.has(r.source_tab)) {
+          return `<td class="text-center">
+                    <button class="kt-btn kt-btn-sm kt-btn-outline kt-btn-primary" data-rescue-id="${r.id}"
+                            data-ref="${esc(r.ref_number || '')}" data-amount="${esc(r.credit_amount || 0)}">
+                      Rescue
+                    </button>
+                  </td>`;
+        }
+        return `<td class="text-center">
+                  <button class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost">
+                    <i class="ki-filled ki-eye text-lg"></i>
+                  </button>
+                </td>`;
+      }
+    }
+    return '<td></td>';
+  };
+
   const renderRow = (r) => {
-    const st = statusPill(r.source_tab);
-    const bk = bankPill(r.bank);
-    const isFailed = String(r.source_tab || '').endsWith('FAILED');
-    const customerCell = r.customer_name
-      ? esc(r.customer_name)
-      : (isFailed && r.fail_reason
-          ? `<span class="text-destructive text-xs">${esc(r.fail_reason)}</span>`
-          : '<span class="text-muted-foreground">—</span>');
-    return `
-      <tr data-id="${r.id}">
-        <td>
-          <input class="kt-checkbox kt-checkbox-sm" type="checkbox" value="${r.id}"/>
-        </td>
-        <td class="text-foreground font-medium">${esc(r.ref_number || '—')}</td>
-        <td>
-          <span class="kt-badge kt-badge-sm kt-badge-outline ${st.cls}">${esc(st.label)}</span>
-        </td>
-        <td class="text-foreground font-normal">${fmtDateCell(r)}</td>
-        <td>
-          <span class="kt-badge kt-badge-sm kt-badge-outline ${bk.cls}">${esc(bk.label)}</span>
-        </td>
-        <td class="text-foreground font-normal">${customerCell}</td>
-        <td class="text-secondary-foreground text-sm align-top py-2" title="${esc(r.description || '')}">
-          <div style="max-width:420px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.3;">${esc(r.description || '—')}</div>
-        </td>
-        <td class="text-foreground font-semibold text-end">${fmtMoney(r.credit_amount)}<span class="text-secondary-foreground font-normal"> TZS</span></td>
-        <td class="text-center">
-          <button class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost">
-            <i class="ki-filled ki-eye text-lg"></i>
-          </button>
-        </td>
-      </tr>
-    `;
+    const cols = columnsForCurrent();
+    return `<tr data-id="${r.id}">${cols.map(c => cellFor(c, r)).join('')}</tr>`;
   };
 
   const renderPager = (page, lastPage) => {
@@ -184,7 +221,6 @@
     });
   };
 
-  // Combine product + status filters into a single source_tab IN(...) list.
   const activeSourceTabs = () => {
     let productSet = null;
     if (state.product && PRODUCT_TABS[state.product]) {
@@ -201,9 +237,13 @@
   };
 
   const load = async () => {
+    renderHead();
+    const cols = columnsForCurrent();
+    const colspan = cols.length;
+
     const params = new URLSearchParams({
-      page:  String(state.page),
-      size:  String(state.size),
+      page: String(state.page),
+      size: String(state.size),
       search: state.search,
     });
     if (state.sort) {
@@ -239,7 +279,7 @@
     }
 
     $tbody.innerHTML =
-      '<tr><td class="text-center text-secondary-foreground py-6" colspan="9">Loading…</td></tr>';
+      `<tr><td class="text-center text-secondary-foreground py-6" colspan="${colspan}">Loading…</td></tr>`;
 
     let json;
     try {
@@ -249,7 +289,7 @@
       if (!r.ok) throw new Error(json.error || r.statusText);
     } catch (e) {
       $tbody.innerHTML =
-        `<tr><td class="text-center text-destructive py-6" colspan="9">Failed to load: ${esc(e.message)}</td></tr>`;
+        `<tr><td class="text-center text-destructive py-6" colspan="${colspan}">Failed to load: ${esc(e.message)}</td></tr>`;
       return;
     }
 
@@ -259,9 +299,10 @@
 
     if (!rows.length) {
       $tbody.innerHTML =
-        '<tr><td class="text-center text-secondary-foreground py-6" colspan="9">No transactions found.</td></tr>';
+        `<tr><td class="text-center text-secondary-foreground py-6" colspan="${colspan}">No transactions found.</td></tr>`;
     } else {
       $tbody.innerHTML = rows.map(renderRow).join('');
+      wireRescueButtons();
     }
 
     const from = state.total ? (state.page - 1) * state.size + 1 : 0;
@@ -275,7 +316,128 @@
     renderPager(state.page, lastPage);
   };
 
-  // Tab switching — sets state.product and re-styles active tab.
+  // ── Rescue modal ────────────────────────────────────────────────────────
+  const $modal    = document.getElementById('rescue_backdrop');
+  const $rSearch  = document.getElementById('rescue_search');
+  const $rResults = document.getElementById('rescue_results');
+  const $rConfirm = document.getElementById('rescue_confirm');
+  const $rCancel  = document.getElementById('rescue_cancel');
+  const $rClose   = document.getElementById('rescue_close');
+  const $rSub     = document.getElementById('rescue_subtitle');
+
+  const rescueState = { txnId: null, customerId: null };
+
+  const openRescue = (btn) => {
+    rescueState.txnId = btn.dataset.rescueId;
+    rescueState.customerId = null;
+    const ref = btn.dataset.ref || '—';
+    const amt = fmtMoney(btn.dataset.amount);
+    $rSub.textContent = `Ref ${ref} · ${amt} TZS · pick the customer, transaction date will be stamped to now`;
+    $rSearch.value = '';
+    $rResults.innerHTML = '<div class="text-sm text-secondary-foreground p-3 text-center">Start typing to search…</div>';
+    $rConfirm.disabled = true;
+    $modal.classList.remove('hidden');
+    $modal.style.display = 'flex';
+    setTimeout(() => $rSearch.focus(), 40);
+  };
+
+  const closeRescue = () => {
+    $modal.classList.add('hidden');
+    $modal.style.display = 'none';
+  };
+
+  const wireRescueButtons = () => {
+    document.querySelectorAll('button[data-rescue-id]').forEach(b => {
+      b.addEventListener('click', () => openRescue(b));
+    });
+  };
+
+  const PRODUCT_LABEL_SHORT = {
+    'BODA_RECORDS':   'Boda',
+    'SAVCOM_RECORDS': 'Savcom',
+    'IPHONE_RECORDS': 'iPhone',
+  };
+
+  const renderCustResults = (list) => {
+    if (!list.length) {
+      $rResults.innerHTML = '<div class="text-sm text-secondary-foreground p-3 text-center">No matches.</div>';
+      return;
+    }
+    $rResults.innerHTML = list.map(c => `
+      <label class="flex items-start gap-2 px-3 py-2 border-b border-border last:border-b-0 cursor-pointer hover:bg-accent/40">
+        <input type="radio" name="rescue_cust" class="kt-radio mt-1" value="${c.id}"/>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium text-mono truncate">${esc(c.name || '(no name)')}</div>
+          <div class="text-xs text-secondary-foreground truncate">
+            ${esc(c.phone || '—')} · ${esc(c.plate || c.customer_id || '—')}
+            <span class="ms-2 kt-badge kt-badge-xs kt-badge-outline kt-badge-secondary">${esc(PRODUCT_LABEL_SHORT[c.source_tab] || c.source_tab)}</span>
+          </div>
+        </div>
+      </label>
+    `).join('');
+    $rResults.querySelectorAll('input[name="rescue_cust"]').forEach(r => {
+      r.addEventListener('change', () => {
+        rescueState.customerId = r.value;
+        $rConfirm.disabled = false;
+      });
+    });
+  };
+
+  let searchAbort = null;
+  let searchTimerR = null;
+  const runSearch = async (q) => {
+    if (!q.trim()) {
+      $rResults.innerHTML = '<div class="text-sm text-secondary-foreground p-3 text-center">Start typing to search…</div>';
+      return;
+    }
+    if (searchAbort) searchAbort.abort();
+    searchAbort = new AbortController();
+    $rResults.innerHTML = '<div class="text-sm text-secondary-foreground p-3 text-center">Searching…</div>';
+    try {
+      const r = await fetch(`/api/customers/search?q=${encodeURIComponent(q)}`,
+                            { credentials: 'same-origin', signal: searchAbort.signal });
+      const j = await r.json();
+      if (r.ok) renderCustResults(j.data || []);
+      else $rResults.innerHTML = `<div class="text-sm text-destructive p-3 text-center">${esc(j.error || 'Search failed')}</div>`;
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        $rResults.innerHTML = `<div class="text-sm text-destructive p-3 text-center">${esc(e.message)}</div>`;
+      }
+    }
+  };
+
+  $rSearch.addEventListener('input', (e) => {
+    clearTimeout(searchTimerR);
+    searchTimerR = setTimeout(() => runSearch(e.target.value), 200);
+  });
+
+  $rCancel.addEventListener('click', closeRescue);
+  $rClose.addEventListener('click', closeRescue);
+  $modal.addEventListener('click', (e) => { if (e.target === $modal) closeRescue(); });
+
+  $rConfirm.addEventListener('click', async () => {
+    if (!rescueState.txnId || !rescueState.customerId) return;
+    $rConfirm.disabled = true;
+    $rConfirm.textContent = 'Moving…';
+    try {
+      const r = await fetch(`/api/transactions/${rescueState.txnId}/rescue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ customer_id: Number(rescueState.customerId) }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      closeRescue();
+      load();
+    } catch (e) {
+      $rConfirm.disabled = false;
+      $rConfirm.textContent = 'Move';
+      alert('Rescue failed: ' + e.message);
+    }
+  });
+
+  // ── Tab switching ─────────────────────────────────────────────────────────
   const setActiveTab = (product) => {
     state.product = product;
     state.page = 1;
@@ -292,6 +454,7 @@
     });
   });
 
+  // ── Filters + search + sort + per-page ────────────────────────────────────
   let searchTimer = null;
   $search.addEventListener('input', (e) => {
     clearTimeout(searchTimer);
@@ -302,63 +465,27 @@
     }, 250);
   });
 
-  $bank.addEventListener('change', (e) => {
-    state.bank = e.target.value;
-    state.page = 1;
-    load();
-  });
-
-  $status.addEventListener('change', (e) => {
-    state.status = e.target.value;
-    state.page = 1;
-    load();
-  });
-
-  $sort.addEventListener('change', (e) => {
-    state.sort = e.target.value;
-    state.page = 1;
-    load();
-  });
-
-  $perpage.addEventListener('change', (e) => {
-    state.size = Number(e.target.value) || 25;
-    state.page = 1;
-    load();
-  });
+  $bank.addEventListener('change', (e) => { state.bank = e.target.value; state.page = 1; load(); });
+  $status.addEventListener('change', (e) => { state.status = e.target.value; state.page = 1; load(); });
+  $sort.addEventListener('change', (e) => { state.sort = e.target.value; state.page = 1; load(); });
+  $perpage.addEventListener('change', (e) => { state.size = Number(e.target.value) || 25; state.page = 1; load(); });
 
   // ── Quick date filters ────────────────────────────────────────────────────
-  // Returns YYYY-MM-DD for a Date object.
   const toISODate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
   const applyQuickRange = (range) => {
     const now = new Date();
     let from = '', to = '';
-    if (range === 'today') {
-      from = to = toISODate(now);
-    } else if (range === 'yesterday') {
-      const y = new Date(now); y.setDate(y.getDate() - 1);
-      from = to = toISODate(y);
-    } else if (range === '7d') {
-      const s = new Date(now); s.setDate(s.getDate() - 6);
-      from = toISODate(s); to = toISODate(now);
-    } else if (range === 'month') {
-      from = toISODate(new Date(now.getFullYear(), now.getMonth(), 1));
-      to   = toISODate(now);
-    } else if (range === 'last_month') {
-      from = toISODate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
-      to   = toISODate(new Date(now.getFullYear(), now.getMonth(), 0));
-    } else if (range === 'all') {
-      from = to = '';
-    }
-    state.dayFrom = from;
-    state.dayTo   = to;
-    state.page    = 1;
-    $from.value   = from ? `${from}T00:00` : '';
-    $to.value     = to   ? `${to}T23:59`   : '';
-    // Toggle active button styling
-    $quick.querySelectorAll('button[data-range]').forEach(b => {
-      b.classList.toggle('kt-btn-primary', b.dataset.range === range);
-    });
+    if (range === 'today') { from = to = toISODate(now); }
+    else if (range === 'yesterday') { const y = new Date(now); y.setDate(y.getDate() - 1); from = to = toISODate(y); }
+    else if (range === '7d') { const s = new Date(now); s.setDate(s.getDate() - 6); from = toISODate(s); to = toISODate(now); }
+    else if (range === 'month') { from = toISODate(new Date(now.getFullYear(), now.getMonth(), 1)); to = toISODate(now); }
+    else if (range === 'last_month') { from = toISODate(new Date(now.getFullYear(), now.getMonth() - 1, 1)); to = toISODate(new Date(now.getFullYear(), now.getMonth(), 0)); }
+    else if (range === 'all') { from = to = ''; }
+    state.dayFrom = from; state.dayTo = to; state.page = 1;
+    $from.value = from ? `${from}T00:00` : '';
+    $to.value   = to   ? `${to}T23:59`   : '';
+    $quick.querySelectorAll('button[data-range]').forEach(b => b.classList.toggle('kt-btn-primary', b.dataset.range === range));
     load();
   };
 
@@ -366,13 +493,10 @@
     b.addEventListener('click', () => applyQuickRange(b.dataset.range));
   });
 
-  // Custom range inputs — datetime-local. We filter by transaction_day (date
-  // only), so time is ignored server-side but kept visible for the user.
   const onRangeInput = () => {
     state.dayFrom = $from.value ? $from.value.slice(0, 10) : '';
     state.dayTo   = $to.value   ? $to.value.slice(0, 10)   : '';
-    state.page    = 1;
-    // Clear the quick-button active styling once user types a custom range.
+    state.page = 1;
     $quick.querySelectorAll('button[data-range]').forEach(b => b.classList.remove('kt-btn-primary'));
     load();
   };

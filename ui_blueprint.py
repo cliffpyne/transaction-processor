@@ -146,7 +146,7 @@ def _paginated_query(table: str, cfg: dict, always_where=None):
     import created before we tightened the row validator.
     """
     page = max(1, int(request.args.get('page', 1)))
-    size = min(200, max(1, int(request.args.get('size', 50))))
+    size = min(2000, max(1, int(request.args.get('size', 50))))
     offset = (page - 1) * size
     end = offset + size - 1
 
