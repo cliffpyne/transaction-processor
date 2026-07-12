@@ -1,128 +1,164 @@
+<!-- Elegansky — Sign In -->
 <!DOCTYPE html>
 <html class="h-full" data-kt-theme="true" data-kt-theme-mode="light" dir="ltr" lang="en">
-<head>
+ <head>
+  <title>
+   Elegansky — Sign in
+  </title>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"/>
-  <title>Elegansky — Sign in</title>
-  <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png"/>
-  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32x32.png"/>
-  <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon-16x16.png"/>
-  <link rel="shortcut icon" href="/static/img/favicon.ico"/>
+  <meta content="follow, index" name="robots"/>
+  <meta content="width=device-width, initial-scale=1, shrink-to-fit=no" name="viewport"/>
+  <meta content="Sign in page using Tailwind CSS" name="description"/>
+  <meta content="@keenthemes" name="twitter:site"/>
+  <meta content="@keenthemes" name="twitter:creator"/>
+  <meta content="summary_large_image" name="twitter:card"/>
+  <meta content="Elegansky — Sign in" name="twitter:title"/>
+  <meta content="Sign in page using Tailwind CSS" name="twitter:description"/>
+  <meta content="/static/img/og-image.png" name="twitter:image"/>
+  <meta content="en_US" property="og:locale"/>
+  <meta content="website" property="og:type"/>
+  <meta content="@keenthemes" property="og:site_name"/>
+  <meta content="Elegansky — Sign in" property="og:title"/>
+  <meta content="Sign in page using Tailwind CSS" property="og:description"/>
+  <meta content="/static/img/og-image.png" property="og:image"/>
+  <link href="/static/img/apple-touch-icon.png" rel="apple-touch-icon" sizes="180x180"/>
+  <link href="/static/img/favicon-32x32.png" rel="icon" sizes="32x32" type="image/png"/>
+  <link href="/static/img/favicon-16x16.png" rel="icon" sizes="16x16" type="image/png"/>
+  <link href="/static/img/favicon.ico" rel="shortcut icon"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
   <link href="/static/metronic/vendors/keenicons/styles.bundle.css" rel="stylesheet"/>
   <link href="/static/metronic/css/styles.css" rel="stylesheet"/>
-</head>
-<body class="antialiased flex h-full text-base text-foreground bg-background">
-  <!-- Theme Mode boot -->
+ </head>
+ <body class="antialiased flex h-full text-base text-foreground bg-background">
+  <!-- Theme Mode -->
   <script>
-    (function () {
-      const defaultThemeMode = 'light';
-      let themeMode = defaultThemeMode;
-      if (document.documentElement) {
-        if (localStorage.getItem('kt-theme')) {
-          themeMode = localStorage.getItem('kt-theme');
-        } else if (document.documentElement.hasAttribute('data-kt-theme-mode')) {
-          themeMode = document.documentElement.getAttribute('data-kt-theme-mode');
-        }
-        if (themeMode === 'system') {
-          themeMode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        }
-        document.documentElement.classList.add(themeMode);
-      }
-    })();
+   const defaultThemeMode = 'light'; // light|dark|system
+			let themeMode;
+
+			if (document.documentElement) {
+				if (localStorage.getItem('kt-theme')) {
+					themeMode = localStorage.getItem('kt-theme');
+				} else if (
+					document.documentElement.hasAttribute('data-kt-theme-mode')
+				) {
+					themeMode =
+						document.documentElement.getAttribute('data-kt-theme-mode');
+				} else {
+					themeMode = defaultThemeMode;
+				}
+
+				if (themeMode === 'system') {
+					themeMode = window.matchMedia('(prefers-color-scheme: dark)').matches
+						? 'dark'
+						: 'light';
+				}
+
+				document.documentElement.classList.add(themeMode);
+			}
   </script>
-
-  <style>
-    .page-bg      { background-image: url('/static/img/auth-bg.png'); }
-    .dark .page-bg { background-image: url('/static/img/auth-bg-dark.png'); }
-    /* Loading state on submit button */
-    #sign_in_form.is-loading #sign_in_submit_label { visibility: hidden; }
-    #sign_in_form.is-loading #sign_in_submit_spinner { display: inline-block; }
-    #sign_in_submit_spinner { display: none; }
-    .kt-spinner {
-      width: 1rem; height: 1rem; border-radius: 9999px;
-      border: 2px solid rgba(255,255,255,.35); border-top-color: #fff;
-      animation: kt-spin .8s linear infinite;
-      position: absolute; left: 50%; top: 50%; margin-left: -.5rem; margin-top: -.5rem;
-    }
-    @keyframes kt-spin { to { transform: rotate(360deg); } }
-  </style>
-
+  <!-- End of Theme Mode -->
   <!-- Page -->
+  <style>
+   .page-bg {
+			background-image: url('/static/img/auth-bg.png');
+		}
+		.dark .page-bg {
+			background-image: url('/static/img/auth-bg-dark.png');
+		}
+  </style>
   <div class="flex flex-col items-center justify-center grow bg-center bg-no-repeat page-bg">
-    <!-- Logo above the card -->
-    <a href="/" class="mb-5 inline-flex items-center gap-2.5">
-      <img src="/static/img/elegansky-logo.png" alt="Elegansky" class="h-9 w-9 object-contain"/>
-      <span class="text-lg font-bold tracking-tight text-mono">ELEGANSKY</span>
-    </a>
-
-    <div class="kt-card max-w-[400px] w-full">
-      <form action="/login" method="POST" autocomplete="on"
-            class="kt-card-content flex flex-col gap-5 p-10" id="sign_in_form">
-
-        <div class="text-center mb-2.5">
-          <h3 class="text-lg font-medium text-mono leading-none mb-2.5">Sign in</h3>
-          <div class="text-sm text-secondary-foreground">Microfinance · Operator Console</div>
-        </div>
-
-        {% if error %}
-        <div class="kt-alert kt-alert-destructive" role="alert">
-          <span class="kt-alert-icon">
-            <i class="ki-filled ki-shield-cross"></i>
-          </span>
-          <div class="kt-alert-content">
-            <div class="kt-alert-description">{{ error }}</div>
-          </div>
-        </div>
-        {% endif %}
-
-        <div class="flex flex-col gap-1">
-          <label for="username" class="kt-form-label font-normal text-mono">Username</label>
-          <input id="username" name="username" type="text" class="kt-input"
-                 placeholder="your.username" required autofocus
-                 autocapitalize="off" autocomplete="username" spellcheck="false"/>
-        </div>
-
-        <div class="flex flex-col gap-1">
-          <label for="password" class="kt-form-label font-normal text-mono">Password</label>
-          <div class="kt-input" data-kt-toggle-password="true">
-            <input id="password" name="password" type="password" placeholder="Enter password"
-                   required autocomplete="current-password"/>
-            <button type="button" class="kt-btn kt-btn-sm kt-btn-ghost kt-btn-icon bg-transparent! -me-1.5"
-                    data-kt-toggle-password-trigger="true" aria-label="Toggle password visibility">
-              <span class="kt-toggle-password-active:hidden">
-                <i class="ki-filled ki-eye text-muted-foreground"></i>
-              </span>
-              <span class="hidden kt-toggle-password-active:block">
-                <i class="ki-filled ki-eye-slash text-muted-foreground"></i>
-              </span>
-            </button>
-          </div>
-        </div>
-
-        <button type="submit" id="sign_in_submit"
-                class="kt-btn kt-btn-primary flex justify-center grow relative">
-          <span id="sign_in_submit_label">Sign in</span>
-          <span id="sign_in_submit_spinner" class="kt-spinner" aria-hidden="true"></span>
-        </button>
-      </form>
-    </div>
+   <a href="/" class="mb-5 inline-flex items-center gap-2.5">
+    <img src="/static/img/elegansky-logo.png" alt="Elegansky" class="h-9 w-9 object-contain"/>
+    <span class="text-lg font-bold tracking-tight text-mono">ELEGANSKY</span>
+   </a>
+   <div class="kt-card max-w-[370px] w-full">
+    <form action="/login" class="kt-card-content flex flex-col gap-5 p-10" id="sign_in_form" method="POST">
+     {% if error %}
+     <div class="kt-alert kt-alert-destructive" role="alert">
+      <span class="kt-alert-icon"><i class="ki-filled ki-shield-cross"></i></span>
+      <div class="kt-alert-content"><div class="kt-alert-description">{{ error }}</div></div>
+     </div>
+     {% endif %}
+     <div class="text-center mb-2.5">
+      <h3 class="text-lg font-medium text-mono leading-none mb-2.5">
+       Sign in
+      </h3>
+      <div class="flex items-center justify-center font-medium">
+       <span class="text-sm text-secondary-foreground me-1.5">
+        Need an account?
+       </span>
+       <a class="text-sm link" href="#">
+        Sign up
+       </a>
+      </div>
+     </div>
+     <div class="grid grid-cols-2 gap-2.5">
+      <a class="kt-btn kt-btn-outline justify-center" href="#">
+       <img alt="" class="size-3.5 shrink-0" src="/static/metronic/media/brand-logos/google.svg"/>
+       Use Google
+      </a>
+      <a class="kt-btn kt-btn-outline justify-center" href="#">
+       <img alt="" class="size-3.5 shrink-0 dark:hidden" src="/static/metronic/media/brand-logos/apple-black.svg"/>
+       <img alt="" class="size-3.5 shrink-0 light:hidden" src="/static/metronic/media/brand-logos/apple-white.svg"/>
+       Use Apple
+      </a>
+     </div>
+     <div class="flex items-center gap-2">
+      <span class="border-t border-border w-full">
+      </span>
+      <span class="text-xs text-muted-foreground font-medium uppercase">
+       Or
+      </span>
+      <span class="border-t border-border w-full">
+      </span>
+     </div>
+     <div class="flex flex-col gap-1">
+      <label class="kt-form-label font-normal text-mono">
+       Username
+      </label>
+      <input class="kt-input" name="username" placeholder="your.username" type="text" value="" required autocomplete="username" autocapitalize="off" spellcheck="false"/>
+     </div>
+     <div class="flex flex-col gap-1">
+      <div class="flex items-center justify-between gap-1">
+       <label class="kt-form-label font-normal text-mono">
+        Password
+       </label>
+       <a class="text-sm kt-link shrink-0" href="#">
+        Forgot Password?
+       </a>
+      </div>
+      <div class="kt-input" data-kt-toggle-password="true">
+       <input name="password" placeholder="Enter Password" type="password" value=""/>
+       <button class="kt-btn kt-btn-sm kt-btn-ghost kt-btn-icon bg-transparent! -me-1.5" data-kt-toggle-password-trigger="true" type="button">
+        <span class="kt-toggle-password-active:hidden">
+         <i class="ki-filled ki-eye text-muted-foreground">
+         </i>
+        </span>
+        <span class="hidden kt-toggle-password-active:block">
+         <i class="ki-filled ki-eye-slash text-muted-foreground">
+         </i>
+        </span>
+       </button>
+      </div>
+     </div>
+     <label class="kt-label">
+      <input class="kt-checkbox kt-checkbox-sm" name="check" type="checkbox" value="1"/>
+      <span class="kt-checkbox-label">
+       Remember me
+      </span>
+     </label>
+     <button class="kt-btn kt-btn-primary flex justify-center grow">
+      Sign In
+     </button>
+    </form>
+   </div>
   </div>
   <!-- End of Page -->
-
-  <script>
-    // Simple loading state — CSS-only spinner, form still submits normally.
-    (function () {
-      const form = document.getElementById('sign_in_form');
-      if (!form) return;
-      form.addEventListener('submit', function () {
-        form.classList.add('is-loading');
-        const btn = document.getElementById('sign_in_submit');
-        if (btn) btn.disabled = true;
-      });
-    })();
+  <!-- Scripts -->
+  <script src="/static/metronic/js/core.bundle.js">
   </script>
-
-  <script src="/static/metronic/js/core.bundle.js"></script>
-</body>
+  <script src="/static/metronic/vendors/ktui/ktui.min.js">
+  </script>
+  <!-- End of Scripts -->
+ </body>
 </html>
