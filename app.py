@@ -3557,17 +3557,17 @@ def admin_sheet_totals():
     if not service:
         return jsonify({'error': 'google_service_failed'}), 500
 
-    # (sheet_id, tab_name, bank_label)
+    # (sheet_id, tab_name, source_tab_label)
     tabs = [
-        (PASSED_SHEET_ID, 'PASSED',         'CRDB'),
-        (PASSED_SHEET_ID, 'PASSED_SAV',     'CRDB'),
-        (NMB_SHEET_ID,    'PASSED',         'NMB'),
-        (NMB_SHEET_ID,    'PASSED_SAV_NMB', 'NMB'),
-        (IPHONE_SHEET_ID, 'BANK_PASSED',    'IPHONE'),
+        (PASSED_SHEET_ID, 'PASSED',         'CRDBPASSED'),
+        (PASSED_SHEET_ID, 'PASSED_SAV',     'CRDBSAVCOM'),
+        (NMB_SHEET_ID,    'PASSED',         'NMBPASSED'),
+        (NMB_SHEET_ID,    'PASSED_SAV_NMB', 'NMBSAVCOM'),
+        (IPHONE_SHEET_ID, 'BANK_PASSED',    'IPHONEPASSED'),
     ]
     buckets: dict = {}
-    per_tab: dict = {}
-    for sheet_id, tab, bank in tabs:
+    per_tab_rows: dict = {}
+    for sheet_id, tab, label in tabs:
         try:
             resp = service.spreadsheets().values().get(
                 spreadsheetId=sheet_id,
@@ -3575,7 +3575,7 @@ def admin_sheet_totals():
                 valueRenderOption='UNFORMATTED_VALUE',
             ).execute()
         except Exception as e:
-            per_tab[f'{bank}:{tab}'] = f'error: {str(e)[:120]}'
+            per_tab_rows[label] = f'error: {str(e)[:120]}'
             continue
         rows = resp.get('values', [])
         tab_seen = 0
@@ -3589,14 +3589,14 @@ def admin_sheet_totals():
             day = parse_transaction_day(date_val)
             if not day or day < from_day:
                 continue
-            buckets.setdefault(bank, {}).setdefault(day, 0.0)
-            buckets[bank][day] += float(credit)
+            buckets.setdefault(label, {}).setdefault(day, 0.0)
+            buckets[label][day] += float(credit)
             tab_seen += 1
-        per_tab[f'{bank}:{tab}'] = tab_seen
+        per_tab_rows[label] = tab_seen
     for b in buckets:
         for d in buckets[b]:
             buckets[b][d] = round(buckets[b][d], 2)
-    return jsonify({'from': from_day, 'buckets': buckets, 'per_tab_row_counts': per_tab})
+    return jsonify({'from': from_day, 'buckets': buckets, 'per_tab_row_counts': per_tab_rows})
 
 
 @app.route('/admin/daily-totals', methods=['GET'])
@@ -3617,6 +3617,7 @@ def admin_daily_totals():
     )
     # PostgREST caps a single response at ~1000 rows, so page through with
     # Range headers until we've read every matching row for the window.
+    # Bucket by source_tab (not bank) so PASSED vs SAVCOM stay separate.
     buckets: dict = {}
     total_rows = 0
     page = 1000
@@ -3624,7 +3625,7 @@ def admin_daily_totals():
     while True:
         r = requests.get(
             f'{url}/rest/v1/transactions'
-            f'?select=bank,transaction_day,credit_amount'
+            f'?select=source_tab,transaction_day,credit_amount'
             f'&transaction_day=gte.{from_day}'
             f'&source_tab=in.({passed_tabs})'
             f'&order=id.asc',
@@ -3639,11 +3640,11 @@ def admin_daily_totals():
         if not chunk:
             break
         for row in chunk:
-            b = (row.get('bank') or 'UNKNOWN').upper()
-            d = row.get('transaction_day') or 'null'
+            st = row.get('source_tab') or 'UNKNOWN'
+            d  = row.get('transaction_day') or 'null'
             amt = float(row.get('credit_amount') or 0)
-            buckets.setdefault(b, {}).setdefault(d, 0.0)
-            buckets[b][d] += amt
+            buckets.setdefault(st, {}).setdefault(d, 0.0)
+            buckets[st][d] += amt
         total_rows += len(chunk)
         if len(chunk) < page:
             break
