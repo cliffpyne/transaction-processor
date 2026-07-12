@@ -127,7 +127,7 @@
         </td>
         <td class="text-foreground font-normal">${customerCell}</td>
         <td class="text-secondary-foreground text-sm align-top py-2" title="${esc(r.description || '')}">
-          <div class="max-w-[420px] line-clamp-3 whitespace-normal leading-snug">${esc(r.description || '—')}</div>
+          <div style="max-width:420px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.3;">${esc(r.description || '—')}</div>
         </td>
         <td class="text-foreground font-semibold text-end">${fmtMoney(r.credit_amount)}<span class="text-secondary-foreground font-normal"> TZS</span></td>
         <td class="text-center">
