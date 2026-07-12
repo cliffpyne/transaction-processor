@@ -206,6 +206,22 @@ def append(logical_tab, sheet_ids, rows):
         else:
             records = [_row_to_record_9col(r, new_source_tab, source_sheet_id) for r in rows]
 
+        # Dedupe within the batch on ref_number so a stray duplicate ref in
+        # a single upload can't 409 the whole batch against the partial
+        # UNIQUE index. Rows without a ref (all *FAILED rows and any bad
+        # data) are exempt — they're not in the index anyway.
+        seen_refs = set()
+        cleaned = []
+        for rec in records:
+            ref = (rec.get('ref_number') or '').strip()
+            if ref:
+                if ref in seen_refs:
+                    print(f'  ↳ skipping duplicate ref in batch: {ref}')
+                    continue
+                seen_refs.add(ref)
+            cleaned.append(rec)
+        records = cleaned
+
         # No on_conflict — PostgREST needs a non-partial unique constraint
         # to accept ON CONFLICT (ref_number), and ours is partial (excludes
         # NULL / empty ref). App-side dedup on ref_number prevents duplicate
@@ -218,7 +234,26 @@ def append(logical_tab, sheet_ids, rows):
             timeout=15,
         )
         if not r.ok:
-            print(f'  ⚠️ Supabase mirror {new_source_tab} → {r.status_code}: {r.text[:200]}')
+            # On a 409 (cross-batch duplicate against the DB), fall back to
+            # per-row inserts so the good rows still land — only the actual
+            # duplicate is skipped.
+            if r.status_code == 409 and len(records) > 1:
+                print(f'  ⚠️ Supabase batch 409 — retrying {len(records)} rows individually')
+                ok_cnt = 0
+                for rec in records:
+                    ri = requests.post(
+                        f'{SUPABASE_URL}/rest/v1/transactions',
+                        headers=_HEADERS, json=[rec], timeout=10,
+                    )
+                    if ri.ok:
+                        ok_cnt += 1
+                    elif ri.status_code == 409:
+                        pass  # already in DB — expected
+                    else:
+                        print(f'    ↳ row failed: {ri.status_code} {ri.text[:120]}')
+                print(f'  📡 Supabase mirror: {ok_cnt}/{len(records)} rows → {new_source_tab} (after retry)')
+            else:
+                print(f'  ⚠️ Supabase mirror {new_source_tab} → {r.status_code}: {r.text[:200]}')
         else:
             print(f'  📡 Supabase mirror: {len(records)} rows → {new_source_tab}')
     except Exception as e:
