@@ -3383,6 +3383,15 @@ def check_auth():
         return jsonify({'authenticated': False, 'error': str(e)}), 500
 
 
+@app.route('/demo')
+@app.route('/demo/')
+def demo_index():
+    """Serve the pristine Metronic demo (dist copy under static/demo)
+    so the UI developer can see the intended look before adapting."""
+    from flask import redirect
+    return redirect('/static/demo/html/demo1/index.html', code=302)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Remote migration runner — trigger migrate_sheets_to_supabase.py FROM Render
 # so local-ISP hiccups can never block the sync. Auth: X-Migration-Token
