@@ -3459,30 +3459,82 @@ def run_migration():
     })
 
 
+_WIPE_STATE = {'running': False, 'started_at': None, 'finished_at': None,
+               'deleted': 0, 'error': None}
+_WIPE_LOCK = threading.Lock()
+
+
+def _wipe_worker():
+    """Delete every row from `transactions` in Supabase, in chunks.
+
+    Supabase's PostgREST DELETE with `id=gte.0` on 179k rows takes far
+    longer than Render's 60s HTTP timeout. Do it in 20k-row chunks so each
+    call fits inside PostgREST's default statement timeout too."""
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    headers = {
+        'apikey':        key,
+        'Authorization': f'Bearer {key}',
+        'Prefer':        'return=minimal',
+    }
+    total = 0
+    try:
+        while True:
+            # Grab the next batch of ids to delete
+            r = requests.get(
+                f'{url}/rest/v1/transactions?select=id&order=id.asc&limit=20000',
+                headers=headers, timeout=60,
+            )
+            r.raise_for_status()
+            batch = [row['id'] for row in r.json()]
+            if not batch:
+                break
+            id_list = ','.join(str(i) for i in batch)
+            d = requests.delete(
+                f'{url}/rest/v1/transactions?id=in.({id_list})',
+                headers=headers, timeout=120,
+            )
+            d.raise_for_status()
+            total += len(batch)
+            with _WIPE_LOCK:
+                _WIPE_STATE['deleted'] = total
+        with _WIPE_LOCK:
+            _WIPE_STATE['error'] = None
+    except Exception as e:
+        with _WIPE_LOCK:
+            _WIPE_STATE['error'] = str(e)[:400]
+    finally:
+        with _WIPE_LOCK:
+            _WIPE_STATE['running'] = False
+            _WIPE_STATE['finished_at'] = datetime.now().isoformat()
+
+
 @app.route('/admin/wipe-transactions', methods=['POST'])
 def wipe_transactions():
-    """One-shot: DELETE FROM transactions in Supabase. Gated by
-    MIGRATION_TOKEN. Used before re-running the migration when we need
-    to backfill columns (like transaction_date time) that require a
-    fresh ingest. Does NOT touch customers or dedup_alerts."""
+    """Kick off a background delete of every row in transactions. Returns
+    immediately; poll /admin/wipe-transactions/status to check progress."""
     if not _migration_token_ok():
         return jsonify({'error': 'unauthorized'}), 401
-    url  = os.environ.get('SUPABASE_URL', '').rstrip('/')
-    key  = os.environ.get('SUPABASE_SERVICE_KEY', '')
-    if not url or not key:
-        return jsonify({'error': 'supabase_env_missing'}), 500
-    r = requests.delete(
-        f'{url}/rest/v1/transactions?id=gte.0',
-        headers={
-            'apikey': key,
-            'Authorization': f'Bearer {key}',
-            'Prefer': 'return=minimal',
-        },
-        timeout=600,
-    )
-    if not r.ok:
-        return jsonify({'error': r.text[:400], 'status': r.status_code}), 500
-    return jsonify({'ok': True, 'status': r.status_code})
+    with _WIPE_LOCK:
+        if _WIPE_STATE['running']:
+            return jsonify({'status': 'already_running',
+                            'started_at': _WIPE_STATE['started_at'],
+                            'deleted': _WIPE_STATE['deleted']}), 409
+        _WIPE_STATE['running'] = True
+        _WIPE_STATE['started_at'] = datetime.now().isoformat()
+        _WIPE_STATE['finished_at'] = None
+        _WIPE_STATE['deleted'] = 0
+        _WIPE_STATE['error'] = None
+    threading.Thread(target=_wipe_worker, daemon=True).start()
+    return jsonify({'status': 'started', 'started_at': _WIPE_STATE['started_at']})
+
+
+@app.route('/admin/wipe-transactions/status', methods=['GET'])
+def wipe_status():
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    with _WIPE_LOCK:
+        return jsonify(dict(_WIPE_STATE))
 
 
 @app.route('/admin/seed-users', methods=['POST'])
