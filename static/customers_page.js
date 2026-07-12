@@ -33,9 +33,12 @@
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const initials = (name) => {
-    if (!name) return '?';
-    return name.trim().split(/\s+/).slice(0, 2).map(s => s[0]).join('').toUpperCase();
+  // Demo ships 30 stock avatars (300-1.png … 300-30.png). We don't have real
+  // customer photos, so pick a stable one per id — same customer always gets
+  // the same avatar, spread evenly across the 30 files.
+  const avatarFor = (id) => {
+    const n = ((Number(id) || 0) % 30) + 1;
+    return `/static/demo/assets/media/avatars/300-${n}.png`;
   };
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -51,9 +54,7 @@
         </td>
         <td>
           <div class="flex items-center gap-2.5">
-            <div class="rounded-full size-7 shrink-0 bg-accent text-secondary-foreground text-xs font-semibold flex items-center justify-center">
-              ${esc(initials(r.name))}
-            </div>
+            <img alt="" class="rounded-full size-7 shrink-0" src="${avatarFor(r.id)}"/>
             <span class="text-sm font-medium text-mono">
               ${esc(r.name || '(no name)')}
             </span>

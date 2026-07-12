@@ -178,7 +178,11 @@ def _paginated_query(table: str, cfg: dict):
         headers={**_H,
                  'Range-Unit': 'items',
                  'Range':      f'{offset}-{end}',
-                 'Prefer':     'count=exact'},
+                 # `estimated` uses the Postgres planner's row estimate — many
+                 # times faster than `exact` on filtered queries (no full
+                 # COUNT(*) scan). Pagination still works; the total row
+                 # figure may be approximate on very large filtered sets.
+                 'Prefer':     'count=estimated'},
         timeout=30,
     )
     if not r.ok:
