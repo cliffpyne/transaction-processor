@@ -3538,6 +3538,29 @@ def wipe_status():
         return jsonify(dict(_WIPE_STATE))
 
 
+@app.route('/admin/count', methods=['GET'])
+def admin_count():
+    """Token-gated row counts for the core tables. Used to diagnose wipe /
+    migration progress across gunicorn workers, since in-memory state
+    isn't shared."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    if not url or not key:
+        return jsonify({'error': 'supabase_env_missing'}), 500
+    hdr = {'apikey': key, 'Authorization': f'Bearer {key}',
+           'Range-Unit': 'items', 'Range': '0-0', 'Prefer': 'count=exact'}
+    out = {}
+    for t in ('transactions', 'customers', 'dedup_alerts'):
+        try:
+            r = requests.get(f'{url}/rest/v1/{t}?select=id', headers=hdr, timeout=30)
+            out[t] = int(r.headers.get('Content-Range', '0-0/0').split('/')[-1] or 0)
+        except Exception as e:
+            out[t] = f'error: {str(e)[:80]}'
+    return jsonify(out)
+
+
 @app.route('/admin/seed-users', methods=['POST'])
 def seed_users_endpoint():
     """One-shot seed of the initial UI accounts. Idempotent (upsert). Gated
