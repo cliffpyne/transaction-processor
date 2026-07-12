@@ -1,180 +1,236 @@
-:root {
-  color-scheme: dark;
-  --bg:        #060912;
-  --panel:     #0c1220;
-  --panel-2:   #111827;
-  --border:    #1e2d47;
-  --border-2:  #2d4060;
-  --text:      #f1f5f9;
-  --text-2:    #94a3b8;
-  --text-3:    #4b6080;
-  --green:     #10b981;
-  --green-hi:  #34d399;
-  --red:       #ef4444;
-  --yellow:    #f59e0b;
-  --blue:      #3b82f6;
-  --purple:    #8b5cf6;
-  --sidebar-w: 240px;
-  --topbar-h:  62px;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg); color: var(--text);
-  display: grid; grid-template-columns: var(--sidebar-w) 1fr; overflow: hidden;
-}
-a { color: inherit; text-decoration: none; }
+/* records.css — Tabulator overrides to align with Metronic's design tokens,
+   plus a small handful of custom classes used by the Records SPA shell
+   (sidebar nav, role badges, modal container, toast). All other styling
+   comes from Metronic's styles.css.
+   Uses Metronic CSS vars: --background, --card, --foreground, --border,
+   --primary, --primary-foreground, --muted-foreground, --accent, --radius. */
 
-/* Sidebar */
-#sidebar {
-  background: var(--panel); border-right: 1px solid var(--border);
-  padding: 20px 14px; display: flex; flex-direction: column;
-  height: 100vh;
+/* ── Sidebar nav items ────────────────────────────────────────────────── */
+#sidebar .nav-item {
+  display: flex; align-items: center; gap: .625rem;
+  padding: .5rem .75rem;
+  font-size: .8125rem; font-weight: 500;
+  color: var(--foreground);
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: background-color .12s, color .12s;
 }
-.brand {
-  display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px;
-  border-bottom: 1px solid var(--border); margin-bottom: 14px;
+#sidebar .nav-item .nav-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.125rem; color: var(--muted-foreground); font-size: .95rem;
 }
-.brand-mark {
-  width: 32px; height: 32px; border-radius: 8px;
-  background: linear-gradient(135deg, var(--green), #0d7f5c);
-  display: flex; align-items: center; justify-content: center;
-  font-size: .72rem; font-weight: 800; color: #fff;
-  font-family: "SF Mono", Menlo, monospace;
-  box-shadow: 0 4px 14px rgba(16,185,129,.3);
+#sidebar .nav-item:hover {
+  background: var(--accent);
+  color: var(--foreground);
 }
-.brand-name { font-weight: 700; letter-spacing: -.01em; }
+#sidebar .nav-item:hover .nav-icon { color: var(--foreground); }
+#sidebar .nav-item.active {
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+  color: var(--primary);
+  border-color: color-mix(in oklch, var(--primary) 22%, transparent);
+}
+#sidebar .nav-item.active .nav-icon { color: var(--primary); }
 
-#nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-.nav-item {
-  padding: 10px 12px; border-radius: 8px; font-size: .9rem; color: var(--text-2);
-  transition: all .12s;
-}
-.nav-item:hover { background: var(--panel-2); color: var(--text); }
-.nav-item.active {
-  background: rgba(16,185,129,.12); color: var(--green-hi);
-  border-left: 2px solid var(--green);
-  padding-left: 10px;
-}
 .nav-admin { display: none; }
-body.role-admin .nav-admin { display: block; }
+body.role-admin .nav-admin { display: flex; }
+body.role-admin div.nav-admin { display: block; }
 
-#user-block {
-  border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px;
+/* Search box: keep it single-line, icon inside */
+#topbar .kt-input { padding-inline: .625rem; gap: .5rem; }
+#topbar .kt-input input {
+  border: 0; outline: none; background: transparent; flex: 1;
+  color: var(--foreground); font-size: .875rem;
 }
-.user-name  { font-weight: 600; font-size: .9rem; }
-.user-meta  { font-size: .75rem; color: var(--text-3); margin-top: 2px; }
+#topbar .kt-input input::placeholder { color: var(--muted-foreground); }
+
+/* ── Role badges ──────────────────────────────────────────────────────── */
 .role {
-  padding: 1px 6px; border-radius: 4px; font-size: .68rem;
-  font-family: "SF Mono", Menlo, monospace;
-  text-transform: uppercase; letter-spacing: .06em;
+  display: inline-flex; align-items: center;
+  padding: 1px 6px; border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: .68rem; letter-spacing: .06em;
+  text-transform: uppercase;
 }
-.role-admin  { background: rgba(139,92,246,.18); color: #c4b5fd; }
-.role-editor { background: rgba(59,130,246,.18); color: #93c5fd; }
-.role-viewer { background: rgba(148,163,184,.18); color: #cbd5e1; }
-.signout {
-  display: block; margin-top: 10px; padding: 8px 12px;
-  border-radius: 6px; font-size: .8rem; color: var(--text-2);
-  border: 1px solid var(--border); text-align: center;
-}
-.signout:hover { color: var(--red); border-color: var(--red); }
+.role-admin  { background: color-mix(in oklch, #8b5cf6 18%, transparent); color: #7c3aed; }
+.role-editor { background: color-mix(in oklch, #3b82f6 18%, transparent); color: #2563eb; }
+.role-viewer { background: color-mix(in oklch, #71717a 18%, transparent); color: #52525b; }
 
-/* Main area */
-#main { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-#topbar {
-  height: var(--topbar-h); border-bottom: 1px solid var(--border);
-  background: var(--panel); padding: 0 24px;
-  display: flex; align-items: center; justify-content: space-between;
+/* ── Icon buttons in table action column ──────────────────────────────── */
+.tabulator .icon-btn {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--muted-foreground);
+  padding: 4px 6px; margin: 0 1px; border-radius: 4px;
+  font-size: 14px; line-height: 1;
 }
-#viewTitle { font-size: 1.1rem; font-weight: 600; letter-spacing: -.01em; }
-.topbar-actions { display: flex; gap: 10px; align-items: center; }
-#searchBox {
-  padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--panel-2); color: var(--text); font-size: .88rem;
-  width: 260px; outline: none; transition: border-color .15s;
-}
-#searchBox:focus { border-color: var(--green); }
-.btn {
-  padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--panel-2); color: var(--text); font-size: .85rem;
-  font-weight: 500; cursor: pointer; transition: all .12s;
-}
-.btn:hover { background: var(--border); }
-.btn-primary {
-  background: var(--green); border-color: var(--green); color: #fff;
-}
-.btn-primary:hover { background: #059669; border-color: #059669; }
-.btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
-.btn-danger:hover { background: #dc2626; border-color: #dc2626; }
-.icon-btn {
-  border: 0; background: none; cursor: pointer; padding: 4px; color: var(--text-2);
-  transition: color .1s;
-}
-.icon-btn:hover { color: var(--text); }
-.icon-btn.danger:hover { color: var(--red); }
+.tabulator .icon-btn:hover { color: var(--foreground); background: var(--accent); }
+.tabulator .icon-btn.danger:hover { color: #dc2626; background: color-mix(in oklch, #dc2626 10%, transparent); }
 
-/* Grid */
-#grid { flex: 1; overflow: hidden; padding: 0; }
+/* ── Tabulator: make it blend with Metronic ───────────────────────────── */
 .tabulator {
-  background: var(--bg) !important;
-  border: 0 !important; height: 100% !important;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  background: var(--background) !important;
+  color: var(--foreground) !important;
+  border: 0 !important;
+  height: 100% !important;
+  font-family: "Inter", -apple-system, "Segoe UI", Roboto, sans-serif !important;
+  font-size: .8125rem !important;
 }
 .tabulator .tabulator-header {
-  background: var(--panel) !important; border-bottom: 1px solid var(--border) !important;
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+  border-bottom: 1px solid var(--border) !important;
+  font-weight: 600 !important;
 }
-.tabulator-col { background: var(--panel) !important; }
-.tabulator-col-title { font-weight: 600 !important; font-size: .8rem !important; }
-.tabulator-row { background: var(--bg) !important; border-bottom: 1px solid var(--panel) !important; }
-.tabulator-row:hover { background: var(--panel-2) !important; }
-.tabulator-row-odd { background: rgba(15,23,42,.4) !important; }
-.tabulator-footer { background: var(--panel) !important; border-top: 1px solid var(--border) !important; }
-.tabulator-page { background: var(--panel-2) !important; color: var(--text) !important; }
-.tabulator-page.active { background: var(--green) !important; }
-.tabulator-header-filter input,
-.tabulator-header-filter select {
-  background: var(--panel-2) !important; color: var(--text) !important;
-  border: 1px solid var(--border) !important; padding: 4px 8px !important;
-  border-radius: 4px !important; font-size: .8rem !important;
+.tabulator .tabulator-header .tabulator-col {
+  background: var(--card) !important;
+  border-right: 1px solid var(--border) !important;
 }
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+  padding: 10px 12px !important;
+}
+.tabulator .tabulator-header .tabulator-col-title {
+  font-size: .75rem !important;
+  font-weight: 600 !important;
+  color: var(--muted-foreground) !important;
+  letter-spacing: .02em !important;
+  text-transform: uppercase !important;
+}
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort="ascending"] .tabulator-arrow,
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort="descending"] .tabulator-arrow {
+  border-bottom-color: var(--primary) !important;
+  border-top-color: var(--primary) !important;
+}
+.tabulator .tabulator-header .tabulator-header-filter input,
+.tabulator .tabulator-header .tabulator-header-filter select {
+  background: var(--background) !important;
+  color: var(--foreground) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: calc(var(--radius) - 4px) !important;
+  padding: 4px 8px !important;
+  font-size: .75rem !important;
+  outline: none !important;
+}
+.tabulator .tabulator-header .tabulator-header-filter input:focus,
+.tabulator .tabulator-header .tabulator-header-filter select:focus {
+  border-color: var(--primary) !important;
+}
+.tabulator .tabulator-tableholder { background: var(--background) !important; }
+.tabulator .tabulator-tableholder .tabulator-placeholder {
+  color: var(--muted-foreground) !important;
+}
+.tabulator .tabulator-row {
+  background: var(--background) !important;
+  color: var(--foreground) !important;
+  border-bottom: 1px solid var(--border) !important;
+  min-height: 40px;
+}
+.tabulator .tabulator-row.tabulator-row-even {
+  background: color-mix(in oklch, var(--card) 60%, transparent) !important;
+}
+.tabulator .tabulator-row:hover {
+  background: var(--accent) !important;
+}
+.tabulator .tabulator-row .tabulator-cell {
+  border-right: 1px solid var(--border) !important;
+  padding: 10px 12px !important;
+  color: var(--foreground) !important;
+}
+.tabulator .tabulator-footer {
+  background: var(--card) !important;
+  border-top: 1px solid var(--border) !important;
+  color: var(--foreground) !important;
+  padding: 8px 12px !important;
+}
+.tabulator .tabulator-footer .tabulator-page {
+  background: var(--background) !important;
+  color: var(--foreground) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: calc(var(--radius) - 4px) !important;
+  padding: 4px 10px !important;
+  margin: 0 2px !important;
+  font-size: .75rem !important;
+}
+.tabulator .tabulator-footer .tabulator-page:not(.disabled):hover {
+  background: var(--accent) !important;
+  color: var(--foreground) !important;
+}
+.tabulator .tabulator-footer .tabulator-page.active {
+  background: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border-color: var(--primary) !important;
+}
+.tabulator .tabulator-footer .tabulator-page-size {
+  background: var(--background) !important;
+  color: var(--foreground) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: calc(var(--radius) - 4px) !important;
+  padding: 4px 8px !important;
+  margin: 0 6px !important;
+}
+.tabulator .tabulator-footer .tabulator-paginator label { color: var(--muted-foreground) !important; }
 
-/* Modal */
+/* ── Modal (uses Metronic classes, we add positioning + backdrop) ────── */
 #modal {
-  position: fixed; inset: 0; background: rgba(0,0,0,.7);
-  display: flex; align-items: center; justify-content: center; z-index: 100;
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(9, 9, 11, .55);
   backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
 }
 #modal.hidden { display: none; }
-.modal-card {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-  padding: 28px; width: min(520px, 92vw); max-height: 88vh; overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0,0,0,.6);
+#modal .modal-card {
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: min(560px, 100%);
+  max-height: 88vh; overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .35);
 }
-#modalTitle { font-size: 1.15rem; font-weight: 600; margin-bottom: 20px; }
-#modalForm { display: flex; flex-direction: column; gap: 14px; }
+#modal .kt-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+#modal .kt-modal-title { font-size: 1rem; font-weight: 600; }
+#modal .kt-modal-close {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--muted-foreground);
+  padding: 4px 6px; border-radius: 4px;
+}
+#modal .kt-modal-close:hover { color: var(--foreground); background: var(--accent); }
+#modal .kt-modal-body   { padding: 1.25rem; }
+#modal .kt-modal-footer {
+  display: flex; justify-content: flex-end; gap: .5rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--border);
+}
 #modalForm label {
-  font-size: .74rem; color: var(--text-2); text-transform: uppercase;
-  letter-spacing: .06em; margin-bottom: 4px; display: block;
+  display: block; font-size: .75rem; color: var(--muted-foreground);
+  font-weight: 500; margin-bottom: .3rem;
 }
 #modalForm input, #modalForm select {
-  width: 100%; padding: 10px 12px; border-radius: 6px;
-  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
-  font-size: .9rem; outline: none;
+  width: 100%; padding: .5rem .75rem;
+  background: var(--background); color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  font-size: .875rem; outline: none;
 }
-#modalForm input:focus, #modalForm select:focus { border-color: var(--green); }
-.modal-actions {
-  display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;
-  padding-top: 20px; border-top: 1px solid var(--border);
+#modalForm input:focus, #modalForm select:focus {
+  border-color: var(--primary);
 }
 
-/* Toast */
+/* ── Toast ────────────────────────────────────────────────────────────── */
 #toast {
-  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-  background: var(--panel); border: 1px solid var(--border);
-  padding: 12px 20px; border-radius: 8px; font-size: .88rem; z-index: 200;
-  box-shadow: 0 10px 30px rgba(0,0,0,.4);
+  position: fixed; z-index: 200;
+  left: 50%; bottom: 24px; transform: translateX(-50%);
+  padding: 10px 16px;
+  background: var(--card); color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: .875rem; font-weight: 500;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
 }
 #toast.hidden { display: none; }
-#toast.ok  { border-color: var(--green); }
-#toast.err { border-color: var(--red); }
+#toast.ok  { border-color: color-mix(in oklch, #10b981 45%, var(--border)); color: #059669; }
+#toast.err { border-color: color-mix(in oklch, #ef4444 45%, var(--border)); color: #dc2626; }

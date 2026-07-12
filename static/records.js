@@ -151,7 +151,7 @@ function jsonPreview(v) {
   if (!v) return '';
   try {
     const s = JSON.stringify(v);
-    return `<code style="font-size:.72rem;color:#94a3b8">${s.length > 90 ? s.slice(0,88)+'…' : s}</code>`;
+    return `<code style="font-size:.72rem;color:var(--muted-foreground)">${s.length > 90 ? s.slice(0,88)+'…' : s}</code>`;
   } catch { return String(v); }
 }
 
@@ -182,8 +182,8 @@ function loadView(name) {
       headerSort: false, resizable: false,
       formatter: () => {
         const parts = [];
-        if (cfg.canEdit)   parts.push('<button class="icon-btn" data-act="edit"   title="Edit">✎</button>');
-        if (cfg.canDelete) parts.push('<button class="icon-btn danger" data-act="delete" title="Delete">🗑</button>');
+        if (cfg.canEdit)   parts.push('<button class="icon-btn" data-act="edit"   title="Edit"><i class="ki-filled ki-pencil"></i></button>');
+        if (cfg.canDelete) parts.push('<button class="icon-btn danger" data-act="delete" title="Delete"><i class="ki-filled ki-trash"></i></button>');
         return parts.join('');
       },
       cellClick: (e, cell) => {
@@ -229,8 +229,8 @@ function loadView(name) {
       return `${url}?${usp.toString()}`;
     },
     ajaxResponse: (url, params, response) => response,
-    dataLoaderLoading: '<div style="padding:20px;color:#94a3b8">Loading…</div>',
-    placeholder: '<div style="padding:40px;color:#4b6080">No rows</div>',
+    dataLoaderLoading: '<div style="padding:20px;color:var(--muted-foreground)">Loading…</div>',
+    placeholder: '<div style="padding:40px;color:var(--muted-foreground)">No rows</div>',
   });
 }
 

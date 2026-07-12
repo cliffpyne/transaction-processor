@@ -1,63 +1,158 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="h-full" data-kt-theme="true" data-kt-theme-mode="light" dir="ltr" lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PikiPiki · Records</title>
-<link href="https://unpkg.com/tabulator-tables@5.6.4/dist/css/tabulator_midnight.min.css" rel="stylesheet">
-<link href="/static/records.css" rel="stylesheet">
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"/>
+  <title>Elegansky — Records</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32x32.png"/>
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon-16x16.png"/>
+  <link rel="shortcut icon" href="/static/img/favicon.ico"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <link href="/static/metronic/vendors/keenicons/styles.bundle.css" rel="stylesheet"/>
+  <link href="/static/metronic/css/styles.css" rel="stylesheet"/>
+  <link href="https://unpkg.com/tabulator-tables@5.6.4/dist/css/tabulator_simple.min.css" rel="stylesheet"/>
+  <link href="/static/records.css" rel="stylesheet"/>
 </head>
-<body>
-  <aside id="sidebar">
-    <div class="brand">
-      <div class="brand-mark">PP</div>
-      <div class="brand-name">PikiPiki</div>
-    </div>
+<body class="antialiased flex h-full text-base text-foreground bg-background">
+  <!-- Theme Mode boot -->
+  <script>
+    (function () {
+      const defaultThemeMode = 'light';
+      let themeMode = defaultThemeMode;
+      if (document.documentElement) {
+        if (localStorage.getItem('kt-theme')) {
+          themeMode = localStorage.getItem('kt-theme');
+        } else if (document.documentElement.hasAttribute('data-kt-theme-mode')) {
+          themeMode = document.documentElement.getAttribute('data-kt-theme-mode');
+        }
+        if (themeMode === 'system') {
+          themeMode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.classList.add(themeMode);
+      }
+    })();
+  </script>
 
-    <nav id="nav">
-      <a href="#customers"     class="nav-item" data-view="customers">Customers</a>
-      <a href="#transactions"  class="nav-item" data-view="transactions">Transactions</a>
-      <a href="#dedup_alerts"  class="nav-item" data-view="dedup_alerts">Dedup Alerts</a>
-      <a href="#users"         class="nav-item nav-admin" data-view="users">Users</a>
-      <a href="#audit"         class="nav-item nav-admin" data-view="record_edits">Audit Log</a>
-    </nav>
-
-    <div id="user-block">
-      <div class="user-name">{{ full_name }}</div>
-      <div class="user-meta"><span class="role role-{{ role }}">{{ role }}</span> · @{{ username }}</div>
-      <a href="/logout" class="signout">Sign out</a>
-    </div>
-  </aside>
-
-  <main id="main">
-    <header id="topbar">
-      <h1 id="viewTitle">Customers</h1>
-      <div class="topbar-actions">
-        <input id="searchBox" type="search" placeholder="Search…" autocomplete="off">
-        <button id="btnAdd" class="btn btn-primary" hidden>+ Add</button>
-        <button id="btnReload" class="btn">Refresh</button>
+  <div class="flex grow w-full">
+    <!-- Sidebar -->
+    <aside id="sidebar"
+           class="w-[240px] shrink-0 h-screen sticky top-0 flex flex-col border-e border-border bg-card">
+      <!-- Brand -->
+      <div class="flex items-center gap-2.5 px-5 pt-5 pb-4 border-b border-border">
+        <img src="/static/img/elegansky-logo.png" alt="Elegansky" class="h-8 w-8 object-contain shrink-0"/>
+        <span class="text-base font-bold tracking-tight text-foreground">ELEGANSKY</span>
       </div>
-    </header>
 
-    <div id="grid"></div>
-  </main>
+      <!-- Nav -->
+      <nav id="nav" class="flex-1 flex flex-col gap-0.5 p-3 overflow-y-auto">
+        <div class="px-3 pt-2 pb-1.5 text-xs font-medium uppercase text-muted-foreground">Records</div>
 
-  <div id="modal" class="hidden">
-    <div class="modal-card">
-      <h2 id="modalTitle">Add row</h2>
-      <form id="modalForm"></form>
-      <div class="modal-actions">
-        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-        <button type="button" class="btn btn-primary" id="modalSave">Save</button>
+        <a href="#customers" class="nav-item" data-view="customers">
+          <span class="nav-icon"><i class="ki-filled ki-people"></i></span>
+          <span class="nav-label">Customers</span>
+        </a>
+        <a href="#transactions" class="nav-item" data-view="transactions">
+          <span class="nav-icon"><i class="ki-filled ki-bill"></i></span>
+          <span class="nav-label">Transactions</span>
+        </a>
+        <a href="#dedup_alerts" class="nav-item" data-view="dedup_alerts">
+          <span class="nav-icon"><i class="ki-filled ki-notification-status"></i></span>
+          <span class="nav-label">Dedup Alerts</span>
+        </a>
+
+        <div class="nav-admin px-3 pt-4 pb-1.5 text-xs font-medium uppercase text-muted-foreground">Admin</div>
+        <a href="#users" class="nav-item nav-admin" data-view="users">
+          <span class="nav-icon"><i class="ki-filled ki-user-tick"></i></span>
+          <span class="nav-label">Users</span>
+        </a>
+        <a href="#record_edits" class="nav-item nav-admin" data-view="record_edits">
+          <span class="nav-icon"><i class="ki-filled ki-time"></i></span>
+          <span class="nav-label">Audit Log</span>
+        </a>
+      </nav>
+
+      <!-- User block -->
+      <div id="user-block" class="p-3 border-t border-border">
+        <div class="flex items-center gap-2.5 px-2 py-1.5">
+          <div class="h-8 w-8 rounded-full bg-primary text-primary-foreground text-xs font-semibold flex items-center justify-center shrink-0">
+            {{ (full_name or username)[:1] | upper }}
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-semibold text-foreground truncate">{{ full_name }}</div>
+            <div class="text-xs text-muted-foreground truncate">
+              <span class="role role-{{ role }}">{{ role }}</span>
+              <span class="ms-1">@{{ username }}</span>
+            </div>
+          </div>
+        </div>
+        <a href="/logout" class="kt-btn kt-btn-outline kt-btn-sm w-full justify-center mt-2">
+          <i class="ki-filled ki-exit-right"></i>
+          Sign out
+        </a>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main id="main" class="flex-1 flex flex-col min-w-0 h-screen">
+      <!-- Topbar -->
+      <header id="topbar"
+              class="h-[62px] shrink-0 flex items-center justify-between gap-3 px-6 border-b border-border bg-card">
+        <h1 id="viewTitle" class="text-base font-semibold text-mono">Customers</h1>
+        <div class="flex items-center gap-2">
+          <div class="kt-input relative w-[260px] max-w-full">
+            <i class="ki-filled ki-magnifier text-muted-foreground text-sm"></i>
+            <input id="searchBox" type="search" placeholder="Search…" autocomplete="off"/>
+          </div>
+          <button id="btnAdd" class="kt-btn kt-btn-primary" hidden>
+            <i class="ki-filled ki-plus"></i>
+            Add
+          </button>
+          <button id="btnReload" class="kt-btn kt-btn-outline">
+            <i class="ki-filled ki-arrows-circle"></i>
+            Refresh
+          </button>
+        </div>
+      </header>
+
+      <!-- Grid -->
+      <div id="grid" class="flex-1 min-h-0 overflow-hidden"></div>
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" class="kt-modal-backdrop hidden">
+    <div class="kt-modal-dialog modal-card">
+      <div class="kt-modal-content">
+        <div class="kt-modal-header">
+          <h3 id="modalTitle" class="kt-modal-title">Add row</h3>
+          <button type="button" class="kt-modal-close" onclick="closeModal()" aria-label="Close">
+            <i class="ki-filled ki-cross"></i>
+          </button>
+        </div>
+        <div class="kt-modal-body">
+          <form id="modalForm" class="flex flex-col gap-3"></form>
+        </div>
+        <div class="kt-modal-footer">
+          <button type="button" class="kt-btn kt-btn-outline" onclick="closeModal()">Cancel</button>
+          <button type="button" class="kt-btn kt-btn-primary" id="modalSave">Save</button>
+        </div>
       </div>
     </div>
   </div>
 
+  <!-- Toast -->
   <div id="toast" class="hidden"></div>
 
   <script>
-    window.__ME__ = { username: "{{ username }}", full_name: "{{ full_name }}", role: "{{ role }}" };
+    window.__ME__ = {
+      username:  {{ username|tojson }},
+      full_name: {{ full_name|tojson }},
+      role:      {{ role|tojson }}
+    };
   </script>
+
+  <script src="/static/metronic/js/core.bundle.js"></script>
   <script src="https://unpkg.com/tabulator-tables@5.6.4/dist/js/tabulator.min.js"></script>
   <script src="/static/records.js"></script>
 </body>

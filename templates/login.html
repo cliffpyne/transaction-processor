@@ -1,78 +1,128 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="h-full" data-kt-theme="true" data-kt-theme-mode="light" dir="ltr" lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PikiPiki · Sign in</title>
-<style>
-  :root { color-scheme: light; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: linear-gradient(135deg, #0a0f1e 0%, #1a2438 100%);
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    color: #f1f5f9;
-  }
-  .box {
-    background: rgba(15, 23, 42, .85); backdrop-filter: blur(20px);
-    border: 1px solid rgba(148, 163, 184, .15);
-    border-radius: 16px; padding: 40px 36px; width: min(400px, 92vw);
-    box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
-  }
-  h1 { font-size: 1.5rem; margin-bottom: 6px; letter-spacing: -.02em; }
-  .sub { color: #94a3b8; font-size: .9rem; margin-bottom: 30px; }
-  label { display: block; font-size: .78rem; color: #94a3b8;
-          text-transform: uppercase; letter-spacing: .08em;
-          margin-bottom: 8px; margin-top: 18px; }
-  input {
-    width: 100%; padding: 12px 14px; border-radius: 8px;
-    border: 1px solid rgba(148, 163, 184, .2);
-    background: rgba(0, 0, 0, .3); color: #f1f5f9; font-size: .95rem;
-    outline: none; transition: border-color .15s;
-  }
-  input:focus { border-color: #10b981; }
-  button {
-    width: 100%; margin-top: 28px; padding: 13px;
-    background: #10b981; color: #fff; font-weight: 600; font-size: .95rem;
-    border: 0; border-radius: 8px; cursor: pointer; letter-spacing: .02em;
-    transition: background .15s;
-  }
-  button:hover { background: #059669; }
-  .err {
-    background: rgba(239, 68, 68, .12);
-    border: 1px solid rgba(239, 68, 68, .3);
-    color: #fca5a5; padding: 10px 14px; border-radius: 8px;
-    font-size: .85rem; margin-bottom: 20px;
-  }
-  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
-  .brand-mark {
-    width: 32px; height: 32px; border-radius: 8px;
-    background: linear-gradient(135deg, #10b981, #0d7f5c);
-    display: flex; align-items: center; justify-content: center;
-    font-size: .72rem; font-weight: 800; color: #fff;
-    font-family: "SF Mono", Menlo, monospace;
-  }
-  .brand-name { font-weight: 700; letter-spacing: -.01em; }
-</style>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"/>
+  <title>Elegansky — Sign in</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32x32.png"/>
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon-16x16.png"/>
+  <link rel="shortcut icon" href="/static/img/favicon.ico"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <link href="/static/metronic/vendors/keenicons/styles.bundle.css" rel="stylesheet"/>
+  <link href="/static/metronic/css/styles.css" rel="stylesheet"/>
 </head>
-<body>
-  <form class="box" method="POST" action="/login" autocomplete="on">
-    <div class="brand">
-      <div class="brand-mark">PP</div>
-      <div class="brand-name">PikiPiki Records</div>
+<body class="antialiased flex h-full text-base text-foreground bg-background">
+  <!-- Theme Mode boot -->
+  <script>
+    (function () {
+      const defaultThemeMode = 'light';
+      let themeMode = defaultThemeMode;
+      if (document.documentElement) {
+        if (localStorage.getItem('kt-theme')) {
+          themeMode = localStorage.getItem('kt-theme');
+        } else if (document.documentElement.hasAttribute('data-kt-theme-mode')) {
+          themeMode = document.documentElement.getAttribute('data-kt-theme-mode');
+        }
+        if (themeMode === 'system') {
+          themeMode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.classList.add(themeMode);
+      }
+    })();
+  </script>
+
+  <style>
+    .page-bg      { background-image: url('/static/img/auth-bg.png'); }
+    .dark .page-bg { background-image: url('/static/img/auth-bg-dark.png'); }
+    /* Loading state on submit button */
+    #sign_in_form.is-loading #sign_in_submit_label { visibility: hidden; }
+    #sign_in_form.is-loading #sign_in_submit_spinner { display: inline-block; }
+    #sign_in_submit_spinner { display: none; }
+    .kt-spinner {
+      width: 1rem; height: 1rem; border-radius: 9999px;
+      border: 2px solid rgba(255,255,255,.35); border-top-color: #fff;
+      animation: kt-spin .8s linear infinite;
+      position: absolute; left: 50%; top: 50%; margin-left: -.5rem; margin-top: -.5rem;
+    }
+    @keyframes kt-spin { to { transform: rotate(360deg); } }
+  </style>
+
+  <!-- Page -->
+  <div class="flex flex-col items-center justify-center grow bg-center bg-no-repeat page-bg">
+    <!-- Logo above the card -->
+    <a href="/" class="mb-5 inline-flex items-center gap-2.5">
+      <img src="/static/img/elegansky-logo.png" alt="Elegansky" class="h-9 w-9 object-contain"/>
+      <span class="text-lg font-bold tracking-tight text-mono">ELEGANSKY</span>
+    </a>
+
+    <div class="kt-card max-w-[400px] w-full">
+      <form action="/login" method="POST" autocomplete="on"
+            class="kt-card-content flex flex-col gap-5 p-10" id="sign_in_form">
+
+        <div class="text-center mb-2.5">
+          <h3 class="text-lg font-medium text-mono leading-none mb-2.5">Sign in</h3>
+          <div class="text-sm text-secondary-foreground">Microfinance · Operator Console</div>
+        </div>
+
+        {% if error %}
+        <div class="kt-alert kt-alert-destructive" role="alert">
+          <span class="kt-alert-icon">
+            <i class="ki-filled ki-shield-cross"></i>
+          </span>
+          <div class="kt-alert-content">
+            <div class="kt-alert-description">{{ error }}</div>
+          </div>
+        </div>
+        {% endif %}
+
+        <div class="flex flex-col gap-1">
+          <label for="username" class="kt-form-label font-normal text-mono">Username</label>
+          <input id="username" name="username" type="text" class="kt-input"
+                 placeholder="your.username" required autofocus
+                 autocapitalize="off" autocomplete="username" spellcheck="false"/>
+        </div>
+
+        <div class="flex flex-col gap-1">
+          <label for="password" class="kt-form-label font-normal text-mono">Password</label>
+          <div class="kt-input" data-kt-toggle-password="true">
+            <input id="password" name="password" type="password" placeholder="Enter password"
+                   required autocomplete="current-password"/>
+            <button type="button" class="kt-btn kt-btn-sm kt-btn-ghost kt-btn-icon bg-transparent! -me-1.5"
+                    data-kt-toggle-password-trigger="true" aria-label="Toggle password visibility">
+              <span class="kt-toggle-password-active:hidden">
+                <i class="ki-filled ki-eye text-muted-foreground"></i>
+              </span>
+              <span class="hidden kt-toggle-password-active:block">
+                <i class="ki-filled ki-eye-slash text-muted-foreground"></i>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" id="sign_in_submit"
+                class="kt-btn kt-btn-primary flex justify-center grow relative">
+          <span id="sign_in_submit_label">Sign in</span>
+          <span id="sign_in_submit_spinner" class="kt-spinner" aria-hidden="true"></span>
+        </button>
+      </form>
     </div>
-    <h1>Sign in</h1>
-    <div class="sub">Enter your username and password.</div>
+  </div>
+  <!-- End of Page -->
 
-    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <script>
+    // Simple loading state — CSS-only spinner, form still submits normally.
+    (function () {
+      const form = document.getElementById('sign_in_form');
+      if (!form) return;
+      form.addEventListener('submit', function () {
+        form.classList.add('is-loading');
+        const btn = document.getElementById('sign_in_submit');
+        if (btn) btn.disabled = true;
+      });
+    })();
+  </script>
 
-    <label for="u">Username</label>
-    <input id="u" name="username" type="text" required autofocus autocapitalize="off" autocomplete="username">
-
-    <label for="p">Password</label>
-    <input id="p" name="password" type="password" required autocomplete="current-password">
-
-    <button type="submit">Sign in</button>
-  </form>
+  <script src="/static/metronic/js/core.bundle.js"></script>
 </body>
 </html>
