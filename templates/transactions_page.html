@@ -203,6 +203,131 @@
      </div>
      <!-- End of Container -->
 
+     <!-- Transaction Details Drawer — verbatim demo structure -->
+     <div class="hidden kt-drawer kt-drawer-end kt-card flex-col max-w-[90%] w-[520px] top-5 bottom-5 end-5 rounded-xl border border-border" data-kt-drawer="true" data-kt-drawer-container="body" id="drawers_txn_details">
+      <div class="kt-card-header px-5">
+       <h3 class="kt-card-title">
+        Transaction Detail
+       </h3>
+       <button class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost shrink-0" data-kt-drawer-dismiss="true">
+        <i class="ki-filled ki-cross text-base">
+        </i>
+       </button>
+      </div>
+      <div class="kt-card-content flex flex-col space-y-3 p-5 kt-scrollable-y-auto">
+       <div class="kt-card relative items-center justify-center bg-accent/50 mb-6.5 py-8 shadow-none">
+        <span id="td_status_pill_wrap" class="absolute top-4 end-4"></span>
+        <span class="text-3xl font-semibold text-mono" id="td_amount">— TZS</span>
+        <span class="text-sm text-secondary-foreground mt-1" id="td_date">—</span>
+       </div>
+       <span class="text-base font-medium text-mono">
+        Description
+       </span>
+       <span class="text-sm font-normal text-foreground block mb-6 whitespace-pre-wrap" id="td_description">
+        —
+       </span>
+       <div class="flex flex-col gap-2.5 lg:mb-11">
+        <div class="flex items-center gap-2.5">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Ref Number
+         </span>
+         <div>
+          <span class="text-xs font-medium text-foreground" id="td_ref">—</span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Bank
+         </span>
+         <div>
+          <span id="td_bank_pill_wrap"></span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Customer
+         </span>
+         <div>
+          <span class="text-xs font-medium text-foreground" id="td_customer">—</span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Identifier
+         </span>
+         <div>
+          <span class="text-xs font-medium text-foreground" id="td_identifier">—</span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Customer ID
+         </span>
+         <div>
+          <span class="text-xs font-medium text-foreground" id="td_customer_id">—</span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Fail reason
+         </span>
+         <div>
+          <span class="text-xs font-medium text-destructive" id="td_fail_reason">—</span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5" id="td_old_date_row" style="display:none">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Old date
+         </span>
+         <div>
+          <span class="text-xs font-medium text-foreground" id="td_old_date">—</span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5" id="td_moved_by_row" style="display:none">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Rescued by
+         </span>
+         <div>
+          <span class="text-xs font-medium text-foreground" id="td_moved_by">—</span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5" id="td_moved_at_row" style="display:none">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Rescued at
+         </span>
+         <div>
+          <span class="text-xs font-medium text-foreground" id="td_moved_at">—</span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Source tab
+         </span>
+         <div>
+          <span class="text-xs font-medium text-foreground" id="td_source_tab">—</span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Sheet ID
+         </span>
+         <div>
+          <span class="text-xs font-medium text-secondary-foreground" id="td_original_id">—</span>
+         </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+         <span class="text-xs font-normal text-foreground min-w-14 xl:min-w-32 shrink-0">
+          Ingested at
+         </span>
+         <div>
+          <span class="text-xs font-medium text-secondary-foreground" id="td_created_at">—</span>
+         </div>
+        </div>
+       </div>
+      </div>
+     </div>
+     <!-- End of Transaction Details Drawer -->
+
      <!-- Rescue modal — pick a customer for a FAILED transaction -->
      <div class="fixed inset-0 z-50 hidden bg-black/40 items-center justify-center p-4" id="rescue_backdrop">
       <div class="bg-background rounded-lg shadow-2xl w-full max-w-[520px] p-5 border border-border">

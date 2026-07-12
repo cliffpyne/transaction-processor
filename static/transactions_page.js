@@ -187,7 +187,8 @@
                   </td>`;
         }
         return `<td class="text-center">
-                  <button class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost">
+                  <button class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost" data-details-id="${r.id}"
+                          data-kt-drawer-toggle="#drawers_txn_details">
                     <i class="ki-filled ki-eye text-lg"></i>
                   </button>
                 </td>`;
@@ -301,8 +302,11 @@
       $tbody.innerHTML =
         `<tr><td class="text-center text-secondary-foreground py-6" colspan="${colspan}">No transactions found.</td></tr>`;
     } else {
+      rowsById = {};
+      for (const r of rows) rowsById[r.id] = r;
       $tbody.innerHTML = rows.map(renderRow).join('');
       wireRescueButtons();
+      wireDetailButtons();
     }
 
     const from = state.total ? (state.page - 1) * state.size + 1 : 0;
@@ -326,6 +330,70 @@
   const $rSub     = document.getElementById('rescue_subtitle');
 
   const rescueState = { txnId: null, customerId: null };
+  let rowsById = {};
+
+  // ── Details drawer — populate fields for the picked row ─────────────────
+  const $td = {
+    amount:      document.getElementById('td_amount'),
+    date:        document.getElementById('td_date'),
+    description: document.getElementById('td_description'),
+    ref:         document.getElementById('td_ref'),
+    customer:    document.getElementById('td_customer'),
+    identifier:  document.getElementById('td_identifier'),
+    customerId:  document.getElementById('td_customer_id'),
+    failReason:  document.getElementById('td_fail_reason'),
+    oldDate:     document.getElementById('td_old_date'),
+    oldDateRow:  document.getElementById('td_old_date_row'),
+    movedBy:     document.getElementById('td_moved_by'),
+    movedByRow:  document.getElementById('td_moved_by_row'),
+    movedAt:     document.getElementById('td_moved_at'),
+    movedAtRow:  document.getElementById('td_moved_at_row'),
+    sourceTab:   document.getElementById('td_source_tab'),
+    originalId:  document.getElementById('td_original_id'),
+    createdAt:   document.getElementById('td_created_at'),
+    statusWrap:  document.getElementById('td_status_pill_wrap'),
+    bankWrap:    document.getElementById('td_bank_pill_wrap'),
+  };
+
+  const populateDetails = (r) => {
+    if (!r) return;
+    const st = statusPill(r.source_tab);
+    const bk = bankPill(r.bank);
+    $td.amount.innerHTML = `${fmtMoney(r.credit_amount)} <span class="text-lg text-secondary-foreground font-normal">TZS</span>`;
+    $td.date.innerHTML   = fmtDate(r.transaction_date, r.description);
+    $td.description.textContent = r.description || '—';
+    $td.ref.textContent = r.ref_number || '—';
+    $td.customer.textContent = r.customer_name || '—';
+    $td.identifier.textContent = r.identifier || '—';
+    $td.customerId.textContent = r.customer_id || '—';
+    $td.failReason.textContent = r.fail_reason || '—';
+    $td.failReason.parentElement.parentElement.style.display = r.fail_reason ? '' : 'none';
+    $td.sourceTab.textContent = r.source_tab || '—';
+    $td.originalId.textContent = r.original_id != null ? String(r.original_id) : '—';
+    $td.createdAt.textContent = r.created_at ? new Date(r.created_at).toLocaleString('en-GB') : '—';
+    $td.statusWrap.innerHTML = `<span class="kt-badge kt-badge-sm kt-badge-outline ${st.cls}">${esc(st.label)}</span>`;
+    $td.bankWrap.innerHTML = `<span class="kt-badge kt-badge-sm kt-badge-outline ${bk.cls}">${esc(bk.label)}</span>`;
+    // Iliyopata-only rows
+    const isIly = ILIYOPATA_TABS.has(r.source_tab);
+    $td.oldDateRow.style.display = isIly ? '' : 'none';
+    $td.movedByRow.style.display = isIly ? '' : 'none';
+    $td.movedAtRow.style.display = isIly ? '' : 'none';
+    if (isIly) {
+      $td.oldDate.innerHTML = fmtDate(r.old_transaction_date, r.description);
+      $td.movedBy.textContent = r.moved_by_username || '—';
+      $td.movedAt.textContent = r.moved_at ? new Date(r.moved_at).toLocaleString('en-GB') : '—';
+    }
+  };
+
+  const wireDetailButtons = () => {
+    document.querySelectorAll('button[data-details-id]').forEach(b => {
+      b.addEventListener('click', () => {
+        populateDetails(rowsById[b.dataset.detailsId]);
+        // Metronic's ktui drawer handles the open animation via
+        // data-kt-drawer-toggle — the button already carries it.
+      });
+    });
+  };
 
   const openRescue = (btn) => {
     rescueState.txnId = btn.dataset.rescueId;
