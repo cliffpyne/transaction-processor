@@ -79,10 +79,35 @@
 
   const pad2 = (n) => String(n).padStart(2, '0');
 
+  // Sheet's transaction_date is date-only; the actual clock time is embedded
+  // in the description. Two shapes we've seen:
+  //   NMB: "... 1207 19 44 35 agency ..."     — DDMM HH MM SS (space-separated)
+  //   Any: "... 19:44:35 ..."                 — plain HH:MM:SS
+  // Return {h, mi} or null.
+  const timeFromDescription = (desc) => {
+    if (!desc) return null;
+    const s = String(desc);
+    // Colon-separated HH:MM[:SS]
+    let m = s.match(/\b([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\b/);
+    if (m) return { h: +m[1], mi: +m[2] };
+    // NMB style: DDMM HH MM SS (four leading digits then three 2-digit groups)
+    m = s.match(/\b\d{4}\s+([01]?\d|2[0-3])\s+([0-5]\d)\s+([0-5]\d)\b/);
+    if (m) return { h: +m[1], mi: +m[2] };
+    // Bare HH MM SS (three 2-digit groups constrained to valid time)
+    m = s.match(/\b([01]?\d|2[0-3])\s+([0-5]\d)\s+([0-5]\d)\b/);
+    if (m) return { h: +m[1], mi: +m[2] };
+    return null;
+  };
+
   // Show either transaction_date (with time) or transaction_day (date only).
+  // If date-only, try to lift a time out of description.
   const fmtDateCell = (r) => {
     const p = parseTxnDate(r.transaction_date) || parseTxnDate(r.transaction_day);
     if (!p) return esc(r.transaction_date || r.transaction_day || '—');
+    if (p.h == null) {
+      const t = timeFromDescription(r.description);
+      if (t) { p.h = t.h; p.mi = t.mi; }
+    }
     const datePart = `${pad2(p.d)} ${MONTH_ABBR[p.mo]} ${p.y}`;
     if (p.h == null) return datePart;
     return `${datePart} <span class="text-secondary-foreground">·</span> ${pad2(p.h)}:${pad2(p.mi)}`;
