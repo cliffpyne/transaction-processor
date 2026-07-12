@@ -304,10 +304,17 @@ def customers_delete(row_id):
 
 
 # ── transactions (read + rescue) ─────────────────────────────────────────────
+# Garbage sheet rows sometimes land with bank='UNKNOWN' (migration default when
+# the bank cell is empty). Real transactions are always CRDB or NMB, so hide
+# UNKNOWN from the UI feed to keep the table clean.
+_TXN_VALID_ROW = ["bank=in.(CRDB,NMB)"]
+
+
 @ui.route('/api/transactions', methods=['GET'])
 @login_required
 def transactions_list():
-    return _paginated_query('transactions', TABLES['transactions'])
+    return _paginated_query('transactions', TABLES['transactions'],
+                            always_where=_TXN_VALID_ROW)
 
 
 # Search customers for the rescue picker. No product filter — an iPhone
