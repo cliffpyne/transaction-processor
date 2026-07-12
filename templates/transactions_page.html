@@ -94,11 +94,13 @@
          <div class="flex flex-wrap gap-2 items-center">
           <div class="flex items-center gap-1.5">
            <label class="text-sm text-secondary-foreground shrink-0">From</label>
-           <input class="kt-input h-8 text-sm shrink-0" id="txn_from" type="datetime-local" style="width:180px"/>
+           <input class="kt-input h-8 text-sm shrink-0 cursor-pointer" id="txn_from" type="datetime-local" style="width:200px"
+                  onclick="try{this.showPicker()}catch(e){}"/>
           </div>
           <div class="flex items-center gap-1.5">
            <label class="text-sm text-secondary-foreground shrink-0">To</label>
-           <input class="kt-input h-8 text-sm shrink-0" id="txn_to" type="datetime-local" style="width:180px"/>
+           <input class="kt-input h-8 text-sm shrink-0 cursor-pointer" id="txn_to" type="datetime-local" style="width:200px"
+                  onclick="try{this.showPicker()}catch(e){}"/>
           </div>
           <button class="kt-btn kt-btn-sm kt-btn-outline shrink-0" id="txn_range_clear">Clear</button>
          </div>
