@@ -21,9 +21,9 @@
   const $total   = document.getElementById('cust_total');
 
   const PRODUCT_LABEL = {
-    'pikipiki_records':  { label: 'Pikipiki Loan', badge: 'kt-badge-primary' },
-    'pikipiki_records2': { label: 'Pikipiki SAV',  badge: 'kt-badge-success' },
-    'IPHONE_RECORDS':    { label: 'iPhone',        badge: 'kt-badge-info' },
+    'BODA_RECORDS':   { label: 'Boda',   badge: 'kt-badge-primary' },
+    'SAVCOM_RECORDS': { label: 'Savcom', badge: 'kt-badge-success' },
+    'IPHONE_RECORDS': { label: 'iPhone', badge: 'kt-badge-info' },
   };
 
   const fmtDate = (iso) => {
