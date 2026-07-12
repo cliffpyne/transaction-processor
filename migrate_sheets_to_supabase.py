@@ -287,6 +287,13 @@ def _is_header_or_blank(row):
 MIGRATION_START_DAY = '2026-07-01'
 
 
+# Track every ref_number we've decided to keep this run so a re-appearing
+# ref (some tabs replay the same row across their sheets) can be dropped
+# on the client side — the partial UNIQUE index on ref_number would 409
+# the whole batch instead of merging.
+_SEEN_REFS: set[str] = set()
+
+
 def row_to_transaction(row, source_tab, source_sheet_id, variant):
     def cell(i):
         return row[i] if i < len(row) else None
@@ -330,6 +337,14 @@ def row_to_transaction(row, source_tab, source_sheet_id, variant):
     tx_day = parse_transaction_day(tx_date_text)
     if not tx_day or tx_day < MIGRATION_START_DAY:
         return None
+
+    # Dedupe by ref_number across the whole run so the partial UNIQUE index
+    # can't 409 an entire batch. Rows without a ref_number are excluded from
+    # the index and stay eligible.
+    if ref_number:
+        if ref_number in _SEEN_REFS:
+            return None
+        _SEEN_REFS.add(ref_number)
 
     return {
         'original_id':      original_id,

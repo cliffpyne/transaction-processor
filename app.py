@@ -9,7 +9,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import json
 import pickle
-from datetime import datetime
+from datetime import datetime, timedelta
 import pdfplumber  # For PDF extraction
 import supabase_writer  # Dual-write mirror to Supabase — no-op unless WRITE_TO_SUPABASE is set
 from auth import login_manager
@@ -3536,6 +3536,48 @@ def wipe_status():
         return jsonify({'error': 'unauthorized'}), 401
     with _WIPE_LOCK:
         return jsonify(dict(_WIPE_STATE))
+
+
+@app.route('/admin/daily-totals', methods=['GET'])
+def admin_daily_totals():
+    """Token-gated: sum(credit_amount) per (bank, transaction_day) for the
+    last N days so we can reconcile the DB against the sheet's daily totals.
+    Only counts PASSED-family rows (FAILED and ILIYOPATA excluded)."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    days = min(60, max(1, int(request.args.get('days', 10))))
+    from_day = (datetime.utcnow() - timedelta(days=days - 1)).strftime('%Y-%m-%d')
+
+    passed_tabs = (
+        'CRDBPASSED,CRDBSAVCOM,NMBPASSED,NMBSAVCOM,'
+        'IPHONEPASSED,BODAILIYOPATA,IPHONEILIYOPATA'
+    )
+    r = requests.get(
+        f'{url}/rest/v1/transactions'
+        f'?select=bank,transaction_day,credit_amount'
+        f'&transaction_day=gte.{from_day}'
+        f'&source_tab=in.({passed_tabs})'
+        f'&limit=100000',
+        headers={'apikey': key, 'Authorization': f'Bearer {key}'},
+        timeout=60,
+    )
+    if not r.ok:
+        return jsonify({'error': r.text[:400]}), 500
+    rows = r.json()
+    buckets: dict = {}
+    for row in rows:
+        b = (row.get('bank') or 'UNKNOWN').upper()
+        d = row.get('transaction_day') or 'null'
+        amt = float(row.get('credit_amount') or 0)
+        buckets.setdefault(b, {}).setdefault(d, 0.0)
+        buckets[b][d] += amt
+    # Round to 2 decimals
+    for b in buckets:
+        for d in buckets[b]:
+            buckets[b][d] = round(buckets[b][d], 2)
+    return jsonify({'from': from_day, 'buckets': buckets, 'total_rows': len(rows)})
 
 
 @app.route('/admin/tx-sample', methods=['GET'])
