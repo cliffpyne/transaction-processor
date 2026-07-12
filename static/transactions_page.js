@@ -357,16 +357,16 @@
     rescueBtn:    document.getElementById('td_rescue_btn'),
   };
 
-  // Avatar ring colour + icon key off the transaction state so the hero card
-  // reads at a glance (green tick for passed, red cross for failed, blue
-  // shield for iliyopata).
+  // Unisex avatar (ki-user silhouette). Only the ring colour + icon tint
+  // shift by state so the hero card reads at a glance without gendering
+  // the placeholder person.
   const avatarStyleFor = (source_tab) => {
     const s = String(source_tab || '').toUpperCase();
-    if (s.endsWith('FAILED'))    return { ring: 'border-destructive/40',        icon: 'ki-cross-circle',    tint: 'text-destructive' };
-    if (s.endsWith('ILIYOPATA')) return { ring: 'border-info/40',               icon: 'ki-shield-tick',     tint: 'text-info' };
+    if (s.endsWith('FAILED'))    return { ring: 'border-destructive/40', tint: 'text-destructive' };
+    if (s.endsWith('ILIYOPATA')) return { ring: 'border-info/40',        tint: 'text-info' };
     if (s.endsWith('PASSED') || s.endsWith('SAVCOM'))
-                                 return { ring: 'border-success/40',            icon: 'ki-check-circle',    tint: 'text-success' };
-    return { ring: 'border-border', icon: 'ki-financial-schedule', tint: 'text-secondary-foreground' };
+                                 return { ring: 'border-success/40',     tint: 'text-success' };
+    return { ring: 'border-border', tint: 'text-secondary-foreground' };
   };
 
   const populateDetails = (r) => {
@@ -381,9 +381,10 @@
     $td.heroBankWrap.innerHTML   = `<span class="kt-badge kt-badge-sm kt-badge-outline ${bk.cls}">${esc(bk.label)}</span>`;
     $td.heroStatusWrap.innerHTML = `<span class="kt-badge kt-badge-sm kt-badge-outline ${st.cls}">${esc(st.label)}</span>`;
     $td.heroDate.innerHTML       = fmtDate(r.transaction_date, r.description);
-    // Reset ring class then set the state colour
-    $td.avatarWrap.className = `flex items-center justify-center rounded-full border-2 bg-background size-[92px] shrink-0 ${av.ring}`;
-    $td.avatarIcon.className = `ki-filled ${av.icon} text-3xl ${av.tint}`;
+    // Reset ring class then set the state colour. Icon is always the
+    // unisex ki-user silhouette; only the tint changes.
+    $td.avatarWrap.className = `flex items-center justify-center rounded-full border-4 bg-background size-[128px] shrink-0 ${av.ring}`;
+    $td.avatarIcon.className = `ki-filled ki-user text-5xl ${av.tint}`;
 
     // Amount
     $td.amount.textContent = fmtMoney(r.credit_amount);

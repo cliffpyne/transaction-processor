@@ -3538,6 +3538,27 @@ def wipe_status():
         return jsonify(dict(_WIPE_STATE))
 
 
+@app.route('/admin/tx-sample', methods=['GET'])
+def admin_tx_sample():
+    """Token-gated: return the top N transactions by transaction_day so
+    we can eyeball what's actually in the column that's driving the sort."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    n = min(20, max(1, int(request.args.get('n', 5))))
+    r = requests.get(
+        f'{url}/rest/v1/transactions'
+        f'?select=id,bank,source_tab,transaction_date,transaction_day,'
+        f'ref_number,description,created_at'
+        f'&order=transaction_day.desc.nullslast,transaction_date.desc.nullslast'
+        f'&limit={n}',
+        headers={'apikey': key, 'Authorization': f'Bearer {key}'},
+        timeout=30,
+    )
+    return (r.text, r.status_code, {'Content-Type': 'application/json'})
+
+
 @app.route('/admin/count', methods=['GET'])
 def admin_count():
     """Token-gated row counts for the core tables. Used to diagnose wipe /
