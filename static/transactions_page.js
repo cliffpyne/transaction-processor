@@ -21,6 +21,9 @@
     bank:    '',
     status:  '',
     sort:    'id.desc',
+    // Date range — inclusive gte/lte on transaction_day. ISO date strings.
+    dayFrom: '',
+    dayTo:   '',
     total:   0,
   };
 
@@ -34,6 +37,10 @@
   const $sort    = document.getElementById('txn_sort');
   const $perpage = document.getElementById('txn_perpage');
   const $tabs    = document.getElementById('txn_producttabs');
+  const $quick   = document.getElementById('txn_quickfilters');
+  const $from    = document.getElementById('txn_from');
+  const $to      = document.getElementById('txn_to');
+  const $clear   = document.getElementById('txn_range_clear');
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -44,11 +51,41 @@
     return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
   };
 
-  const fmtDate = (d) => {
-    if (!d) return '—';
-    const dt = new Date(d + (d.length === 10 ? 'T00:00:00Z' : ''));
-    if (isNaN(dt)) return d;
-    return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  // Parse the sheet's transaction_date text. Common shapes:
+  //   "9-Jul-26 07:35:12"        (unpadded day, 2-digit year, 24h time)
+  //   "09-Jul-2026 07:35:12"     (padded day, 4-digit year)
+  //   "2026-07-09 07:35:12"      (ISO-ish)
+  //   "9-Jul-26"                 (date only)
+  // Returns {date: 'DD MMM YYYY', time: 'HH:MM' | null} or null on failure.
+  const MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+  const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  const parseTxnDate = (raw) => {
+    if (!raw) return null;
+    const s = String(raw).trim();
+    // ISO YYYY-MM-DD[ HH:MM[:SS]]
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (m) return { y: +m[1], mo: +m[2] - 1, d: +m[3], h: m[4] ? +m[4] : null, mi: m[5] ? +m[5] : 0 };
+    // DD-Mon-YY[YY] [HH:MM[:SS]]
+    m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (m) {
+      const mo = MONTHS[m[2].toLowerCase()];
+      if (mo == null) return null;
+      let y = +m[3]; if (y < 100) y += 2000;
+      return { y, mo, d: +m[1], h: m[4] ? +m[4] : null, mi: m[5] ? +m[5] : 0 };
+    }
+    return null;
+  };
+
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  // Show either transaction_date (with time) or transaction_day (date only).
+  const fmtDateCell = (r) => {
+    const p = parseTxnDate(r.transaction_date) || parseTxnDate(r.transaction_day);
+    if (!p) return esc(r.transaction_date || r.transaction_day || '—');
+    const datePart = `${pad2(p.d)} ${MONTH_ABBR[p.mo]} ${p.y}`;
+    if (p.h == null) return datePart;
+    return `${datePart} <span class="text-secondary-foreground">·</span> ${pad2(p.h)}:${pad2(p.mi)}`;
   };
 
   // source_tab → status pill
@@ -84,7 +121,7 @@
         <td>
           <span class="kt-badge kt-badge-sm kt-badge-outline ${st.cls}">${esc(st.label)}</span>
         </td>
-        <td class="text-foreground font-normal">${esc(fmtDate(r.transaction_day || r.transaction_date))}</td>
+        <td class="text-foreground font-normal">${fmtDateCell(r)}</td>
         <td>
           <span class="kt-badge kt-badge-sm kt-badge-outline ${bk.cls}">${esc(bk.label)}</span>
         </td>
@@ -158,6 +195,18 @@
       params.set(`filter[${fi}][field]`, 'bank');
       params.set(`filter[${fi}][value]`, state.bank);
       params.set(`filter[${fi}][type]`,  'eq');
+      fi++;
+    }
+    if (state.dayFrom) {
+      params.set(`filter[${fi}][field]`, 'transaction_day');
+      params.set(`filter[${fi}][value]`, state.dayFrom);
+      params.set(`filter[${fi}][type]`,  'gte');
+      fi++;
+    }
+    if (state.dayTo) {
+      params.set(`filter[${fi}][field]`, 'transaction_day');
+      params.set(`filter[${fi}][value]`, state.dayTo);
+      params.set(`filter[${fi}][type]`,  'lte');
       fi++;
     }
 
@@ -248,6 +297,61 @@
     state.page = 1;
     load();
   });
+
+  // ── Quick date filters ────────────────────────────────────────────────────
+  // Returns YYYY-MM-DD for a Date object.
+  const toISODate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+  const applyQuickRange = (range) => {
+    const now = new Date();
+    let from = '', to = '';
+    if (range === 'today') {
+      from = to = toISODate(now);
+    } else if (range === 'yesterday') {
+      const y = new Date(now); y.setDate(y.getDate() - 1);
+      from = to = toISODate(y);
+    } else if (range === '7d') {
+      const s = new Date(now); s.setDate(s.getDate() - 6);
+      from = toISODate(s); to = toISODate(now);
+    } else if (range === 'month') {
+      from = toISODate(new Date(now.getFullYear(), now.getMonth(), 1));
+      to   = toISODate(now);
+    } else if (range === 'last_month') {
+      from = toISODate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+      to   = toISODate(new Date(now.getFullYear(), now.getMonth(), 0));
+    } else if (range === 'all') {
+      from = to = '';
+    }
+    state.dayFrom = from;
+    state.dayTo   = to;
+    state.page    = 1;
+    $from.value   = from ? `${from}T00:00` : '';
+    $to.value     = to   ? `${to}T23:59`   : '';
+    // Toggle active button styling
+    $quick.querySelectorAll('button[data-range]').forEach(b => {
+      b.classList.toggle('kt-btn-primary', b.dataset.range === range);
+    });
+    load();
+  };
+
+  $quick.querySelectorAll('button[data-range]').forEach(b => {
+    b.addEventListener('click', () => applyQuickRange(b.dataset.range));
+  });
+
+  // Custom range inputs — datetime-local. We filter by transaction_day (date
+  // only), so time is ignored server-side but kept visible for the user.
+  const onRangeInput = () => {
+    state.dayFrom = $from.value ? $from.value.slice(0, 10) : '';
+    state.dayTo   = $to.value   ? $to.value.slice(0, 10)   : '';
+    state.page    = 1;
+    // Clear the quick-button active styling once user types a custom range.
+    $quick.querySelectorAll('button[data-range]').forEach(b => b.classList.remove('kt-btn-primary'));
+    load();
+  };
+  $from.addEventListener('change', onRangeInput);
+  $to.addEventListener('change', onRangeInput);
+
+  $clear.addEventListener('click', () => applyQuickRange('all'));
 
   load();
 })();

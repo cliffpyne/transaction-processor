@@ -62,6 +62,24 @@
      <div class="kt-container-fixed">
       <div class="grid gap-5 lg:gap-7.5">
        <div class="kt-card kt-card-grid min-w-full">
+        <!-- Quick date filters -->
+        <div class="kt-card-header py-3 flex-wrap gap-3">
+         <div class="flex flex-wrap gap-2 items-center" id="txn_quickfilters">
+          <button class="kt-btn kt-btn-sm kt-btn-outline" data-range="today">Today</button>
+          <button class="kt-btn kt-btn-sm kt-btn-outline" data-range="yesterday">Yesterday</button>
+          <button class="kt-btn kt-btn-sm kt-btn-outline" data-range="7d">Last 7 days</button>
+          <button class="kt-btn kt-btn-sm kt-btn-outline" data-range="month">This month</button>
+          <button class="kt-btn kt-btn-sm kt-btn-outline" data-range="last_month">Last month</button>
+          <button class="kt-btn kt-btn-sm kt-btn-outline kt-btn-primary" data-range="all">All time</button>
+         </div>
+         <div class="flex flex-wrap gap-2 items-center">
+          <label class="text-sm text-secondary-foreground">From</label>
+          <input class="kt-input h-8 text-sm" id="txn_from" type="datetime-local"/>
+          <label class="text-sm text-secondary-foreground">To</label>
+          <input class="kt-input h-8 text-sm" id="txn_to" type="datetime-local"/>
+          <button class="kt-btn kt-btn-sm kt-btn-outline" id="txn_range_clear">Clear</button>
+         </div>
+        </div>
         <div class="kt-card-header flex-wrap gap-2">
          <h3 class="kt-card-title text-sm" id="txn_showing">
           Loading transactions…

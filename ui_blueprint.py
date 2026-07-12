@@ -183,6 +183,9 @@ def _paginated_query(table: str, cfg: dict, always_where=None):
                 items = ','.join(v.strip() for v in value.split(',') if v.strip())
                 if items:
                     parts.append(f'{field}=in.({items})')
+            elif ftype in ('gte', 'lte', 'gt', 'lt', 'neq'):
+                # Range/comparison — PostgREST: field=<op>.<value>
+                parts.append(f'{field}={ftype}.{value}')
             else:
                 parts.append(f'{field}=eq.{value}')
         i += 1
