@@ -12,6 +12,7 @@ import pickle
 from datetime import datetime, timedelta
 import pdfplumber  # For PDF extraction
 import supabase_writer  # Dual-write mirror to Supabase — no-op unless WRITE_TO_SUPABASE is set
+import iliyopata_writer  # Mirror rescued rows into ILIYOPATA tab on the bank sheet
 from auth import login_manager
 from ui_blueprint import ui as ui_blueprint
 
@@ -3961,10 +3962,13 @@ def sms_rescue():
         return jsonify({'error': 'supabase_env_missing'}), 500
     hdr = {'apikey': key, 'Authorization': f'Bearer {key}'}
 
-    # 1. Fetch the transaction by ref_number
+    # 1. Fetch the transaction by ref_number — pull every field the
+    #    iliyopata sheet append needs (description, amount, identifier,
+    #    customer_id) so we don't have to re-fetch after PATCH.
     tx_r = requests.get(
         f'{url}/rest/v1/transactions?ref_number=eq.{ref}'
-        '&select=id,source_tab,transaction_date,customer_name,bank',
+        '&select=id,source_tab,transaction_date,customer_name,bank,'
+        'description,credit_amount,identifier,ref_number,customer_id',
         headers=hdr, timeout=15,
     )
     if not tx_r.ok:
@@ -3991,10 +3995,11 @@ def sms_rescue():
                         'source_tab': tx['source_tab'],
                         'row_id': tx['id']}), 409
 
-    # 2. Fetch the customer by plate
+    # 2. Fetch the customer by plate (pull plate + customer_id for the
+    #    ILIYOPATA sheet append)
     cust_r = requests.get(
         f'{url}/rest/v1/customers?plate=eq.{plate}'
-        '&select=id,name,source_tab&limit=1',
+        '&select=id,name,plate,customer_id,source_tab&limit=1',
         headers=hdr, timeout=15,
     )
     if not cust_r.ok:
@@ -4038,14 +4043,26 @@ def sms_rescue():
                           plate, ref, tx['id'], None, pr.text[:400])
         return jsonify({'error': pr.text[:400]}), 500
 
+    # 4. Mirror the rescue into the bank sheet's ILIYOPATA tab.
+    #    Best-effort — a Google API hiccup here is logged in the sms_event
+    #    error_detail but does not roll back the DB write above.
+    sheet_result = iliyopata_writer.append_iliyopata_row(
+        origin_source_tab=tx['source_tab'],
+        tx=tx,
+        customer=cust,
+        new_date_text=update['transaction_date'],
+    )
+    sheet_err = None if sheet_result.get('ok') else sheet_result.get('error')
+
     _sms_event_insert(sender, msg, received_at, 200, 'rescued',
-                      plate, ref, tx['id'], target_tab, None)
+                      plate, ref, tx['id'], target_tab, sheet_err)
     return jsonify({
         'rescued': True,
         'row_id': tx['id'],
         'source_tab': target_tab,
         'plate': plate,
         'ref': ref,
+        'sheet': sheet_result,
     })
 
 

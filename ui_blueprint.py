@@ -378,15 +378,17 @@ def transactions_rescue(row_id):
     if not customer_id:
         return jsonify({'error': 'customer_id required'}), 400
 
-    # Fetch txn + customer in parallel
+    # Fetch txn + customer — pull every field the ILIYOPATA sheet append
+    # needs so we don't have to re-fetch after PATCH.
     tx_r = requests.get(
         f'{SUPABASE_URL}/rest/v1/transactions?id=eq.{row_id}'
-        '&select=id,source_tab,transaction_date,customer_name,ref_number',
+        '&select=id,source_tab,transaction_date,customer_name,ref_number,'
+        'bank,description,credit_amount,identifier,customer_id',
         headers=_H, timeout=15,
     )
     cust_r = requests.get(
         f'{SUPABASE_URL}/rest/v1/customers?id=eq.{customer_id}'
-        '&select=id,name,source_tab',
+        '&select=id,name,plate,customer_id,source_tab',
         headers=_H, timeout=15,
     )
     if not tx_r.ok or not cust_r.ok:
@@ -429,6 +431,20 @@ def transactions_rescue(row_id):
         return jsonify({'error': r.text[:400]}), 500
     after = (r.json() or [None])[0]
     _audit('RESCUE', 'transactions', row_id, before=tx, after=after)
+
+    # Mirror the rescue into the bank sheet's ILIYOPATA tab. Best-effort:
+    # a Google API hiccup doesn't roll back the DB write above; we return
+    # the sheet result inline so the UI can toast a warning if wanted.
+    import iliyopata_writer
+    now_stamp = now.strftime('%d.%m.%Y %H:%M:%S')
+    sheet_result = iliyopata_writer.append_iliyopata_row(
+        origin_source_tab=tx['source_tab'],
+        tx=tx,
+        customer=cust,
+        new_date_text=now_stamp,
+    )
+    if isinstance(after, dict):
+        after['sheet'] = sheet_result
     return jsonify(after)
 
 
