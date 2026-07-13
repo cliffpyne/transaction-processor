@@ -15,7 +15,7 @@ Table access matrix:
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import bcrypt
 import requests
@@ -412,20 +412,23 @@ def transactions_rescue(row_id):
         return jsonify({'error': 'unknown customer source_tab',
                         'source_tab': cust['source_tab']}), 400
 
-    now = datetime.utcnow()
-    now_iso   = now.strftime('%Y-%m-%d %H:%M:%S')
-    today_iso = now.strftime('%Y-%m-%d')
+    # Display fields stamped in EAT (Tanzania, UTC+3); timestamptz fields
+    # (moved_at, rescue_locked_at) stay in UTC ISO.
+    now_utc = datetime.utcnow()
+    now_eat = now_utc + timedelta(hours=3)
+    now_disp  = now_eat.strftime('%d.%m.%Y %H:%M:%S')
+    today_eat = now_eat.strftime('%Y-%m-%d')
 
     update = {
         'old_transaction_date': tx.get('transaction_date'),
-        'transaction_date':     now_iso,
-        'transaction_day':      today_iso,
+        'transaction_date':     now_disp,
+        'transaction_day':      today_eat,
         'customer_name':        cust.get('name'),
         'source_tab':           target_tab,
         'moved_by_user_id':     int(current_user.id),
         'moved_by_username':    current_user.username,
-        'moved_at':             now.isoformat() + 'Z',
-        'rescue_locked_at':     now.isoformat() + 'Z',
+        'moved_at':             now_utc.isoformat() + 'Z',
+        'rescue_locked_at':     now_utc.isoformat() + 'Z',
     }
     # Atomic conditional PATCH — only touches the row if it isn't
     # already locked. Simultaneous UI + SMS rescues on the same id
@@ -449,12 +452,11 @@ def transactions_rescue(row_id):
     # a Google API hiccup doesn't roll back the DB write above; we return
     # the sheet result inline so the UI can toast a warning if wanted.
     import iliyopata_writer
-    now_stamp = now.strftime('%d.%m.%Y %H:%M:%S')
     sheet_result = iliyopata_writer.append_iliyopata_row(
         origin_source_tab=tx['source_tab'],
         tx=tx,
         customer=cust,
-        new_date_text=now_stamp,
+        new_date_text=now_disp,
     )
     if isinstance(after, dict):
         after['sheet'] = sheet_result

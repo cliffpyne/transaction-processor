@@ -30,7 +30,6 @@ class SmsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, p
         val api = ApiFactory.build(settings.serverUrl, settings.token)
         val dao = QueueDb.get(ctx).dao()
 
-        var didAnyRetryableFail = false
         while (true) {
             val batch = dao.nextBatch()
             if (batch.isEmpty()) break
@@ -39,8 +38,7 @@ class SmsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, p
                     postOne(api, entry)
                 } catch (t: Throwable) {
                     Log.w(TAG, "network error on id=${entry.id}: ${t.message}")
-                    didAnyRetryableFail = true
-                    continue
+                    continue  // leave the row pending; next drain will retry
                 }
                 dao.recordAttempt(entry.id, outcome.status, outcome.error, outcome.terminal)
                 if (outcome.deleteSms) {
@@ -49,10 +47,13 @@ class SmsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, p
                     // which is fine, just leaves the SMS in the inbox.
                     deleteSms(ctx, entry.body, entry.sender)
                 }
-                if (outcome.retryable) didAnyRetryableFail = true
             }
         }
-        return if (didAnyRetryableFail) Result.retry() else Result.success()
+        // Always success — never trigger WorkManager exponential backoff.
+        // Rows that didn't reach a terminal state stay in Room with
+        // terminal='' and get re-tried whenever the next drain fires
+        // (new SMS arrival, boot, or the user tapping "Drain queue now").
+        return Result.success()
     }
 
     private suspend fun postOne(api: SmsRescueApi, entry: QueueEntry): PostOutcome {
@@ -111,7 +112,10 @@ class SmsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, p
         private const val TAG = "SmsWorker"
         private const val UNIQUE_NAME = "sms-drain"
 
-        /** One-shot drain. WorkManager coalesces repeated calls. */
+        /** One-shot drain. ExistingWorkPolicy.REPLACE cancels any pending
+         *  or backed-off worker and starts a fresh one immediately —
+         *  a user tapping "Drain queue now" always fires this instant,
+         *  never waits for an exponential-backoff cooldown. */
         fun enqueueDrain(ctx: Context) {
             val req = OneTimeWorkRequestBuilder<SmsWorker>()
                 .setConstraints(
@@ -119,10 +123,9 @@ class SmsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, p
                         .setRequiredNetworkType(NetworkType.CONNECTED)
                         .build()
                 )
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
             WorkManager.getInstance(ctx).enqueueUniqueWork(
-                UNIQUE_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, req,
+                UNIQUE_NAME, ExistingWorkPolicy.REPLACE, req,
             )
         }
     }

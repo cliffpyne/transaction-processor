@@ -4026,16 +4026,20 @@ def sms_rescue():
     #    the row if it hasn't been locked yet, so simultaneous UI + SMS
     #    rescues on the same row can't both succeed. If the update
     #    matches zero rows, someone else locked it first.
-    now = datetime.utcnow()
+    # Timestamps: transaction_date/day are display fields — stamp them
+    # in EAT (Tanzania, UTC+3) so the UI shows local wall-clock. moved_at
+    # is a real timestamptz so keep it in UTC ISO.
+    now_utc = datetime.utcnow()
+    now_eat = now_utc + timedelta(hours=3)
     update = {
         'old_transaction_date': tx.get('transaction_date'),
-        'transaction_date':     now.strftime('%d.%m.%Y %H:%M:%S'),
-        'transaction_day':      now.strftime('%Y-%m-%d'),
+        'transaction_date':     now_eat.strftime('%d.%m.%Y %H:%M:%S'),
+        'transaction_day':      now_eat.strftime('%Y-%m-%d'),
         'customer_name':        cust['name'],
         'source_tab':           target_tab,
         'moved_by_username':    'sms_rescue',
-        'moved_at':             now.isoformat() + 'Z',
-        'rescue_locked_at':     now.isoformat() + 'Z',
+        'moved_at':             now_utc.isoformat() + 'Z',
+        'rescue_locked_at':     now_utc.isoformat() + 'Z',
     }
     pr = requests.patch(
         f'{url}/rest/v1/transactions?id=eq.{tx["id"]}'
