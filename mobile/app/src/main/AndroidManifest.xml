@@ -24,6 +24,17 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Required so Android lists this app in the default-SMS-role
+                 prompt. We don't compose SMS; the activity just opens its
+                 normal UI when someone taps "message" against our app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SENDTO" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="sms" />
+                <data android:scheme="smsto" />
+                <data android:scheme="mms" />
+                <data android:scheme="mmsto" />
+            </intent-filter>
         </activity>
 
         <!-- Fires whenever a new SMS arrives. Enqueues a WorkManager job
