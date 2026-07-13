@@ -1261,18 +1261,17 @@ def load_all_customers(service):
                     if phone_clean:
                         phone_lookup[phone_clean] = name_col
             n_rows = len(values)
-            print(f"Loaded {len(phone_lookup)} phones and {len(plate_lookup)} plates from pikipiki records (raw rows={n_rows}, attempt {attempt})")
             if n_rows < LOOKUP_MIN_ROWS:
                 # Sheets returned a truncated payload — retry rather than
                 # process with an incomplete lookup that would misroute
-                # legit transactions to FAILED.
-                print(f"⚠️ pikipiki records payload too small ({n_rows} < {LOOKUP_MIN_ROWS}) — retrying")
+                # legit transactions to FAILED. Log ONLY when suspicious.
+                print(f"⚠️ pikipiki records truncated ({n_rows} rows, attempt {attempt}) — retrying")
                 _time.sleep(2 * attempt)
                 continue
             return phone_lookup, plate_lookup
         except Exception as e:
             last_err = e
-            print(f"Error loading customers (attempt {attempt}): {e}")
+            print(f"pikipiki records load error (attempt {attempt}): {e}")
             _time.sleep(2 * attempt)
     print(f"❌ load_all_customers gave up after 4 attempts, last error: {last_err}")
     return {}, {}
