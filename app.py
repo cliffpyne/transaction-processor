@@ -1441,30 +1441,40 @@ def get_existing_refs(service, sheet_name='PASSED', refs_only=False):
         return set(), set()
 
 def get_last_id(service, sheet_name):
-    """Get the last ID from the sheet"""
+    """Get the last ID from the sheet.
+
+    Reads column A with valueRenderOption=UNFORMATTED_VALUE so numeric
+    cells come back as numbers even when Sheets auto-formatted them as
+    dates (a large integer like 51310 displays as '23-Jun-40' under a
+    date format, and the default FORMATTED_VALUE read would return that
+    string, break int(), and the next write would land another integer
+    that also displays as a date, cascading forever).
+    """
     try:
         target_sheet_id, actual_tab = _resolve_sheet(sheet_name)
         sheet = service.spreadsheets()
         result = sheet.values().get(
             spreadsheetId=target_sheet_id,
-            range=f'{actual_tab}!A:A'
+            range=f'{actual_tab}!A:A',
+            valueRenderOption='UNFORMATTED_VALUE',
         ).execute()
-        
+
         values = result.get('values', [])
-        
+
         if len(values) > 1:
             for row in reversed(values[1:]):
-                if row and len(row) > 0 and row[0]:
+                if row and len(row) > 0 and row[0] not in (None, ''):
+                    v = row[0]
                     try:
-                        last_id = int(row[0])
+                        last_id = int(v)
                         print(f"Last ID in {sheet_name}: {last_id}")
                         return last_id
                     except (ValueError, TypeError):
                         continue
-        
+
         print(f"No existing IDs found in {sheet_name}, starting from 0")
         return 0
-        
+
     except Exception as e:
         print(f"Error getting last ID: {e}")
         return 0
