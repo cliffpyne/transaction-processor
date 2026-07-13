@@ -3849,10 +3849,15 @@ _SMS_REF_PATTERNS = [
 
 
 def _extract_ref_from_sms(msg, plate=None):
-    """Find the alphanumeric token most likely to be the bank reference.
-    Strips the plate substring first (so it doesn't compete), then prefers
-    tokens matching known bank shapes; falls back to the longest token
-    ≥10 chars."""
+    """Find the token most likely to be the bank reference.
+    Strips the plate substring first (so it doesn't compete), then:
+      1. Whitespace-preserving token scan (10+ alphanumeric chars).
+         Prefers tokens matching known bank shapes.
+      2. Whitespace-collapsed hex scan — if the customer split the ref
+         with a space, e.g. '19f468a9fbad 249', we still catch the
+         full 15-char ref '19f468a9fbad249'.
+      3. Longest whitespace-preserving token as last resort.
+    """
     working = msg
     if plate:
         working = re.sub(re.escape(plate), ' ', working, flags=re.IGNORECASE)
@@ -3860,15 +3865,31 @@ def _extract_ref_from_sms(msg, plate=None):
     working = re.sub(r'MC\s*\d{3}\s*[A-Z]{3}', ' ', working, flags=re.IGNORECASE)
     working = re.sub(r'\b\d{3}\s+[A-Z]{3}\b', ' ', working, flags=re.IGNORECASE)
     working = re.sub(r'\b[A-Z]{3}\s+\d{3}\b', ' ', working, flags=re.IGNORECASE)
+
     tokens = re.findall(r'[A-Za-z0-9]{10,}', working)
-    if not tokens:
-        return None
     for pat in _SMS_REF_PATTERNS:
         rgx = re.compile(pat, re.IGNORECASE)
         for t in tokens:
             if rgx.match(t):
                 return t
-    return max(tokens, key=len)
+
+    # Whitespace-collapsed hex scan — catches split refs like
+    # '19f468a9fbad 249' that customers sometimes type with a stray
+    # space. Only matches hex (bank refs are hex or PS-prefixed digits)
+    # so we don't accidentally join two unrelated tokens across
+    # sentence boundaries.
+    compressed = re.sub(r'\s+', '', working)
+    hex_matches = re.findall(r'[a-fA-F0-9]{12,}', compressed)
+    if hex_matches:
+        # Prefer 15-16 char hex (typical bank ref length); else the longest.
+        for h in hex_matches:
+            if 12 <= len(h) <= 32:
+                return h
+        return max(hex_matches, key=len)
+
+    if tokens:
+        return max(tokens, key=len)
+    return None
 
 
 _ILIYOPATA_TARGET_FROM_CUSTOMER = {
