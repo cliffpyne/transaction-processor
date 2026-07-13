@@ -11,8 +11,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Fires for every incoming SMS. Aggregates multi-part messages by sender,
- * checks the sender whitelist, appends to Room, then kicks the drain worker.
+ * Fires for every incoming SMS. POSTs the message straight to
+ * /api/sms-rescue from the receiver's async block — no Room round-trip,
+ * no WorkManager delay. Only if the POST returns a network failure
+ * (server unreachable, timeout, 5xx) does the row get queued for the
+ * SmsWorker drainer to retry later.
  */
 class SmsReceiver : BroadcastReceiver() {
 
@@ -20,23 +23,45 @@ class SmsReceiver : BroadcastReceiver() {
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
         if (messages.isEmpty()) return
         val settings = SettingsRepo(context)
-        // Multi-part SMS: same sender, concat body
         val sender = messages.first().originatingAddress ?: return
         if (!settings.senderAllowed(sender)) return
         val body = messages.joinToString(separator = "") { it.messageBody ?: "" }
         if (body.isBlank()) return
 
+        val entry = QueueEntry(
+            sender = sender,
+            body = body,
+            receivedAt = System.currentTimeMillis(),
+        )
+
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                QueueDb.get(context).dao().insert(
-                    QueueEntry(
-                        sender = sender,
-                        body = body,
-                        receivedAt = System.currentTimeMillis(),
-                    )
+                val api = SmsPusher.api(context)
+                if (api == null) {
+                    // Settings not filled in yet — queue for later drain.
+                    QueueDb.get(context).dao().insert(entry)
+                    return@launch
+                }
+                val outcome = SmsPusher.postOne(api, entry)
+                if (outcome.networkFailure) {
+                    // Server unreachable / timeout — queue and let the
+                    // WorkManager drainer retry with backoff constraints.
+                    QueueDb.get(context).dao().insert(entry)
+                    SmsWorker.enqueueDrain(context)
+                    return@launch
+                }
+                // Terminal outcome landed — record it and optionally delete
+                // the SMS. Room row is inserted only for the audit trail
+                // (queue view / stats); it never re-drains because terminal
+                // is already set.
+                val id = QueueDb.get(context).dao().insert(entry)
+                QueueDb.get(context).dao().recordAttempt(
+                    id, outcome.status, outcome.error, outcome.terminal,
                 )
-                SmsWorker.enqueueDrain(context)
+                if (outcome.deleteSms) {
+                    SmsPusher.deleteFromInbox(context, entry.sender, entry.body)
+                }
             } finally {
                 pending.finish()
             }
