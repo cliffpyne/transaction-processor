@@ -107,8 +107,15 @@ class MainActivity : AppCompatActivity() {
         permissionLauncher.launch(need.toTypedArray())
     }
 
-    private fun isDefaultSmsApp(): Boolean =
-        Telephony.Sms.getDefaultSmsPackage(this) == packageName
+    private fun isDefaultSmsApp(): Boolean {
+        // On Android 10+ RoleManager is the source of truth; on Samsung
+        // getDefaultSmsPackage() can return null while the role is held.
+        if (Build.VERSION.SDK_INT >= 29) {
+            val rm = getSystemService(RoleManager::class.java)
+            if (rm != null && rm.isRoleHeld(RoleManager.ROLE_SMS)) return true
+        }
+        return Telephony.Sms.getDefaultSmsPackage(this) == packageName
+    }
 
     private fun becomeDefaultSmsApp() {
         if (Build.VERSION.SDK_INT >= 29) {
