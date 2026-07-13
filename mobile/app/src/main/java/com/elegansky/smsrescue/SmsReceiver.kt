@@ -1,8 +1,10 @@
 package com.elegansky.smsrescue
 
+import android.app.role.RoleManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.provider.Telephony
 import com.elegansky.smsrescue.db.QueueDb
 import com.elegansky.smsrescue.db.QueueEntry
@@ -16,10 +18,23 @@ import kotlinx.coroutines.launch
  * no WorkManager delay. Only if the POST returns a network failure
  * (server unreachable, timeout, 5xx) does the row get queued for the
  * SmsWorker drainer to retry later.
+ *
+ * Android fires SMS_RECEIVED to every app with RECEIVE_SMS permission,
+ * AND SMS_DELIVER exclusively to the default SMS app. When we're
+ * the default, both broadcasts arrive here → we'd double-post.
+ * SmsReceiver bails on SMS_RECEIVED when we're default; only
+ * SmsDeliverReceiver drives the pipeline in that case.
  */
 class SmsReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION
+            && isDefaultSmsApp(context)
+        ) return
+        handle(context, intent)
+    }
+
+    fun handle(context: Context, intent: Intent) {
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
         if (messages.isEmpty()) return
         val settings = SettingsRepo(context)
@@ -39,22 +54,15 @@ class SmsReceiver : BroadcastReceiver() {
             try {
                 val api = SmsPusher.api(context)
                 if (api == null) {
-                    // Settings not filled in yet — queue for later drain.
                     QueueDb.get(context).dao().insert(entry)
                     return@launch
                 }
                 val outcome = SmsPusher.postOne(api, entry)
                 if (outcome.networkFailure) {
-                    // Server unreachable / timeout — queue and let the
-                    // WorkManager drainer retry with backoff constraints.
                     QueueDb.get(context).dao().insert(entry)
                     SmsWorker.enqueueDrain(context)
                     return@launch
                 }
-                // Terminal outcome landed — record it and optionally delete
-                // the SMS. Room row is inserted only for the audit trail
-                // (queue view / stats); it never re-drains because terminal
-                // is already set.
                 val id = QueueDb.get(context).dao().insert(entry)
                 QueueDb.get(context).dao().recordAttempt(
                     id, outcome.status, outcome.error, outcome.terminal,
@@ -65,6 +73,15 @@ class SmsReceiver : BroadcastReceiver() {
             } finally {
                 pending.finish()
             }
+        }
+    }
+
+    private fun isDefaultSmsApp(ctx: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= 29) {
+            ctx.getSystemService(RoleManager::class.java)
+                ?.isRoleHeld(RoleManager.ROLE_SMS) == true
+        } else {
+            Telephony.Sms.getDefaultSmsPackage(ctx) == ctx.packageName
         }
     }
 }
