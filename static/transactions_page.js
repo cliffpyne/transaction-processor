@@ -322,6 +322,11 @@
 
   // ── Rescue modal ────────────────────────────────────────────────────────
   const $modal    = document.getElementById('rescue_backdrop');
+  // ktui's drawer overlay covers everything inside <main>. Detach the
+  // modal to <body> so it can render above the drawer backdrop.
+  if ($modal && $modal.parentElement !== document.body) {
+    document.body.appendChild($modal);
+  }
   const $rSearch  = document.getElementById('rescue_search');
   const $rResults = document.getElementById('rescue_results');
   const $rConfirm = document.getElementById('rescue_confirm');

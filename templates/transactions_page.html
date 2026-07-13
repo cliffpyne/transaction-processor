@@ -373,8 +373,10 @@
      </div>
      <!-- End of Transaction Details Drawer -->
 
-     <!-- Rescue modal — pick a customer for a FAILED transaction -->
-     <div class="fixed inset-0 z-50 hidden bg-black/40 items-center justify-center p-4" id="rescue_backdrop">
+     <!-- Rescue modal — pick a customer for a FAILED transaction.
+          JS moves this element to <body> on load so it renders above
+          ktui's drawer overlay (which covers everything inside <main>). -->
+     <div class="fixed inset-0 hidden bg-black/60 items-center justify-center p-4" id="rescue_backdrop" style="z-index:9999">
       <div class="bg-background rounded-lg shadow-2xl w-full max-w-[520px] p-5 border border-border">
        <div class="flex items-start justify-between mb-4">
         <div>
