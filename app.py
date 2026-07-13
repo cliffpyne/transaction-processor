@@ -3968,7 +3968,8 @@ def sms_rescue():
     tx_r = requests.get(
         f'{url}/rest/v1/transactions?ref_number=eq.{ref}'
         '&select=id,source_tab,transaction_date,customer_name,bank,'
-        'description,credit_amount,identifier,ref_number,customer_id',
+        'description,credit_amount,identifier,ref_number,customer_id,'
+        'rescue_locked_at',
         headers=hdr, timeout=15,
     )
     if not tx_r.ok:
@@ -3982,7 +3983,7 @@ def sms_rescue():
         return jsonify({'error': 'ref_not_found',
                         'ref': ref, 'plate': plate}), 404
     tx = tx_rows[0]
-    if tx['source_tab'] in {'BODAILIYOPATA', 'IPHONEILIYOPATA'}:
+    if tx.get('rescue_locked_at') or tx['source_tab'] in {'BODAILIYOPATA', 'IPHONEILIYOPATA'}:
         _sms_event_insert(sender, msg, received_at, 409, 'already_rescued',
                           plate, ref, tx['id'], tx['source_tab'], None)
         return jsonify({'error': 'already_rescued',
@@ -4020,7 +4021,11 @@ def sms_rescue():
         return jsonify({'error': 'unknown_customer_source',
                         'source_tab': cust['source_tab']}), 400
 
-    # 3. PATCH the row to move it to iliyopata
+    # 3. PATCH the row to move it to iliyopata — atomically. The URL
+    #    filter `rescue_locked_at=is.null` means Postgres only touches
+    #    the row if it hasn't been locked yet, so simultaneous UI + SMS
+    #    rescues on the same row can't both succeed. If the update
+    #    matches zero rows, someone else locked it first.
     now = datetime.utcnow()
     update = {
         'old_transaction_date': tx.get('transaction_date'),
@@ -4030,9 +4035,11 @@ def sms_rescue():
         'source_tab':           target_tab,
         'moved_by_username':    'sms_rescue',
         'moved_at':             now.isoformat() + 'Z',
+        'rescue_locked_at':     now.isoformat() + 'Z',
     }
     pr = requests.patch(
-        f'{url}/rest/v1/transactions?id=eq.{tx["id"]}',
+        f'{url}/rest/v1/transactions?id=eq.{tx["id"]}'
+        '&rescue_locked_at=is.null',
         headers={**hdr,
                  'Content-Type': 'application/json',
                  'Prefer': 'return=representation'},
@@ -4042,6 +4049,12 @@ def sms_rescue():
         _sms_event_insert(sender, msg, received_at, 500, 'server_error',
                           plate, ref, tx['id'], None, pr.text[:400])
         return jsonify({'error': pr.text[:400]}), 500
+    if not (pr.json() or []):
+        # Zero rows updated = a concurrent rescue beat us to it.
+        _sms_event_insert(sender, msg, received_at, 409, 'already_rescued',
+                          plate, ref, tx['id'], None, 'concurrent lock')
+        return jsonify({'error': 'already_rescued',
+                        'row_id': tx['id']}), 409
 
     # 4. Mirror the rescue into the bank sheet's ILIYOPATA tab.
     #    Best-effort — a Google API hiccup here is logged in the sms_event

@@ -64,7 +64,12 @@ ALTER TABLE transactions
   ADD COLUMN IF NOT EXISTS old_transaction_date text,
   ADD COLUMN IF NOT EXISTS moved_by_user_id     bigint,
   ADD COLUMN IF NOT EXISTS moved_by_username    text,
-  ADD COLUMN IF NOT EXISTS moved_at             timestamptz;
+  ADD COLUMN IF NOT EXISTS moved_at             timestamptz,
+  -- Non-null value = this FAILED row has already been rescued and can
+  -- never be moved to ILIYOPATA again. The rescue endpoints set this
+  -- via PATCH ?rescue_locked_at=is.null so the update is atomic —
+  -- simultaneous UI + SMS rescues on the same row can't both succeed.
+  ADD COLUMN IF NOT EXISTS rescue_locked_at     timestamptz;
 
 CREATE INDEX IF NOT EXISTS idx_tx_moved_at
   ON transactions(moved_at DESC)

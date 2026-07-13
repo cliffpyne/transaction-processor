@@ -383,7 +383,8 @@ def transactions_rescue(row_id):
     tx_r = requests.get(
         f'{SUPABASE_URL}/rest/v1/transactions?id=eq.{row_id}'
         '&select=id,source_tab,transaction_date,customer_name,ref_number,'
-        'bank,description,credit_amount,identifier,customer_id',
+        'bank,description,credit_amount,identifier,customer_id,'
+        'rescue_locked_at',
         headers=_H, timeout=15,
     )
     cust_r = requests.get(
@@ -400,6 +401,9 @@ def transactions_rescue(row_id):
         return jsonify({'error': 'transaction not found'}), 404
     if not cust:
         return jsonify({'error': 'customer not found'}), 404
+    if tx.get('rescue_locked_at'):
+        return jsonify({'error': 'already_rescued',
+                        'rescue_locked_at': tx['rescue_locked_at']}), 409
     if tx['source_tab'] not in _FAILED_SOURCE_TABS:
         return jsonify({'error': 'not a failed row',
                         'current_state': tx['source_tab']}), 409
@@ -421,15 +425,24 @@ def transactions_rescue(row_id):
         'moved_by_user_id':     int(current_user.id),
         'moved_by_username':    current_user.username,
         'moved_at':             now.isoformat() + 'Z',
+        'rescue_locked_at':     now.isoformat() + 'Z',
     }
+    # Atomic conditional PATCH — only touches the row if it isn't
+    # already locked. Simultaneous UI + SMS rescues on the same id
+    # can't both succeed; the loser gets 0 rows updated → 409.
     r = requests.patch(
-        f'{SUPABASE_URL}/rest/v1/transactions?id=eq.{row_id}',
+        f'{SUPABASE_URL}/rest/v1/transactions?id=eq.{row_id}'
+        '&rescue_locked_at=is.null',
         headers={**_H, 'Prefer': 'return=representation'},
         json=update, timeout=15,
     )
     if not r.ok:
         return jsonify({'error': r.text[:400]}), 500
-    after = (r.json() or [None])[0]
+    after_rows = r.json() or []
+    if not after_rows:
+        return jsonify({'error': 'already_rescued',
+                        'row_id': row_id}), 409
+    after = after_rows[0]
     _audit('RESCUE', 'transactions', row_id, before=tx, after=after)
 
     # Mirror the rescue into the bank sheet's ILIYOPATA tab. Best-effort:
