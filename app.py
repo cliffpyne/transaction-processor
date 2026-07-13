@@ -3823,5 +3823,167 @@ def migration_log():
     return Response(html, mimetype='text/html')
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SMS Rescue — inbound-SMS-driven auto-rescue for FAILED transactions
+# ═══════════════════════════════════════════════════════════════════════════
+# Customers are instructed to include their plate and ref number in the
+# payment reference. When the bank forwards the SMS to our server, we:
+#   1. Extract plate via the existing extract_plate_number(text)
+#      — covers MC779EXM, MC EXM 779, 779EXM, EXM779, etc.
+#   2. Extract the ref via a lenient token scan (no 'REF:' prefix required
+#      because customers type only the ref, not the label).
+#   3. Look up the FAILED row by ref_number.
+#   4. Look up the customer by plate.
+#   5. Re-stamp transaction_date to now, preserve old_transaction_date,
+#      move source_tab -> BODAILIYOPATA (or IPHONEILIYOPATA), record
+#      moved_by_username='sms_rescue', moved_at=now.
+
+# Known bank-ref token shapes (used to disambiguate when the SMS body has
+# multiple long tokens). Order = priority.
+_SMS_REF_PATTERNS = [
+    r'^PS\d{10,}$',              # CRDB TIPS
+    r'^\d{3}AG[A-Z]+\w+$',       # NMB agent codes (101AGD…, 243AGPS…)
+    r'^[a-f0-9]{16,}$',          # CRDB hex hash
+]
+
+
+def _extract_ref_from_sms(msg, plate=None):
+    """Find the alphanumeric token most likely to be the bank reference.
+    Strips the plate substring first (so it doesn't compete), then prefers
+    tokens matching known bank shapes; falls back to the longest token
+    ≥10 chars."""
+    working = msg
+    if plate:
+        working = re.sub(re.escape(plate), ' ', working, flags=re.IGNORECASE)
+    # Also strip spaced-plate variants (MC 779 EXM, 779 EXM, etc.)
+    working = re.sub(r'MC\s*\d{3}\s*[A-Z]{3}', ' ', working, flags=re.IGNORECASE)
+    working = re.sub(r'\b\d{3}\s+[A-Z]{3}\b', ' ', working, flags=re.IGNORECASE)
+    working = re.sub(r'\b[A-Z]{3}\s+\d{3}\b', ' ', working, flags=re.IGNORECASE)
+    tokens = re.findall(r'[A-Za-z0-9]{10,}', working)
+    if not tokens:
+        return None
+    for pat in _SMS_REF_PATTERNS:
+        rgx = re.compile(pat, re.IGNORECASE)
+        for t in tokens:
+            if rgx.match(t):
+                return t
+    return max(tokens, key=len)
+
+
+_ILIYOPATA_TARGET_FROM_CUSTOMER = {
+    'IPHONE_RECORDS': 'IPHONEILIYOPATA',
+    'BODA_RECORDS':   'BODAILIYOPATA',
+    'SAVCOM_RECORDS': 'BODAILIYOPATA',
+}
+_FAILED_SOURCE_TABS = {'CRDBFAILED', 'NMBFAILED', 'IPHONEFAILED'}
+
+
+@app.route('/api/sms-rescue', methods=['POST'])
+def sms_rescue():
+    """POST { "message": "raw SMS body" } — token-gated (X-Migration-Token).
+
+    Returns:
+      200  { rescued:true, row_id, source_tab, plate, ref }
+      400  { error:'plate_extract_failed'|'ref_extract_failed'|'message required' }
+      404  { error:'ref_not_found'|'plate_not_in_records' }
+      409  { error:'already_rescued'|'not_a_failed_row', source_tab }
+      500  { error:'…' }
+
+    Idempotent: replaying the same SMS after a successful rescue returns
+    409 already_rescued, which the phone can treat as safe-to-delete."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    payload = request.get_json(silent=True) or {}
+    msg = (payload.get('message') or '').strip()
+    if not msg:
+        return jsonify({'error': 'message required'}), 400
+
+    plate = extract_plate_number(msg)
+    if not plate:
+        return jsonify({'error': 'plate_extract_failed',
+                        'message': msg[:200]}), 400
+
+    ref = _extract_ref_from_sms(msg, plate)
+    if not ref:
+        return jsonify({'error': 'ref_extract_failed',
+                        'plate': plate,
+                        'message': msg[:200]}), 400
+
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    if not url or not key:
+        return jsonify({'error': 'supabase_env_missing'}), 500
+    hdr = {'apikey': key, 'Authorization': f'Bearer {key}'}
+
+    # 1. Fetch the transaction by ref_number
+    tx_r = requests.get(
+        f'{url}/rest/v1/transactions?ref_number=eq.{ref}'
+        '&select=id,source_tab,transaction_date,customer_name,bank',
+        headers=hdr, timeout=15,
+    )
+    if not tx_r.ok:
+        return jsonify({'error': tx_r.text[:400]}), 500
+    tx_rows = tx_r.json()
+    if not tx_rows:
+        return jsonify({'error': 'ref_not_found',
+                        'ref': ref, 'plate': plate}), 404
+    tx = tx_rows[0]
+    if tx['source_tab'] in {'BODAILIYOPATA', 'IPHONEILIYOPATA'}:
+        return jsonify({'error': 'already_rescued',
+                        'source_tab': tx['source_tab'],
+                        'row_id': tx['id']}), 409
+    if tx['source_tab'] not in _FAILED_SOURCE_TABS:
+        return jsonify({'error': 'not_a_failed_row',
+                        'source_tab': tx['source_tab'],
+                        'row_id': tx['id']}), 409
+
+    # 2. Fetch the customer by plate
+    cust_r = requests.get(
+        f'{url}/rest/v1/customers?plate=eq.{plate}'
+        '&select=id,name,source_tab&limit=1',
+        headers=hdr, timeout=15,
+    )
+    if not cust_r.ok:
+        return jsonify({'error': cust_r.text[:400]}), 500
+    cust_rows = cust_r.json()
+    if not cust_rows:
+        return jsonify({'error': 'plate_not_in_records',
+                        'plate': plate, 'ref': ref}), 404
+    cust = cust_rows[0]
+    target_tab = _ILIYOPATA_TARGET_FROM_CUSTOMER.get(cust['source_tab'])
+    if not target_tab:
+        return jsonify({'error': 'unknown_customer_source',
+                        'source_tab': cust['source_tab']}), 400
+
+    # 3. PATCH the row to move it to iliyopata
+    now = datetime.utcnow()
+    update = {
+        'old_transaction_date': tx.get('transaction_date'),
+        'transaction_date':     now.strftime('%d.%m.%Y %H:%M:%S'),
+        'transaction_day':      now.strftime('%Y-%m-%d'),
+        'customer_name':        cust['name'],
+        'source_tab':           target_tab,
+        'moved_by_username':    'sms_rescue',
+        'moved_at':             now.isoformat() + 'Z',
+    }
+    pr = requests.patch(
+        f'{url}/rest/v1/transactions?id=eq.{tx["id"]}',
+        headers={**hdr,
+                 'Content-Type': 'application/json',
+                 'Prefer': 'return=representation'},
+        json=update, timeout=15,
+    )
+    if not pr.ok:
+        return jsonify({'error': pr.text[:400]}), 500
+
+    return jsonify({
+        'rescued': True,
+        'row_id': tx['id'],
+        'source_tab': target_tab,
+        'plate': plate,
+        'ref': ref,
+    })
+
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
