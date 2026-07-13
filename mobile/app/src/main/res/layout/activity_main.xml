@@ -120,5 +120,12 @@
             android:layout_height="wrap_content"
             android:text="Drain queue now"
             android:layout_marginTop="8dp"/>
+
+        <Button
+            android:id="@+id/importInboxBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Import inbox from last Saturday"
+            android:layout_marginTop="4dp"/>
     </LinearLayout>
 </ScrollView>

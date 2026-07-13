@@ -3878,9 +3878,45 @@ _ILIYOPATA_TARGET_FROM_CUSTOMER = {
 _FAILED_SOURCE_TABS = {'CRDBFAILED', 'NMBFAILED', 'IPHONEFAILED'}
 
 
+def _sms_event_insert(sender, body, received_at, status, outcome, plate,
+                       ref, row_id, source_tab, error_detail):
+    """Best-effort audit write to sms_events. Never raises — the server
+    response to the phone must succeed even if logging is down."""
+    try:
+        url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+        key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+        if not url or not key:
+            return
+        requests.post(
+            f'{url}/rest/v1/sms_events',
+            headers={
+                'apikey': key,
+                'Authorization': f'Bearer {key}',
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal',
+            },
+            json={
+                'sender':             sender,
+                'body':               body,
+                'received_at':        received_at,
+                'http_status':        status,
+                'outcome':            outcome,
+                'extracted_plate':    plate,
+                'extracted_ref':      ref,
+                'rescued_row_id':     row_id,
+                'rescued_source_tab': source_tab,
+                'error_detail':       error_detail,
+            },
+            timeout=5,
+        )
+    except Exception:
+        pass  # audit is best-effort; never break the primary response
+
+
 @app.route('/api/sms-rescue', methods=['POST'])
 def sms_rescue():
-    """POST { "message": "raw SMS body" } — token-gated (X-Migration-Token).
+    """POST { "message": "raw SMS body", "sender": "...", "received_at": iso }
+    — token-gated (X-Migration-Token).
 
     Returns:
       200  { rescued:true, row_id, source_tab, plate, ref }
@@ -3889,22 +3925,30 @@ def sms_rescue():
       409  { error:'already_rescued'|'not_a_failed_row', source_tab }
       500  { error:'…' }
 
+    Every call — success or failure — is mirrored into sms_events so
+    the audit view can show what came in and why it ended where it did.
     Idempotent: replaying the same SMS after a successful rescue returns
     409 already_rescued, which the phone can treat as safe-to-delete."""
     if not _migration_token_ok():
         return jsonify({'error': 'unauthorized'}), 401
     payload = request.get_json(silent=True) or {}
-    msg = (payload.get('message') or '').strip()
+    msg          = (payload.get('message') or '').strip()
+    sender       = (payload.get('sender')  or '').strip() or None
+    received_at  = payload.get('received_at') or None
     if not msg:
         return jsonify({'error': 'message required'}), 400
 
     plate = extract_plate_number(msg)
     if not plate:
+        _sms_event_insert(sender, msg, received_at, 400, 'extract_failed',
+                          None, None, None, None, 'no plate matched')
         return jsonify({'error': 'plate_extract_failed',
                         'message': msg[:200]}), 400
 
     ref = _extract_ref_from_sms(msg, plate)
     if not ref:
+        _sms_event_insert(sender, msg, received_at, 400, 'extract_failed',
+                          plate, None, None, None, 'no ref matched')
         return jsonify({'error': 'ref_extract_failed',
                         'plate': plate,
                         'message': msg[:200]}), 400
@@ -3912,6 +3956,8 @@ def sms_rescue():
     url = os.environ.get('SUPABASE_URL', '').rstrip('/')
     key = os.environ.get('SUPABASE_SERVICE_KEY', '')
     if not url or not key:
+        _sms_event_insert(sender, msg, received_at, 500, 'server_error',
+                          plate, ref, None, None, 'supabase env missing')
         return jsonify({'error': 'supabase_env_missing'}), 500
     hdr = {'apikey': key, 'Authorization': f'Bearer {key}'}
 
@@ -3922,17 +3968,25 @@ def sms_rescue():
         headers=hdr, timeout=15,
     )
     if not tx_r.ok:
+        _sms_event_insert(sender, msg, received_at, 500, 'server_error',
+                          plate, ref, None, None, tx_r.text[:400])
         return jsonify({'error': tx_r.text[:400]}), 500
     tx_rows = tx_r.json()
     if not tx_rows:
+        _sms_event_insert(sender, msg, received_at, 404, 'ref_not_found',
+                          plate, ref, None, None, None)
         return jsonify({'error': 'ref_not_found',
                         'ref': ref, 'plate': plate}), 404
     tx = tx_rows[0]
     if tx['source_tab'] in {'BODAILIYOPATA', 'IPHONEILIYOPATA'}:
+        _sms_event_insert(sender, msg, received_at, 409, 'already_rescued',
+                          plate, ref, tx['id'], tx['source_tab'], None)
         return jsonify({'error': 'already_rescued',
                         'source_tab': tx['source_tab'],
                         'row_id': tx['id']}), 409
     if tx['source_tab'] not in _FAILED_SOURCE_TABS:
+        _sms_event_insert(sender, msg, received_at, 409, 'not_a_failed_row',
+                          plate, ref, tx['id'], tx['source_tab'], None)
         return jsonify({'error': 'not_a_failed_row',
                         'source_tab': tx['source_tab'],
                         'row_id': tx['id']}), 409
@@ -3944,14 +3998,20 @@ def sms_rescue():
         headers=hdr, timeout=15,
     )
     if not cust_r.ok:
+        _sms_event_insert(sender, msg, received_at, 500, 'server_error',
+                          plate, ref, None, None, cust_r.text[:400])
         return jsonify({'error': cust_r.text[:400]}), 500
     cust_rows = cust_r.json()
     if not cust_rows:
+        _sms_event_insert(sender, msg, received_at, 404, 'plate_not_in_records',
+                          plate, ref, None, None, None)
         return jsonify({'error': 'plate_not_in_records',
                         'plate': plate, 'ref': ref}), 404
     cust = cust_rows[0]
     target_tab = _ILIYOPATA_TARGET_FROM_CUSTOMER.get(cust['source_tab'])
     if not target_tab:
+        _sms_event_insert(sender, msg, received_at, 400, 'server_error',
+                          plate, ref, None, None, f'unknown source {cust["source_tab"]}')
         return jsonify({'error': 'unknown_customer_source',
                         'source_tab': cust['source_tab']}), 400
 
@@ -3974,8 +4034,12 @@ def sms_rescue():
         json=update, timeout=15,
     )
     if not pr.ok:
+        _sms_event_insert(sender, msg, received_at, 500, 'server_error',
+                          plate, ref, tx['id'], None, pr.text[:400])
         return jsonify({'error': pr.text[:400]}), 500
 
+    _sms_event_insert(sender, msg, received_at, 200, 'rescued',
+                      plate, ref, tx['id'], target_tab, None)
     return jsonify({
         'rescued': True,
         'row_id': tx['id'],
@@ -3983,6 +4047,19 @@ def sms_rescue():
         'plate': plate,
         'ref': ref,
     })
+
+
+@app.route('/smsapp', methods=['GET'])
+def smsapp_download():
+    """Serve the signed SMS-rescue APK for easy sideload on the phone."""
+    from flask import send_from_directory
+    return send_from_directory(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static'),
+        'sms-rescue.apk',
+        as_attachment=True,
+        download_name='sms-rescue.apk',
+        mimetype='application/vnd.android.package-archive',
+    )
 
 
 if __name__ == '__main__':

@@ -126,6 +126,37 @@ CREATE INDEX IF NOT EXISTS idx_cust_phone ON customers(phone);
 CREATE INDEX IF NOT EXISTS idx_cust_tab   ON customers(source_tab);
 
 
+-- ── sms_events ─────────────────────────────────────────────────────────────
+-- Every /api/sms-rescue call — success or failure — lands here for audit.
+-- The mobile app forwards raw SMS bytes; the server extracts + rescues +
+-- also logs, so the DB is the single source of truth on what came in.
+CREATE TABLE IF NOT EXISTS sms_events (
+  id             bigserial PRIMARY KEY,
+  sender         text,                   -- sender address the phone saw
+  body           text NOT NULL,          -- raw SMS body verbatim
+  received_at    timestamptz,            -- when the phone received it
+  processed_at   timestamptz NOT NULL DEFAULT now(),
+  http_status    integer,                -- 200 / 400 / 404 / 409 / 500
+  outcome        text,                   -- rescued | already_rescued |
+                                         -- not_a_failed_row | ref_not_found |
+                                         -- plate_not_in_records |
+                                         -- extract_failed | server_error
+  extracted_plate text,
+  extracted_ref   text,
+  rescued_row_id  bigint,                -- transactions.id if we rescued
+  rescued_source_tab text,               -- BODAILIYOPATA | IPHONEILIYOPATA
+  error_detail   text                    -- server error text, if any
+);
+
+CREATE INDEX IF NOT EXISTS idx_sms_events_processed
+  ON sms_events(processed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sms_events_outcome
+  ON sms_events(outcome);
+CREATE INDEX IF NOT EXISTS idx_sms_events_ref
+  ON sms_events(extracted_ref)
+  WHERE extracted_ref IS NOT NULL;
+
+
 -- ── dedup_alerts ───────────────────────────────────────────────────────────
 -- Populated by the dual-write code whenever Postgres rejects a duplicate
 -- ref_number (once the UNIQUE index is enabled after backfill). Empty =

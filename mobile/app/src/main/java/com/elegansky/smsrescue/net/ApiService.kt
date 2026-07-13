@@ -14,7 +14,12 @@ import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
 
 @JsonClass(generateAdapter = true)
-data class SmsRescueRequest(val message: String)
+data class SmsRescueRequest(
+    val message: String,
+    val sender: String? = null,
+    /** ISO-8601 UTC timestamp of when the phone received the SMS. */
+    val received_at: String? = null,
+)
 
 @JsonClass(generateAdapter = true)
 data class SmsRescueResponse(

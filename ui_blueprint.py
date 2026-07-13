@@ -84,6 +84,16 @@ TABLES = {
         'editable':    [],
         'sort_default':'id.desc',
     },
+    'sms_events': {
+        'columns':     ['id', 'sender', 'body', 'received_at', 'processed_at',
+                        'http_status', 'outcome', 'extracted_plate',
+                        'extracted_ref', 'rescued_row_id',
+                        'rescued_source_tab', 'error_detail'],
+        'search_cols': ['sender', 'body', 'extracted_plate', 'extracted_ref',
+                        'outcome'],
+        'editable':    [],
+        'sort_default':'processed_at.desc',
+    },
 }
 
 
@@ -121,6 +131,7 @@ def _records_compat(sub=None):
 _HOME_SUBPAGES = {
     'customers':    'customers_page.html',
     'transactions': 'transactions_page.html',
+    'sms':          'sms_events_page.html',
     # dedup_alerts, users, record_edits — added as pages ship
 }
 
@@ -426,6 +437,13 @@ def transactions_rescue(row_id):
 @login_required
 def dedup_alerts_list():
     return _paginated_query('dedup_alerts', TABLES['dedup_alerts'])
+
+
+# ── sms_events (read-only, audit) ────────────────────────────────────────────
+@ui.route('/api/sms_events', methods=['GET'])
+@login_required
+def sms_events_list():
+    return _paginated_query('sms_events', TABLES['sms_events'])
 
 
 # ── users (admin only) ───────────────────────────────────────────────────────

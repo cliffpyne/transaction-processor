@@ -1,0 +1,106 @@
+{% extends "home.html" %}
+{% block content %}
+     <!-- Container -->
+     <div class="kt-container-fixed" id="contentContainer">
+     </div>
+     <!-- End of Container -->
+     <!-- Container -->
+     <div class="kt-container-fixed">
+      <div class="flex flex-wrap items-center lg:items-end justify-between gap-5 pb-7.5">
+       <div class="flex flex-col justify-center gap-2">
+        <h1 class="text-xl font-medium leading-none text-mono">
+         SMS Log
+        </h1>
+        <div class="flex items-center gap-2 text-sm font-normal text-secondary-foreground">
+         Every message forwarded by the phone to <code>/api/sms-rescue</code>
+        </div>
+       </div>
+       <div class="flex items-center gap-2.5">
+        <a class="kt-btn kt-btn-outline" href="/smsapp" download>
+         <i class="ki-filled ki-cloud-download"></i>
+         Download APK
+        </a>
+       </div>
+      </div>
+     </div>
+     <!-- End of Container -->
+     <!-- Container -->
+     <div class="kt-container-fixed">
+      <div class="grid gap-5 lg:gap-7.5">
+       <div class="kt-card kt-card-grid min-w-full">
+        <div class="kt-card-header flex-wrap gap-2">
+         <h3 class="kt-card-title text-sm" id="sms_showing">
+          Loading SMS events…
+         </h3>
+         <div class="flex flex-wrap gap-2 lg:gap-5">
+          <div class="flex">
+           <label class="kt-input">
+            <i class="ki-filled ki-magnifier"></i>
+            <input id="sms_search" placeholder="Search sender, body, plate, ref…" type="text" value=""/>
+           </label>
+          </div>
+          <div class="flex flex-wrap gap-2.5">
+           <select class="kt-select w-40" data-kt-select="true" data-kt-select-placeholder="All outcomes" id="sms_outcome">
+            <option value="">All outcomes</option>
+            <option value="rescued">Rescued</option>
+            <option value="already_rescued">Already rescued</option>
+            <option value="not_a_failed_row">Not a failed row</option>
+            <option value="ref_not_found">Ref not found</option>
+            <option value="plate_not_in_records">Plate unknown</option>
+            <option value="extract_failed">Extract failed</option>
+            <option value="server_error">Server error</option>
+           </select>
+           <select class="kt-select w-36" data-kt-select="true" data-kt-select-placeholder="Sort by" id="sms_sort">
+            <option value="processed_at.desc">Newest first</option>
+            <option value="processed_at.asc">Oldest first</option>
+           </select>
+          </div>
+         </div>
+        </div>
+        <div class="kt-card-table">
+         <div class="grid">
+          <div class="kt-scrollable-x-auto">
+           <table class="kt-table kt-table-border">
+            <thead>
+             <tr>
+              <th class="w-[130px]"><span class="kt-table-col"><span class="kt-table-col-label">When</span></span></th>
+              <th class="w-[130px]"><span class="kt-table-col"><span class="kt-table-col-label">Outcome</span></span></th>
+              <th class="w-[110px]"><span class="kt-table-col"><span class="kt-table-col-label">Sender</span></span></th>
+              <th class="w-[110px]"><span class="kt-table-col"><span class="kt-table-col-label">Plate</span></span></th>
+              <th class="min-w-[160px]"><span class="kt-table-col"><span class="kt-table-col-label">Ref</span></span></th>
+              <th class="min-w-[280px]"><span class="kt-table-col"><span class="kt-table-col-label">Body</span></span></th>
+              <th class="w-[120px]"><span class="kt-table-col"><span class="kt-table-col-label">Rescued row</span></span></th>
+             </tr>
+            </thead>
+            <tbody id="sms_tbody">
+             <tr>
+              <td class="text-center text-secondary-foreground py-6" colspan="7">Loading…</td>
+             </tr>
+            </tbody>
+           </table>
+          </div>
+          <div class="kt-card-footer justify-center md:justify-between flex-col md:flex-row gap-5 text-secondary-foreground text-sm font-medium">
+           <div class="flex items-center gap-2 order-2 md:order-1">
+            Show
+            <select class="kt-select w-20" id="sms_perpage">
+             <option value="25">25</option>
+             <option value="50">50</option>
+             <option value="100">100</option>
+             <option value="500">500</option>
+             <option value="1000">1000</option>
+            </select>
+            per page
+           </div>
+           <div class="flex items-center gap-4 order-1 md:order-2">
+            <span id="sms_info"></span>
+            <div class="flex items-center gap-1" id="sms_pager"></div>
+           </div>
+          </div>
+         </div>
+        </div>
+       </div>
+      </div>
+     </div>
+     <!-- End of Container -->
+     <script src="/static/sms_events_page.js" defer></script>
+{% endblock %}

@@ -56,6 +56,15 @@ class MainActivity : AppCompatActivity() {
             SmsWorker.enqueueDrain(this)
             Toast.makeText(this, "drain enqueued", Toast.LENGTH_SHORT).show()
         }
+        binding.importInboxBtn.setOnClickListener {
+            lifecycleScope.launch {
+                val n = withContext(Dispatchers.IO) { InboxImporter.importSinceLastSaturday(this@MainActivity) }
+                Toast.makeText(this@MainActivity,
+                    "imported $n messages since last Saturday",
+                    Toast.LENGTH_LONG).show()
+                refreshStatus()
+            }
+        }
     }
 
     override fun onResume() {

@@ -56,7 +56,14 @@ class SmsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, p
     }
 
     private suspend fun postOne(api: SmsRescueApi, entry: QueueEntry): PostOutcome {
-        val resp = api.rescue(SmsRescueRequest(message = entry.body))
+        val receivedIso = java.time.Instant.ofEpochMilli(entry.receivedAt).toString()
+        val resp = api.rescue(
+            SmsRescueRequest(
+                message = entry.body,
+                sender = entry.sender,
+                received_at = receivedIso,
+            )
+        )
         val body = try { resp.body() } catch (_: Throwable) { null }
         val err = body?.error
         return when (resp.code()) {
