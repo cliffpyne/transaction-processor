@@ -1224,45 +1224,58 @@ def lookup_iphone_customer(details, iphone_lookup):
 
 
 def load_all_customers(service):
-    """Load all customers from pikipiki records sheet"""
-    try:
-        sheet = service.spreadsheets()
-        result = sheet.values().get(
-            spreadsheetId=PIKIPIKI_SHEET_ID,
-            range='pikipiki records!A:E'
-        ).execute()
-        
-        values = result.get('values', [])
-        if not values:
-            return {}, {}
-        
-        phone_lookup = {}
-        plate_lookup = {}
-        
-        for row in values[1:]:
-            plate_col = row[1] if len(row) > 1 else ''
-            phone_col = row[3] if len(row) > 3 else ''
-            name_col = row[2] if len(row) > 2 else ''
-            
-            if not plate_col and not phone_col:
+    """Load all customers from pikipiki records sheet.
+
+    Intermittently the Sheets API returns a truncated payload — no error,
+    just fewer rows — and the caller's plate lookup silently misses every
+    plate that fell off the tail, which cascades into 'PLATE(X) not found'
+    rows and manual re-syncs. Retry up to 4× with exponential backoff and
+    refuse to accept a payload smaller than the smallest we've ever seen
+    (LOOKUP_MIN_ROWS). Row counts are always logged so a shrinkage shows
+    up in the logs.
+    """
+    import time as _time
+    LOOKUP_MIN_ROWS = 800  # BODA fleet has ~2k active — anything under this is a truncation
+    last_err = None
+    for attempt in range(1, 5):
+        try:
+            result = service.spreadsheets().values().get(
+                spreadsheetId=PIKIPIKI_SHEET_ID,
+                range='pikipiki records!A:E',
+                valueRenderOption='UNFORMATTED_VALUE',
+            ).execute()
+            values = result.get('values', [])
+            phone_lookup, plate_lookup = {}, {}
+            for row in values[1:]:
+                plate_col = row[1] if len(row) > 1 else ''
+                phone_col = row[3] if len(row) > 3 else ''
+                name_col  = row[2] if len(row) > 2 else ''
+                if not plate_col and not phone_col:
+                    continue
+                if plate_col:
+                    plate_clean = str(plate_col).replace(' ', '').upper()
+                    if plate_clean:
+                        plate_lookup[plate_clean] = name_col
+                if phone_col:
+                    phone_clean = str(phone_col).replace(' ', '').replace('-', '')
+                    if phone_clean:
+                        phone_lookup[phone_clean] = name_col
+            n_rows = len(values)
+            print(f"Loaded {len(phone_lookup)} phones and {len(plate_lookup)} plates from pikipiki records (raw rows={n_rows}, attempt {attempt})")
+            if n_rows < LOOKUP_MIN_ROWS:
+                # Sheets returned a truncated payload — retry rather than
+                # process with an incomplete lookup that would misroute
+                # legit transactions to FAILED.
+                print(f"⚠️ pikipiki records payload too small ({n_rows} < {LOOKUP_MIN_ROWS}) — retrying")
+                _time.sleep(2 * attempt)
                 continue
-            
-            if plate_col:
-                plate_clean = str(plate_col).replace(' ', '').upper()
-                if plate_clean:
-                    plate_lookup[plate_clean] = name_col
-            
-            if phone_col:
-                phone_clean = str(phone_col).replace(' ', '').replace('-', '')
-                if phone_clean:
-                    phone_lookup[phone_clean] = name_col
-        
-        print(f"Loaded {len(phone_lookup)} phone numbers and {len(plate_lookup)} plates from pikipiki records")
-        return phone_lookup, plate_lookup
-        
-    except Exception as e:
-        print(f"Error loading customers: {e}")
-        return {}, {}
+            return phone_lookup, plate_lookup
+        except Exception as e:
+            last_err = e
+            print(f"Error loading customers (attempt {attempt}): {e}")
+            _time.sleep(2 * attempt)
+    print(f"❌ load_all_customers gave up after 4 attempts, last error: {last_err}")
+    return {}, {}
 
 def load_all_customers_sav(service):
     """🔥 UPDATED: Load all customers from pikipiki records2 sheet (for PASSED_SAV) - includes customer IDs"""
