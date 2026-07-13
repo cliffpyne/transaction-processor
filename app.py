@@ -4092,5 +4092,18 @@ def smsapp_download():
     )
 
 
+@app.errorhandler(404)
+def not_found(e):
+    """Render the Metronic-styled 404 for HTML clients, JSON for API paths."""
+    if request.path.startswith('/api/') or request.path.startswith('/admin/'):
+        return jsonify({'error': 'not_found', 'path': request.path}), 404
+    return render_template(
+        'error_404.html',
+        username=(current_user.username if getattr(current_user, 'is_authenticated', False) else ''),
+        full_name=(current_user.full_name if getattr(current_user, 'is_authenticated', False) else ''),
+        role=(current_user.role if getattr(current_user, 'is_authenticated', False) else ''),
+    ), 404
+
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
