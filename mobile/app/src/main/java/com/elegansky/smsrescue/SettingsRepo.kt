@@ -32,10 +32,12 @@ class SettingsRepo(private val ctx: Context) {
 
     /**
      * Comma-separated list of sender IDs to accept — everything else is
-     * ignored. Empty = accept every SMS, useful for debug only.
+     * ignored. Empty (default) = accept every SMS, because customer-sent
+     * payment confirmations come from arbitrary customer phone numbers,
+     * not from a fixed bank shortcode.
      */
     var senderWhitelist: String
-        get() = prefs.getString(KEY_SENDERS, "NMB,CRDB,NMBBANK,CRDBBANK") ?: ""
+        get() = prefs.getString(KEY_SENDERS, "") ?: ""
         set(value) { prefs.edit().putString(KEY_SENDERS, value).apply() }
 
     fun senderAllowed(sender: String): Boolean {
