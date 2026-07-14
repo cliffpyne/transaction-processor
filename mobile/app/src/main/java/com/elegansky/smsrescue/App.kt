@@ -24,6 +24,9 @@ class App : Application(), Configuration.Provider {
         }
         // Kick a drain on cold-start in case any queued rows were left behind.
         SmsWorker.enqueueDrain(this)
+        // Start the foreground service so Samsung can't hibernate us mid-day
+        // and drop incoming SMS_DELIVER broadcasts.
+        KeepAliveService.start(this)
     }
 
     override val workManagerConfiguration: Configuration =

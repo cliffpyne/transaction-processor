@@ -3923,20 +3923,42 @@ _FAILED_SOURCE_TABS = {'CRDBFAILED', 'NMBFAILED', 'IPHONEFAILED'}
 def _sms_event_insert(sender, body, received_at, status, outcome, plate,
                        ref, row_id, source_tab, error_detail):
     """Best-effort audit write to sms_events. Never raises — the server
-    response to the phone must succeed even if logging is down."""
+    response to the phone must succeed even if logging is down.
+
+    Deduplicates: if a matching (sender, body) row was already logged
+    in the last 60 seconds, skip. Kills duplicates from OkHttp
+    retry-on-slow-response and double-broadcast paths in one shot."""
     try:
         url = os.environ.get('SUPABASE_URL', '').rstrip('/')
         key = os.environ.get('SUPABASE_SERVICE_KEY', '')
         if not url or not key:
             return
+        hdr = {
+            'apikey': key,
+            'Authorization': f'Bearer {key}',
+        }
+        # PostgREST doesn't let us URL-encode the body if it has odd chars,
+        # so query by processed_at cutoff + a hash-style eq on body via
+        # PostgREST's `body=eq.<value>`. For safety we send the check
+        # through the JSON POST as a Prefer merge? No — simpler: hit the
+        # regular listing endpoint with a body eq filter.
+        cutoff = (datetime.utcnow() - timedelta(seconds=60)).isoformat() + 'Z'
+        check = requests.get(
+            f'{url}/rest/v1/sms_events'
+            f'?select=id&limit=1'
+            f'&processed_at=gte.{cutoff}'
+            f'&outcome=eq.{outcome}',
+            headers=hdr,
+            params={'sender': f'eq.{sender or ""}', 'body': f'eq.{body}'},
+            timeout=4,
+        )
+        if check.ok and len(check.json() or []) > 0:
+            return  # duplicate within 60s — skip
         requests.post(
             f'{url}/rest/v1/sms_events',
-            headers={
-                'apikey': key,
-                'Authorization': f'Bearer {key}',
-                'Content-Type': 'application/json',
-                'Prefer': 'return=minimal',
-            },
+            headers={**hdr,
+                     'Content-Type': 'application/json',
+                     'Prefer': 'return=minimal'},
             json={
                 'sender':             sender,
                 'body':               body,
