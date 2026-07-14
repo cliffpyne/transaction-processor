@@ -3957,6 +3957,99 @@ def admin_sms_recent():
     return (r.text, r.status_code, {'Content-Type': 'application/json'})
 
 
+@app.route('/admin/sms-purge-dupes', methods=['POST'])
+def admin_sms_purge_dupes():
+    """Collapse sms_events to one row per (sender, body). Same message
+    forwarded 50 times by repeated inbox imports leaves 50 rows; this
+    endpoint keeps the ONE most-informative row per group and deletes
+    the rest.
+
+    Priority for the survivor (highest wins, ties broken by earliest
+    processed_at so we preserve the original event time):
+
+        rescued > already_rescued > not_a_failed_row > ref_not_found
+        > plate_not_in_records > extract_failed > server_error > null
+
+    Query params:
+        dry_run=1  (default) → report only, no deletes
+        dry_run=0            → actually delete
+    """
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    hdr = {'apikey': key, 'Authorization': f'Bearer {key}'}
+    dry_run = request.args.get('dry_run', '1') != '0'
+
+    priority = {
+        'rescued': 7, 'already_rescued': 6, 'not_a_failed_row': 5,
+        'ref_not_found': 4, 'plate_not_in_records': 3,
+        'extract_failed': 2, 'server_error': 1,
+    }
+    all_rows = []
+    for offset in range(0, 20000, 1000):
+        r = requests.get(
+            f'{url}/rest/v1/sms_events'
+            f'?select=id,sender,body,outcome,processed_at'
+            f'&order=id.asc',
+            headers={**hdr, 'Range-Unit': 'items',
+                     'Range': f'{offset}-{offset+999}'},
+            timeout=45,
+        )
+        if r.status_code not in (200, 206):
+            return jsonify({'error': r.text[:400]}), 500
+        chunk = r.json()
+        all_rows.extend(chunk)
+        if len(chunk) < 1000:
+            break
+
+    groups = {}
+    for row in all_rows:
+        key_tuple = (row.get('sender') or '', row.get('body') or '')
+        groups.setdefault(key_tuple, []).append(row)
+
+    keep_ids, delete_ids = [], []
+    for group in groups.values():
+        group.sort(key=lambda r: (
+            -priority.get(r.get('outcome'), 0),
+            r.get('processed_at') or '',
+        ))
+        keep_ids.append(group[0]['id'])
+        delete_ids.extend(r['id'] for r in group[1:])
+
+    result = {
+        'total_rows':    len(all_rows),
+        'distinct_pairs': len(groups),
+        'would_keep':    len(keep_ids),
+        'would_delete':  len(delete_ids),
+        'dry_run':       dry_run,
+    }
+
+    if dry_run or not delete_ids:
+        return jsonify(result)
+
+    # Delete in chunks of 500 via `id=in.(a,b,c…)`
+    deleted = 0
+    errors = []
+    for i in range(0, len(delete_ids), 500):
+        chunk = delete_ids[i:i+500]
+        id_list = ','.join(str(x) for x in chunk)
+        dr = requests.delete(
+            f'{url}/rest/v1/sms_events?id=in.({id_list})',
+            headers={**hdr, 'Prefer': 'return=minimal'},
+            timeout=60,
+        )
+        if dr.status_code not in (200, 204):
+            errors.append({'chunk_start': i, 'status': dr.status_code,
+                           'body': dr.text[:200]})
+        else:
+            deleted += len(chunk)
+    result['deleted'] = deleted
+    if errors:
+        result['errors'] = errors
+    return jsonify(result)
+
+
 @app.route('/admin/seed-users', methods=['POST'])
 def seed_users_endpoint():
     """One-shot seed of the initial UI accounts. Idempotent (upsert). Gated
