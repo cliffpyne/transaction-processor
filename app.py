@@ -3896,7 +3896,7 @@ def admin_sms_retry_fails():
     from flask import current_app
     tally = {'checked': 0, 'rescued': 0, 'still_ref_not_found': 0,
              'plate_unknown': 0, 'already_rescued': 0,
-             'not_a_failed_row': 0, 'extract_failed': 0, 'other': 0}
+             'ref_in_passed': 0, 'extract_failed': 0, 'other': 0}
     samples = []
     with current_app.test_client() as client:
         for row in rows:
@@ -3924,8 +3924,8 @@ def admin_sms_retry_fails():
                                     'ref': data.get('ref')})
             elif resp.status_code == 409 and data.get('error') == 'already_rescued':
                 tally['already_rescued'] += 1
-            elif resp.status_code == 409 and data.get('error') == 'not_a_failed_row':
-                tally['not_a_failed_row'] += 1
+            elif resp.status_code == 409 and data.get('error') == 'ref_in_passed':
+                tally['ref_in_passed'] += 1
             elif resp.status_code == 404 and data.get('error') == 'ref_not_found':
                 tally['still_ref_not_found'] += 1
             elif resp.status_code == 404 and data.get('error') == 'plate_not_in_records':
@@ -3967,7 +3967,7 @@ def admin_sms_purge_dupes():
     Priority for the survivor (highest wins, ties broken by earliest
     processed_at so we preserve the original event time):
 
-        rescued > already_rescued > not_a_failed_row > ref_not_found
+        rescued > already_rescued > ref_in_passed > ref_not_found
         > plate_not_in_records > extract_failed > server_error > null
 
     Query params:
@@ -3982,7 +3982,7 @@ def admin_sms_purge_dupes():
     dry_run = request.args.get('dry_run', '1') != '0'
 
     priority = {
-        'rescued': 7, 'already_rescued': 6, 'not_a_failed_row': 5,
+        'rescued': 7, 'already_rescued': 6, 'ref_in_passed': 5,
         'ref_not_found': 4, 'plate_not_in_records': 3,
         'extract_failed': 2, 'server_error': 1,
     }
@@ -4249,7 +4249,7 @@ def sms_rescue():
       200  { rescued:true, row_id, source_tab, plate, ref }
       400  { error:'plate_extract_failed'|'ref_extract_failed'|'message required' }
       404  { error:'ref_not_found'|'plate_not_in_records' }
-      409  { error:'already_rescued'|'not_a_failed_row', source_tab }
+      409  { error:'already_rescued'|'ref_in_passed', source_tab }
       500  { error:'…' }
 
     Every call — success or failure — is mirrored into sms_events so
@@ -4318,9 +4318,9 @@ def sms_rescue():
                         'source_tab': tx['source_tab'],
                         'row_id': tx['id']}), 409
     if tx['source_tab'] not in _FAILED_SOURCE_TABS:
-        _sms_event_insert(sender, msg, received_at, 409, 'not_a_failed_row',
+        _sms_event_insert(sender, msg, received_at, 409, 'ref_in_passed',
                           plate, ref, tx['id'], tx['source_tab'], None)
-        return jsonify({'error': 'not_a_failed_row',
+        return jsonify({'error': 'ref_in_passed',
                         'source_tab': tx['source_tab'],
                         'row_id': tx['id']}), 409
 
@@ -4435,6 +4435,29 @@ def not_found(e):
         full_name=(current_user.full_name if getattr(current_user, 'is_authenticated', False) else ''),
         role=(current_user.role if getattr(current_user, 'is_authenticated', False) else ''),
     ), 404
+
+
+@app.route('/admin/sms-rename-outcome', methods=['POST'])
+def admin_sms_rename_outcome():
+    """One-shot backfill: rename outcome 'not_a_failed_row' → 'ref_in_passed'
+    across every existing sms_events row. Called once after the code rename
+    lands so the UI and DB stay consistent."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    hdr = {'apikey': key, 'Authorization': f'Bearer {key}',
+           'Content-Type': 'application/json', 'Prefer': 'return=representation'}
+    r = requests.patch(
+        f'{url}/rest/v1/sms_events?outcome=eq.not_a_failed_row',
+        headers=hdr,
+        json={'outcome': 'ref_in_passed'},
+        timeout=60,
+    )
+    if not r.ok:
+        return jsonify({'error': r.text[:400]}), 500
+    updated = len(r.json() or [])
+    return jsonify({'updated': updated})
 
 
 @app.route('/admin/rescued-banks', methods=['GET'])

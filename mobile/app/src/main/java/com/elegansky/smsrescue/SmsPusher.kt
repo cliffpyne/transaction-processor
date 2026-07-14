@@ -53,7 +53,7 @@ object SmsPusher {
         return when (resp.code()) {
             200 -> PostOutcome(200, null, "RESCUED", deleteSms = true)
             409 -> {
-                val t = if (err == "already_rescued") "ALREADY" else "NOT_FAILED"
+                val t = if (err == "already_rescued") "ALREADY" else "REF_IN_PASSED"
                 PostOutcome(409, err, t, deleteSms = true)
             }
             400 -> PostOutcome(400, err ?: "extract_failed", "EXTRACT_FAILED")

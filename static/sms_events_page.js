@@ -20,7 +20,7 @@
   const OUTCOME_PILL = {
     'rescued':              { label: 'Rescued',           cls: 'kt-badge-success' },
     'already_rescued':      { label: 'Already rescued',   cls: 'kt-badge-info' },
-    'not_a_failed_row':     { label: 'In PASSED',         cls: 'kt-badge-primary' },
+    'ref_in_passed':        { label: 'Ref in PASSED',     cls: 'kt-badge-primary' },
     'ref_not_found':        { label: 'Ref not found',     cls: 'kt-badge-destructive' },
     'plate_not_in_records': { label: 'Plate unknown',     cls: 'kt-badge-warning' },
     'extract_failed':       { label: 'Extract failed',    cls: 'kt-badge-secondary' },

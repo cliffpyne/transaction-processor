@@ -12,6 +12,7 @@ class App : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        SettingsRepo(this).migrateLegacyPortalUrl()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
             nm?.createNotificationChannel(

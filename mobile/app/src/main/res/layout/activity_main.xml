@@ -34,7 +34,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:inputType="textUri"
-            android:hint="https://portal.eleganskyboda.com"/>
+            android:hint="https://processor.eleganskyboda.com"/>
 
         <TextView
             android:layout_width="match_parent"

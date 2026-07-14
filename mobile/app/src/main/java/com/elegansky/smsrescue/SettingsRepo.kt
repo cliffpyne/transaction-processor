@@ -23,8 +23,23 @@ class SettingsRepo(private val ctx: Context) {
     }
 
     var serverUrl: String
-        get() = prefs.getString(KEY_URL, "https://portal.eleganskyboda.com") ?: ""
+        get() = prefs.getString(KEY_URL, DEFAULT_URL) ?: ""
         set(value) { prefs.edit().putString(KEY_URL, value).apply() }
+
+    /**
+     * One-shot migration: on 2026-07-14 the backend moved from Render
+     * (portal.eleganskyboda.com — now suspended) to Contabo VPS
+     * (processor.eleganskyboda.com). Any phone that was already using
+     * the old URL would keep POSTing into a suspended service after
+     * upgrading. This flips the stored URL to the new host EXACTLY ONCE
+     * so users don't need to re-enter it manually.
+     */
+    fun migrateLegacyPortalUrl() {
+        val current = prefs.getString(KEY_URL, null) ?: return
+        if (current.trim().trimEnd('/').equals("https://portal.eleganskyboda.com", ignoreCase = true)) {
+            prefs.edit().putString(KEY_URL, DEFAULT_URL).apply()
+        }
+    }
 
     var token: String
         get() = prefs.getString(KEY_TOKEN, "") ?: ""
@@ -53,5 +68,6 @@ class SettingsRepo(private val ctx: Context) {
         private const val KEY_URL = "server_url"
         private const val KEY_TOKEN = "server_token"
         private const val KEY_SENDERS = "sender_whitelist"
+        const val DEFAULT_URL = "https://processor.eleganskyboda.com"
     }
 }
