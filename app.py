@@ -3767,6 +3767,55 @@ def admin_count():
     return jsonify(out)
 
 
+@app.route('/admin/dup-refs', methods=['GET'])
+def admin_dup_refs():
+    """Token-gated: find any ref_number that appears more than once in
+    transactions. If the partial UNIQUE index is doing its job the count
+    should be 0; anything > 0 means the dedup leaked."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    # Page through the last day of transactions and tally client-side.
+    days = min(30, max(1, int(request.args.get('days', 3))))
+    from_day = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
+    hdr = {'apikey': key, 'Authorization': f'Bearer {key}'}
+    refs = {}
+    offset = 0
+    while True:
+        r = requests.get(
+            f'{url}/rest/v1/transactions'
+            f'?select=id,ref_number,transaction_day,source_tab,credit_amount'
+            f'&transaction_day=gte.{from_day}'
+            f'&order=id.asc',
+            headers={**hdr, 'Range-Unit': 'items',
+                     'Range': f'{offset}-{offset + 999}'},
+            timeout=45,
+        )
+        if r.status_code not in (200, 206):
+            return jsonify({'error': r.text[:400]}), 500
+        chunk = r.json()
+        if not chunk:
+            break
+        for row in chunk:
+            ref = (row.get('ref_number') or '').strip()
+            if not ref:
+                continue
+            refs.setdefault(ref, []).append(row)
+        if len(chunk) < 1000:
+            break
+        offset += 1000
+    dupes = {ref: rows for ref, rows in refs.items() if len(rows) > 1}
+    total_rows_dupe = sum(len(rs) - 1 for rs in dupes.values())
+    return jsonify({
+        'from_day': from_day,
+        'unique_refs_scanned': len(refs),
+        'refs_with_duplicates': len(dupes),
+        'extra_rows_from_dupes': total_rows_dupe,
+        'sample': dict(list(dupes.items())[:10]),
+    })
+
+
 @app.route('/admin/sms-recent', methods=['GET'])
 def admin_sms_recent():
     """Token-gated peek at the most recent sms_events rows so we can
