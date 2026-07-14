@@ -4074,11 +4074,13 @@ def sms_rescue():
         return jsonify({'error': 'supabase_env_missing'}), 500
     hdr = {'apikey': key, 'Authorization': f'Bearer {key}'}
 
-    # 1. Fetch the transaction by ref_number — pull every field the
-    #    iliyopata sheet append needs (description, amount, identifier,
-    #    customer_id) so we don't have to re-fetch after PATCH.
+    # 1. Fetch the transaction by ref_number — case-insensitive (ilike)
+    #    so an uppercase-typed ref like '19F5C574BD2A0ACF' still matches
+    #    the lowercase hex '19f5c574bd2a0acf' the sheet stores. Bank refs
+    #    are alphanumeric-only so ilike acts as a plain case-insensitive
+    #    equality with no wildcard risk.
     tx_r = requests.get(
-        f'{url}/rest/v1/transactions?ref_number=eq.{ref}'
+        f'{url}/rest/v1/transactions?ref_number=ilike.{ref}'
         '&select=id,source_tab,transaction_date,customer_name,bank,'
         'description,credit_amount,identifier,ref_number,customer_id,'
         'rescue_locked_at',
