@@ -1905,18 +1905,40 @@ def process_crdb_transactions(filepath):
             # ══════════════════════════════════════════════════════════════════
 
             # ── Normal duplicate check ─────────────────────────────────────────
+            # Same empty-description guard as NMB: description-based dedup only
+            # fires when details is non-empty, otherwise all no-description rows
+            # collide on the empty string and silently drop.
             is_duplicate = False
 
             if ref_number and ref_number in all_existing_refs:
                 is_duplicate = True
                 stats['skipped'] += 1
-            elif details in all_existing_messages:
+            elif details and details in all_existing_messages:
                 is_duplicate = True
                 stats['skipped'] += 1
 
             if is_duplicate:
                 continue
-            
+
+            # ── No-description CRDB row → straight to FAILED with UNKNOWN
+            # placeholders. Symmetric to the NMB path — a customer SMS with the
+            # ref + plate can rescue it later.
+            if not details.strip():
+                last_failed_id += 1
+                failed_data.append([
+                    last_failed_id,
+                    date,
+                    'CRDB',
+                    'UNKNOWN',
+                    credit_amount,
+                    'UNKNOWN',
+                    'UNKNOWN',
+                    ref_number,
+                ])
+                stats['failed'] += 1
+                print(f"⚠️ FAILED (no description, CRDB) — ref={ref_number} amt={credit_amount} → SMS-rescue candidate")
+                continue
+
             # ── Extract phone and plate ────────────────────────────────────────
             phone = extract_phone_number(details)
             plate = extract_plate_number(details)
@@ -2758,15 +2780,42 @@ def process_nmb_transactions(filepath):
             )
 
             # ── Duplicate check ────────────────────────────────────────────────
+            # description-based dedup only runs when description is non-empty,
+            # otherwise every no-description row would collide on the empty
+            # string with any prior no-description row and get silently
+            # dropped. Ref-based dedup still guards those rows.
             is_duplicate = False
             if ref_number and ref_number in all_existing_refs:
                 is_duplicate = True
                 stats['skipped'] += 1
-            elif description in all_existing_messages:
+            elif description and description in all_existing_messages:
                 is_duplicate = True
                 stats['skipped'] += 1
 
             if is_duplicate:
+                continue
+
+            # ── No-description NMB row → straight to FAILED_NMB with UNKNOWN
+            # placeholders. Value Date, Transaction Reference and Credit Amount
+            # are still present on the CSV row; SMS rescue can pick this up when
+            # the customer texts the ref + plate. Without this branch these
+            # rows would fall through the whole extractor stack and land in
+            # FAILED with 'No identifier', which reads as an ingestion error
+            # rather than an SMS-rescue candidate.
+            if not description.strip():
+                last_failed_nmb_id += 1
+                failed_nmb_data.append([
+                    last_failed_nmb_id,
+                    date,
+                    'NMB',
+                    'UNKNOWN',
+                    credit_amount,
+                    'UNKNOWN',
+                    'UNKNOWN',
+                    ref_number,
+                ])
+                stats['failed_nmb'] += 1
+                print(f"⚠️ FAILED_NMB (no description) — ref={ref_number} amt={credit_amount} → SMS-rescue candidate")
                 continue
 
             # ══════════════════════════════════════════════════════════════════
