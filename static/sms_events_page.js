@@ -18,13 +18,13 @@
   const $perpage = document.getElementById('sms_perpage');
 
   const OUTCOME_PILL = {
-    'rescued':              { label: 'Rescued',        cls: 'kt-badge-success' },
-    'already_rescued':      { label: 'Already',        cls: 'kt-badge-info' },
-    'not_a_failed_row':     { label: 'Not failed',     cls: 'kt-badge-secondary' },
-    'ref_not_found':        { label: 'Ref not found',  cls: 'kt-badge-warning' },
-    'plate_not_in_records': { label: 'Plate unknown',  cls: 'kt-badge-warning' },
-    'extract_failed':       { label: 'Extract failed', cls: 'kt-badge-destructive' },
-    'server_error':         { label: 'Server error',   cls: 'kt-badge-destructive' },
+    'rescued':              { label: 'Rescued',           cls: 'kt-badge-success' },
+    'already_rescued':      { label: 'Already rescued',   cls: 'kt-badge-info' },
+    'not_a_failed_row':     { label: 'In PASSED',         cls: 'kt-badge-primary' },
+    'ref_not_found':        { label: 'Ref not found',     cls: 'kt-badge-destructive' },
+    'plate_not_in_records': { label: 'Plate unknown',     cls: 'kt-badge-warning' },
+    'extract_failed':       { label: 'Extract failed',    cls: 'kt-badge-secondary' },
+    'server_error':         { label: 'Server error',      cls: 'kt-badge-destructive' },
   };
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -53,7 +53,11 @@
         </td>
         <td class="text-foreground font-normal text-sm">
           ${r.rescued_row_id
-            ? `<a class="text-primary hover:underline" href="/home/transactions#${r.rescued_row_id}">#${r.rescued_row_id}</a>`
+            ? `<a class="text-primary hover:underline" href="/home/transactions#${r.rescued_row_id}"
+                  title="${esc(r.rescued_source_tab || '')}">#${r.rescued_row_id}${
+                r.rescued_source_tab
+                  ? ` <span class="text-xs text-muted-foreground">${esc(r.rescued_source_tab)}</span>`
+                  : ''}</a>`
             : '<span class="text-muted-foreground">—</span>'}
         </td>
       </tr>

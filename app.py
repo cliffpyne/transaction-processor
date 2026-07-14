@@ -3945,14 +3945,14 @@ def admin_sms_recent():
         return jsonify({'error': 'unauthorized'}), 401
     url = os.environ.get('SUPABASE_URL', '').rstrip('/')
     key = os.environ.get('SUPABASE_SERVICE_KEY', '')
-    n = min(50, max(1, int(request.args.get('n', 15))))
+    n = min(5000, max(1, int(request.args.get('n', 15))))
     r = requests.get(
         f'{url}/rest/v1/sms_events'
         f'?select=id,sender,outcome,http_status,extracted_plate,extracted_ref,'
         f'rescued_row_id,processed_at,body'
         f'&order=processed_at.desc&limit={n}',
         headers={'apikey': key, 'Authorization': f'Bearer {key}'},
-        timeout=30,
+        timeout=60,
     )
     return (r.text, r.status_code, {'Content-Type': 'application/json'})
 
