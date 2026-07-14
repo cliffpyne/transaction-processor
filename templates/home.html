@@ -39,6 +39,69 @@ License: https://keenthemes.com/metronic/tailwind/docs/getting-started/license
   <link href="assets/vendors/keenicons/styles.bundle.css" rel="stylesheet"/>
   <link href="assets/css/styles.css" rel="stylesheet"/>
   <script src="assets/js/elegansky-loader.js"></script>
+{% if role == 'viewer' %}
+ <style>
+  /* Viewer-role cosmetic gating — hide the demo Metronic surfaces so a
+     branch officer never sees the vendor breadcrumbs. Admins/editors are
+     unaffected. */
+  #headerContainer > *:not(.kt-viewer-nav) { display: none !important; }
+  .kt-viewer-nav { display: flex !important; gap: 1.5rem; align-items: center; }
+  .kt-viewer-nav a {
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: hsl(var(--foreground));
+    padding: 0.25rem 0.5rem;
+  }
+  .kt-viewer-nav a:hover { color: hsl(var(--primary)); }
+  #sidebar_content .kt-menu > .kt-menu-item[data-viewer-hide="1"] { display: none !important; }
+  .kt-footer nav a { pointer-events: none !important; opacity: 0.55; cursor: default; }
+ </style>
+ <script>
+  document.addEventListener('DOMContentLoaded', function () {
+    // ── Top navbar — replace with just Dashboard + Transactions ──
+    var header = document.getElementById('headerContainer');
+    if (header) {
+      var nav = document.createElement('div');
+      nav.className = 'kt-viewer-nav';
+      var here = window.location.pathname;
+      var mkLink = function (label, href) {
+        var a = document.createElement('a');
+        a.textContent = label;
+        a.href = href;
+        if (here === href || (href !== '/home' && here.indexOf(href) === 0)) {
+          a.style.color = 'hsl(var(--primary))';
+          a.style.fontWeight = '600';
+        }
+        return a;
+      };
+      nav.appendChild(mkLink('Dashboard', '/home'));
+      nav.appendChild(mkLink('Transactions', '/home/transactions'));
+      header.appendChild(nav);
+    }
+    // ── Sidebar — hide every accordion except Dashboards + Transactions ──
+    var KEEP = ['Dashboards', 'Transactions'];
+    var items = document.querySelectorAll('#sidebar_content .kt-menu > .kt-menu-item');
+    items.forEach(function (el) {
+      var titleEl = el.querySelector('.kt-menu-title');
+      if (!titleEl) return;                 // headings like "USER" / "APPS"
+      var title = titleEl.textContent.trim();
+      if (KEEP.indexOf(title) === -1) {
+        el.setAttribute('data-viewer-hide', '1');
+      }
+    });
+    // Also hide the USER / APPS section headings that lead unwanted groups.
+    var headings = document.querySelectorAll('#sidebar_content .kt-menu > .kt-menu-item .kt-menu-heading');
+    headings.forEach(function (h) {
+      var text = h.textContent.trim().toUpperCase();
+      if (text === 'USER' || text === 'APPS') {
+        var wrapper = h.closest('.kt-menu-item');
+        if (wrapper) wrapper.setAttribute('data-viewer-hide', '1');
+      }
+    });
+  });
+ </script>
+{% endif %}
  </head>
  <body class="antialiased flex h-full text-base text-foreground bg-background demo1 kt-sidebar-fixed kt-header-fixed">
   <!-- Theme Mode -->
