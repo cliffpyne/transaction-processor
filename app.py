@@ -1376,25 +1376,70 @@ def lookup_customer_id_from_cache(identifier, lookup_type, id_lookup_sav):
     
     return ''
 
+# Sticky per-tab minimum ref count. Once we've read N refs from a tab, a
+# subsequent read that drops below 0.9*N is treated as a Sheets API
+# truncation and retried instead of trusted. Reset per process; grows
+# monotonically as tabs fill up.
+_REF_COUNT_FLOOR: dict = {}
+
+
 def get_existing_refs(service, sheet_name='PASSED', refs_only=False):
     """
     Get existing reference numbers AND messages for duplicate detection.
     refs_only=True: skip loading message column entirely (saves memory for large sheets).
+
+    Retries up to 4x with exponential backoff on exception. Once a stable
+    row count is known for a tab, refuses to accept a subsequent read that
+    dropped below _LAST_KNOWN_REF_COUNT * 0.9 — that catches Google Sheets'
+    silent truncation which was landing sheet-side duplicates
+    (dedup missed recent refs → CSV re-upload appended existing rows).
     """
+    import time as _time
+    if sheet_name == 'FAILED':
+        ref_column = 'I'
+    elif sheet_name in ('FAILED_NMB', 'FAILED_NMB_OLD'):
+        ref_column = 'H'
+    else:
+        ref_column = 'H'
+
+    target_sheet_id, actual_tab = _resolve_sheet(sheet_name)
+    last_err = None
+    for attempt in range(1, 5):
+        try:
+            if refs_only:
+                result = service.spreadsheets().values().get(
+                    spreadsheetId=target_sheet_id,
+                    range=f'{actual_tab}!{ref_column}:{ref_column}',
+                    valueRenderOption='UNFORMATTED_VALUE',
+                ).execute()
+                refs = set()
+                messages = set()
+                raw = result.get('values', [])
+                for row in raw[1:]:
+                    if row and row[0] not in (None, ''):
+                        ref = str(row[0]).strip()
+                        if ref and ref.lower() != 'refnumber':
+                            refs.add(ref)
+                # Truncation guard: reject a suspicious shrinkage.
+                floor = _REF_COUNT_FLOOR.get(sheet_name, 0)
+                if floor and len(refs) < floor * 0.9:
+                    print(f"⚠️ {sheet_name}: dedup read returned {len(refs)} refs "
+                          f"(known floor {floor}) — retry")
+                    _time.sleep(2 * attempt)
+                    continue
+                _REF_COUNT_FLOOR[sheet_name] = max(floor, len(refs))
+                return refs, messages
+            # Full path — messages + refs
+            break
+        except Exception as e:
+            last_err = e
+            print(f"{sheet_name} dedup read error attempt {attempt}: {e}")
+            _time.sleep(2 * attempt)
+    # Fall through to the original non-retry path for the messages+refs case
     try:
         sheet = service.spreadsheets()
-        
-        if sheet_name == 'FAILED':
-            ref_column = 'I'  # CRDB FAILED has 9 cols, ref in col I
-        elif sheet_name in ('FAILED_NMB', 'FAILED_NMB_OLD'):
-            ref_column = 'H'  # NMB FAILED has 8 cols, ref in col H
-        else:
-            ref_column = 'H'
-        
-        target_sheet_id, actual_tab = _resolve_sheet(sheet_name)
-        mode = 'REFS ONLY' if refs_only else 'MESSAGE+REF'
-        print(f"📖 Reading {sheet_name} (tab:{actual_tab}): {mode}, REFNUMBER from column {ref_column}")
-        
+        print(f"📖 Reading {sheet_name} (tab:{actual_tab}): MESSAGE+REF, REFNUMBER from column {ref_column}")
+
         if refs_only:
             # Only fetch the ref column — skip messages to save memory
             result = service.spreadsheets().values().get(
