@@ -3861,6 +3861,82 @@ def admin_dup_refs():
     })
 
 
+@app.route('/admin/sms-retry-fails', methods=['POST'])
+def admin_sms_retry_fails():
+    """Token-gated: replay every sms_events row that ended in
+    ref_not_found through /api/sms-rescue internally. With the
+    ref_number lookup now case-insensitive, uppercase-typed refs
+    that missed before will match and rescue this time.
+
+    Returns a tally of what changed. The dedup guard on _sms_event_insert
+    keeps a re-tried row from stacking a second sms_events entry when
+    the outcome doesn't change; a successful rescue writes a fresh
+    row with outcome='rescued'."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    hdr = {'apikey': key, 'Authorization': f'Bearer {key}'}
+    outcomes = ['ref_not_found']
+    if request.args.get('include_plate_unknown') == '1':
+        outcomes.append('plate_not_in_records')
+    filt = ','.join(outcomes)
+    r = requests.get(
+        f'{url}/rest/v1/sms_events'
+        f'?select=id,sender,body,received_at'
+        f'&outcome=in.({filt})'
+        f'&order=processed_at.asc',
+        headers={**hdr, 'Range-Unit': 'items', 'Range': '0-1999'},
+        timeout=45,
+    )
+    if r.status_code not in (200, 206):
+        return jsonify({'error': r.text[:400]}), 500
+    rows = r.json()
+
+    from flask import current_app
+    tally = {'checked': 0, 'rescued': 0, 'still_ref_not_found': 0,
+             'plate_unknown': 0, 'already_rescued': 0,
+             'not_a_failed_row': 0, 'extract_failed': 0, 'other': 0}
+    samples = []
+    with current_app.test_client() as client:
+        for row in rows:
+            tally['checked'] += 1
+            resp = client.post(
+                '/api/sms-rescue',
+                headers={'X--Migration-Token': '',                          # not used
+                         'Content-Type': 'application/json'},
+                json={'message': row.get('body') or '',
+                      'sender':  row.get('sender'),
+                      'received_at': row.get('received_at')},
+                environ_overrides={'HTTP_X_MIGRATION_TOKEN':
+                                   os.environ.get('MIGRATION_TOKEN', '')},
+            )
+            try:
+                data = resp.get_json() or {}
+            except Exception:
+                data = {}
+            if resp.status_code == 200 and data.get('rescued'):
+                tally['rescued'] += 1
+                if len(samples) < 10:
+                    samples.append({'sms_id': row['id'],
+                                    'row_id': data.get('row_id'),
+                                    'plate': data.get('plate'),
+                                    'ref': data.get('ref')})
+            elif resp.status_code == 409 and data.get('error') == 'already_rescued':
+                tally['already_rescued'] += 1
+            elif resp.status_code == 409 and data.get('error') == 'not_a_failed_row':
+                tally['not_a_failed_row'] += 1
+            elif resp.status_code == 404 and data.get('error') == 'ref_not_found':
+                tally['still_ref_not_found'] += 1
+            elif resp.status_code == 404 and data.get('error') == 'plate_not_in_records':
+                tally['plate_unknown'] += 1
+            elif resp.status_code == 400:
+                tally['extract_failed'] += 1
+            else:
+                tally['other'] += 1
+    return jsonify({'tally': tally, 'sample_rescued': samples})
+
+
 @app.route('/admin/sms-recent', methods=['GET'])
 def admin_sms_recent():
     """Token-gated peek at the most recent sms_events rows so we can
