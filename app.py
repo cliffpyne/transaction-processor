@@ -4437,5 +4437,41 @@ def not_found(e):
     ), 404
 
 
+@app.route('/admin/rescued-banks', methods=['GET'])
+def admin_rescued_banks():
+    """Group every row that was moved by the SMS-rescue flow (or the UI
+    rescue button) by its bank + destination source_tab so we can see
+    which sheets' ILIYOPATAAUTO tabs should have entries."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    hdr = {'apikey': key, 'Authorization': f'Bearer {key}'}
+    r = requests.get(
+        f'{url}/rest/v1/transactions'
+        f'?select=id,bank,source_tab,ref_number,moved_at,moved_by_username'
+        f'&source_tab=in.(BODAILIYOPATA,IPHONEILIYOPATA)'
+        f'&order=moved_at.desc',
+        headers={**hdr, 'Range-Unit': 'items', 'Range': '0-2999'},
+        timeout=45,
+    )
+    if r.status_code not in (200, 206):
+        return jsonify({'error': r.text[:400]}), 500
+    rows = r.json()
+    counts = {}
+    for row in rows:
+        key_tuple = (row.get('bank') or '?', row.get('source_tab') or '?')
+        counts[key_tuple] = counts.get(key_tuple, 0) + 1
+    breakdown = [{'bank': b, 'dest': t, 'count': n}
+                 for (b, t), n in sorted(counts.items(), key=lambda kv: -kv[1])]
+    sms_rescued = [r for r in rows if r.get('moved_by_username') == 'sms_rescue']
+    return jsonify({
+        'total_moved': len(rows),
+        'sms_rescued': len(sms_rescued),
+        'by_bank_and_dest': breakdown,
+        'newest_5': rows[:5],
+    })
+
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
