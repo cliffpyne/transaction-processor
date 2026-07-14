@@ -3758,13 +3758,33 @@ def admin_count():
     hdr = {'apikey': key, 'Authorization': f'Bearer {key}',
            'Range-Unit': 'items', 'Range': '0-0', 'Prefer': 'count=exact'}
     out = {}
-    for t in ('transactions', 'customers', 'dedup_alerts'):
+    for t in ('transactions', 'customers', 'dedup_alerts', 'sms_events'):
         try:
             r = requests.get(f'{url}/rest/v1/{t}?select=id', headers=hdr, timeout=30)
             out[t] = int(r.headers.get('Content-Range', '0-0/0').split('/')[-1] or 0)
         except Exception as e:
             out[t] = f'error: {str(e)[:80]}'
     return jsonify(out)
+
+
+@app.route('/admin/sms-recent', methods=['GET'])
+def admin_sms_recent():
+    """Token-gated peek at the most recent sms_events rows so we can
+    verify the phone-forward is landing without needing a login session."""
+    if not _migration_token_ok():
+        return jsonify({'error': 'unauthorized'}), 401
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    n = min(50, max(1, int(request.args.get('n', 15))))
+    r = requests.get(
+        f'{url}/rest/v1/sms_events'
+        f'?select=id,sender,outcome,http_status,extracted_plate,extracted_ref,'
+        f'rescued_row_id,processed_at,body'
+        f'&order=processed_at.desc&limit={n}',
+        headers={'apikey': key, 'Authorization': f'Bearer {key}'},
+        timeout=30,
+    )
+    return (r.text, r.status_code, {'Content-Type': 'application/json'})
 
 
 @app.route('/admin/seed-users', methods=['POST'])
