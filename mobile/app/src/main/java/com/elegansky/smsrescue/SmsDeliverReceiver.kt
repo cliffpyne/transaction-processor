@@ -5,13 +5,15 @@ import android.content.Context
 import android.content.Intent
 
 /**
- * Only invoked when this app is the DEFAULT SMS handler. Skip the
- * default-check guard in SmsReceiver.onReceive() and go straight to
- * handle() so this receiver becomes the sole pipeline entry when
- * we're default (avoids double-processing with SMS_RECEIVED).
+ * Only invoked when this app is the DEFAULT SMS handler. Owns its own
+ * PendingResult from goAsync() (calling it here — not inside the
+ * shared processor — because goAsync() only works on the receiver
+ * that's actively dispatching), then delegates to SmsReceiver.process
+ * for the actual queue + POST + delete logic.
  */
 class SmsDeliverReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        SmsReceiver().handle(context, intent)
+        val pending = goAsync()
+        SmsReceiver.process(context, intent, pending)
     }
 }
