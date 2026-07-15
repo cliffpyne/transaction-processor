@@ -38,7 +38,7 @@ USERS = [
     ('APRUNA THOMAS BODA',    'APRUNA',   'Apruna Thomas Boda',    'viewer'),
     ('EPPIFANY KALUA',        'EPPIFANY', 'Eppifany Kalua',        'viewer'),
     ('MWASITI JUMANNE BODA',  'MWASITI',  'Mwasiti Jumanne Boda',  'viewer'),
-    ('MWANZANI SAID',         'MWANZANI', 'Mwanzani Said',         'viewer'),
+    ('MWAZANI SAID',          'MWAZANI',  'Mwazani Said',          'viewer'),
     ('EDITHA KAMANZI BODA',   'EDITHA',   'Editha Kamanzi Boda',   'viewer'),
 ]
 
