@@ -3930,10 +3930,28 @@ def admin_sms_retry_fails():
     if request.args.get('include_plate_unknown') == '1':
         outcomes.append('plate_not_in_records')
     filt = ','.join(outcomes)
+
+    # Age-window filter: retry events aged min_age_min..max_age_min. Default
+    # window is 5 min → 24 h: gives the puller time to catch up before we
+    # look, and doesn't waste calls retrying week-old typos forever. A cron
+    # firing every ~5 min with these defaults naturally covers the "timing
+    # race" case where the customer's SMS arrives before their transaction
+    # lands in the DB.
+    try:
+        min_age_min = int(request.args.get('min_age_min', '5'))
+        max_age_min = int(request.args.get('max_age_min', '1440'))
+    except ValueError:
+        return jsonify({'error': 'min_age_min/max_age_min must be integers'}), 400
+    now_utc = datetime.utcnow()
+    upper = (now_utc - timedelta(minutes=min_age_min)).isoformat() + 'Z'
+    lower = (now_utc - timedelta(minutes=max_age_min)).isoformat() + 'Z'
+
     r = requests.get(
         f'{url}/rest/v1/sms_events'
-        f'?select=id,sender,body,received_at'
+        f'?select=id,sender,body,received_at,processed_at'
         f'&outcome=in.({filt})'
+        f'&processed_at=gte.{lower}'
+        f'&processed_at=lte.{upper}'
         f'&order=processed_at.asc',
         headers={**hdr, 'Range-Unit': 'items', 'Range': '0-1999'},
         timeout=45,
