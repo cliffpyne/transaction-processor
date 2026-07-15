@@ -73,13 +73,19 @@ class SmsReceiver : BroadcastReceiver() {
             )
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val api = SmsPusher.api(context)
+                    // Receiver path uses the FAST client (3 s connect / 5 s read)
+                    // so the total time in this coroutine stays under Android's
+                    // 10 s broadcast-ANR limit. Slow network → we bail early,
+                    // queue the row, and the drainer picks it up.
+                    val api = SmsPusher.api(context, fastMode = true)
                     if (api == null) {
                         QueueDb.get(context).dao().insert(entry)
                         return@launch
                     }
                     val outcome = SmsPusher.postOne(api, entry)
                     if (outcome.networkFailure) {
+                        // Fast POST failed — hand off to the drainer, which
+                        // uses the slow client and has ~10 min of budget.
                         QueueDb.get(context).dao().insert(entry)
                         SmsWorker.enqueueDrain(context)
                         return@launch

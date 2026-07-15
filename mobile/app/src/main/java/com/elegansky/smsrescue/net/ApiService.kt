@@ -39,7 +39,21 @@ interface SmsRescueApi {
 
 object ApiFactory {
 
-    fun build(baseUrl: String, token: String): SmsRescueApi {
+    /**
+     * Build a Retrofit client.
+     *
+     * fastMode=true is for calls that run inside a BroadcastReceiver.goAsync()
+     * window. Android kills any receiver that blocks longer than 10 s with an
+     * ANR — under Samsung's background-throttled state a POST can take 20+ s
+     * to even establish a TCP connection, so the receiver ANRs on nearly every
+     * SMS_DELIVER. We use aggressive 3 s connect / 5 s read here and let
+     * anything that misses that budget fail fast; SmsWorker then picks up the
+     * queued row later with the slow timeouts and retries at its leisure.
+     *
+     * fastMode=false is for WorkManager drain calls — no ANR limit, keep the
+     * generous 20 s / 30 s timeouts to survive genuine bad-network moments.
+     */
+    fun build(baseUrl: String, token: String, fastMode: Boolean = false): SmsRescueApi {
         val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
         val tokenInterceptor = Interceptor { chain ->
             val req = chain.request().newBuilder()
@@ -47,13 +61,16 @@ object ApiFactory {
                 .build()
             chain.proceed(req)
         }
+        val (connectSec, readSec) = if (fastMode) 3L to 5L else 20L to 30L
         val client = OkHttpClient.Builder()
             .addInterceptor(tokenInterceptor)
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BASIC
             })
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(!fastMode)
+            .connectTimeout(connectSec, TimeUnit.SECONDS)
+            .readTimeout(readSec, TimeUnit.SECONDS)
+            .writeTimeout(readSec, TimeUnit.SECONDS)
             .build()
         return Retrofit.Builder()
             .baseUrl(baseUrl.trimEnd('/') + "/")

@@ -28,10 +28,16 @@ object SmsPusher {
 
     private const val TAG = "SmsPusher"
 
-    fun api(ctx: Context): SmsRescueApi? {
+    /**
+     * fastMode=true is for the SMS receiver's goAsync() window (Android's
+     * 10 s ANR limit — 3 s connect / 5 s read). fastMode=false is for the
+     * WorkManager drainer (20 s / 30 s). If a fast POST times out, the
+     * receiver queues the row and the drainer retries with slow timeouts.
+     */
+    fun api(ctx: Context, fastMode: Boolean = false): SmsRescueApi? {
         val settings = SettingsRepo(ctx)
         if (!settings.ready()) return null
-        return ApiFactory.build(settings.serverUrl, settings.token)
+        return ApiFactory.build(settings.serverUrl, settings.token, fastMode)
     }
 
     suspend fun postOne(api: SmsRescueApi, entry: QueueEntry): PostOutcome {
