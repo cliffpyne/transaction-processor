@@ -60,7 +60,19 @@ _PASSED_TAB = {
     'IPHONE': 'BANK_PASSED',
 }
 
+# FAILED tab per bank sheet — where the row still sits after rescue. We
+# stamp column I on that row so accounting can see at a glance which rows
+# have been rescued.
+_FAILED_TAB = {
+    'CRDB':   'FAILED',
+    'NMB':    'FAILED_NMB',
+    'IPHONE': 'BANK_FAILED',
+}
+
 ILIYOPATA_TAB = 'ILIYOPATAAUTO'
+# Column letter to stamp the rescue marker into on the FAILED row.
+# FAILED rows use A..H; I is unused → free for the marker.
+FAILED_MARKER_COL = 'I'
 
 
 def _service():
@@ -115,6 +127,43 @@ def _scan_tab(service, sheet_id):
             if 0 < v < 100_000 and v > biggest:
                 biggest = v
     return biggest, last_used_row + 1
+
+
+def _mark_failed_row_rescued(service, sheet_id, failed_tab, ref, marker_text):
+    """Stamp the rescue marker into column I of the FAILED row that
+    matches `ref`. FAILED rows use A..H, so I is free.
+
+    Ref match is case-insensitive because bank refs are alphanumeric and
+    customer texts sometimes ALL-CAPS them. Returns {'ok': True, 'row': N}
+    on hit, {'ok': False, ...} if the ref isn't found (row already gone
+    or ref differs).
+    """
+    try:
+        r = service.spreadsheets().values().get(
+            spreadsheetId=sheet_id,
+            range=f"'{failed_tab}'!H:H",
+            valueRenderOption='UNFORMATTED_VALUE',
+        ).execute()
+    except Exception as e:
+        return {'ok': False, 'error': f'read_failed: {str(e)[:120]}'}
+    needle = (ref or '').strip().lower()
+    if not needle:
+        return {'ok': False, 'error': 'empty_ref'}
+    for i, row in enumerate(r.get('values', []), start=1):
+        if not row:
+            continue
+        if str(row[0]).strip().lower() == needle:
+            try:
+                service.spreadsheets().values().update(
+                    spreadsheetId=sheet_id,
+                    range=f"'{failed_tab}'!{FAILED_MARKER_COL}{i}",
+                    valueInputOption='USER_ENTERED',
+                    body={'values': [[marker_text]]},
+                ).execute()
+                return {'ok': True, 'row': i}
+            except Exception as e:
+                return {'ok': False, 'error': f'update_failed: {str(e)[:120]}'}
+    return {'ok': False, 'error': 'ref_not_in_failed_tab'}
 
 
 def _passed_last_id(service, sheet_id, passed_tab):
@@ -233,12 +282,26 @@ def append_iliyopata_row(*, origin_source_tab, tx, customer, new_date_text):
                 traceback.print_exc()
                 passed_err = str(e)[:200]
 
+        # Stamp the source FAILED row so accounting can see rescued rows
+        # in-tab without cross-checking ILIYOPATA. Best-effort — a failure
+        # here just means no marker; the DB and other sheet writes are
+        # already durable.
+        failed_tab = _FAILED_TAB.get(bank_label)
+        marker_result = None
+        if failed_tab:
+            ref = tx.get('ref_number') or ''
+            marker_text = f"RESCUED @ {new_date_text or ''}".strip()
+            marker_result = _mark_failed_row_rescued(
+                service, sheet_id, failed_tab, ref, marker_text,
+            )
+
         return {
             'ok': True,
             'sheet': bank_label,
             'appended_id': next_id,
             'passed_id': passed_id,
             'passed_err': passed_err,
+            'failed_marker': marker_result,
         }
     except Exception as e:
         traceback.print_exc()
