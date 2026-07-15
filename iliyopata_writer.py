@@ -52,6 +52,14 @@ _ORIGIN_TO_SHEET = {
     'IPHONEFAILED': ('IPHONE', IPHONE_SHEET_ID),
 }
 
+# PASSED tab per bank sheet. Both CRDB and NMB just call it 'PASSED'
+# (there is no 'PASSED_NMB' tab on the NMB sheet). iPhone uses BANK_PASSED.
+_PASSED_TAB = {
+    'CRDB':   'PASSED',
+    'NMB':    'PASSED',
+    'IPHONE': 'BANK_PASSED',
+}
+
 ILIYOPATA_TAB = 'ILIYOPATAAUTO'
 
 
@@ -66,21 +74,61 @@ def _service():
     return build('sheets', 'v4', credentials=creds)
 
 
-def _next_id(service, sheet_id):
-    """Read column A of the ILIYOPATA tab (UNFORMATTED_VALUE so numeric
-    cells come back as numbers regardless of any date-format display),
-    take the largest integer, add 1. Starts at 1 if the tab is empty."""
+def _scan_tab(service, sheet_id):
+    """Read A:I of the ILIYOPATA tab and figure out two things:
+
+      - biggest_id  = largest integer found in ANY of columns A..I (some
+                      old rows have the id in column E because of a
+                      historical Sheets append() misalignment on NMB —
+                      we treat any integer that looks like an id as one
+                      so we don't reuse it).
+      - next_row    = 1-based row number of the first fully-empty row,
+                      so the next update lands there without gaps and
+                      without touching existing data.
+
+    No header assumption — the ILIYOPATA tabs don't have a header row,
+    so we scan every row starting from row 1.
+
+    Falls back to (biggest_id=0, next_row=1) if the read fails.
+    """
     try:
         resp = service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
-            range=f"'{ILIYOPATA_TAB}'!A:A",
+            range=f"'{ILIYOPATA_TAB}'!A:I",
             valueRenderOption='UNFORMATTED_VALUE',
         ).execute()
     except Exception:
-        return 1
+        return 0, 1
     values = resp.get('values', [])
     biggest = 0
-    for row in values[1:]:  # skip header
+    last_used_row = 0  # 1-based row number of the last row with any data
+    for i, row in enumerate(values, start=1):
+        if any(str(c).strip() for c in row):
+            last_used_row = i
+        for cell in row:
+            try:
+                v = int(cell)
+            except (ValueError, TypeError):
+                continue
+            # Only integers in a plausible id range — skip amounts / phone
+            # numbers / anything huge. Ids stay well under 100k.
+            if 0 < v < 100_000 and v > biggest:
+                biggest = v
+    return biggest, last_used_row + 1
+
+
+def _passed_last_id(service, sheet_id, passed_tab):
+    """Largest integer in column A of the PASSED tab, or 0 if empty/unreadable."""
+    try:
+        resp = service.spreadsheets().values().get(
+            spreadsheetId=sheet_id,
+            range=f"'{passed_tab}'!A:A",
+            valueRenderOption='UNFORMATTED_VALUE',
+        ).execute()
+    except Exception:
+        return 0
+    biggest = 0
+    for row in resp.get('values', []):
         if not row:
             continue
         try:
@@ -89,11 +137,24 @@ def _next_id(service, sheet_id):
                 biggest = v
         except (ValueError, TypeError):
             continue
-    return biggest + 1
+    return biggest
 
 
 def append_iliyopata_row(*, origin_source_tab, tx, customer, new_date_text):
-    """Append one row to the ILIYOPATA tab of the correct bank sheet.
+    """Mirror a rescued row into TWO tabs on the bank's Google Sheet:
+
+      1. ILIYOPATAAUTO — audit trail of every rescue (9 cols with customer_id)
+      2. PASSED (or BANK_PASSED for iPhone) — the same row makes it into
+         the primary success tab too (8 cols, no customer_id) so downstream
+         tooling that only reads PASSED sees rescued transactions as
+         successful. The row uses the ILIYOPATA timestamp (the exact time
+         of rescue) — not the original bank timestamp.
+
+    The ILIYOPATA write uses values.update() with an explicit A{n}:I{n}
+    range instead of values.append('A:I') because on the NMB sheet the
+    append+INSERT_ROWS behaviour was mis-detecting the table and inserting
+    rows shifted 4 columns to the right. Explicit-range update bypasses
+    Sheets' table-detection entirely.
 
     Args:
       origin_source_tab: the source_tab of the FAILED row we just rescued
@@ -105,7 +166,8 @@ def append_iliyopata_row(*, origin_source_tab, tx, customer, new_date_text):
       new_date_text: the DD.MM.YYYY HH:MM:SS string we just stamped into
                      transactions.transaction_date.
 
-    Returns: {'ok': True, 'sheet': 'CRDB', 'appended_id': N} on success.
+    Returns: {'ok': True, 'sheet': 'CRDB', 'appended_id': N,
+              'passed_id': M} on success.
              {'ok': False, 'error': '…'} on any Google error — DB write
              already succeeded so this is purely observability.
     """
@@ -113,30 +175,71 @@ def append_iliyopata_row(*, origin_source_tab, tx, customer, new_date_text):
     if not binding:
         return {'ok': False, 'error': f'unknown origin {origin_source_tab}'}
     bank_label, sheet_id = binding
+    passed_tab = _PASSED_TAB.get(bank_label)
 
     try:
         service = _service()
-        next_id = _next_id(service, sheet_id)
-        row = [
-            next_id,                                          # A id
-            new_date_text or '',                              # B date+time
-            bank_label,                                       # C bank
-            tx.get('description') or '',                      # D description
+        biggest_id, next_row = _scan_tab(service, sheet_id)
+        next_id = biggest_id + 1
+
+        # ILIYOPATA 9-col row — with customer_id
+        ily_row = [
+            next_id,
+            new_date_text or '',
+            bank_label,
+            tx.get('description') or '',
             tx.get('credit_amount') if tx.get('credit_amount') is not None else '',
-                                                              # E amount
-            tx.get('identifier') or customer.get('plate') or '',  # F plate/id
-            customer.get('name') or '',                       # G customer
-            tx.get('ref_number') or '',                       # H ref
-            tx.get('customer_id') or customer.get('customer_id') or '',  # I cust_id
+            tx.get('identifier') or customer.get('plate') or '',
+            customer.get('name') or '',
+            tx.get('ref_number') or '',
+            tx.get('customer_id') or customer.get('customer_id') or '',
         ]
-        service.spreadsheets().values().append(
+        # Explicit-range update — writes exactly at A{n}:I{n}, no table detection.
+        service.spreadsheets().values().update(
             spreadsheetId=sheet_id,
-            range=f"'{ILIYOPATA_TAB}'!A:I",
+            range=f"'{ILIYOPATA_TAB}'!A{next_row}:I{next_row}",
             valueInputOption='USER_ENTERED',
-            insertDataOption='INSERT_ROWS',
-            body={'values': [row]},
+            body={'values': [ily_row]},
         ).execute()
-        return {'ok': True, 'sheet': bank_label, 'appended_id': next_id}
+
+        # PASSED 8-col row — same data minus customer_id.
+        passed_id = None
+        passed_err = None
+        if passed_tab:
+            try:
+                passed_id = _passed_last_id(service, sheet_id, passed_tab) + 1
+                passed_row = [
+                    passed_id,
+                    new_date_text or '',
+                    bank_label,
+                    tx.get('description') or '',
+                    tx.get('credit_amount') if tx.get('credit_amount') is not None else '',
+                    tx.get('identifier') or customer.get('plate') or '',
+                    customer.get('name') or '',
+                    tx.get('ref_number') or '',
+                ]
+                # append() is fine on PASSED — those tabs have thousands of
+                # rows and Sheets' table detection works correctly on them.
+                service.spreadsheets().values().append(
+                    spreadsheetId=sheet_id,
+                    range=f"'{passed_tab}'!A:H",
+                    valueInputOption='USER_ENTERED',
+                    insertDataOption='INSERT_ROWS',
+                    body={'values': [passed_row]},
+                ).execute()
+            except Exception as e:
+                # PASSED write is a secondary mirror — log but do not fail
+                # the whole call. ILIYOPATA already succeeded above.
+                traceback.print_exc()
+                passed_err = str(e)[:200]
+
+        return {
+            'ok': True,
+            'sheet': bank_label,
+            'appended_id': next_id,
+            'passed_id': passed_id,
+            'passed_err': passed_err,
+        }
     except Exception as e:
         traceback.print_exc()
         return {'ok': False, 'error': str(e)[:200]}
