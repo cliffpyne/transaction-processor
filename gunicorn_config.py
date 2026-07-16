@@ -5,7 +5,11 @@ import os
 bind = "0.0.0.0:10000"
 
 # Worker processes
-workers = 1
+# 2 sync workers so no single slow request (retry sweeps, big NMB
+# CSV uploads) can block real customer traffic — the other worker
+# stays available. Per-worker RSS is ~150 MB, so 2 workers ~= 300 MB
+# on an 8 GB VPS — plenty of headroom.
+workers = 2
 worker_class = 'sync'
 threads = 1
 
