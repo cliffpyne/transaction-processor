@@ -130,6 +130,23 @@
     renderPager(state.page, lastPage);
   };
 
+  const loadStats = async () => {
+    try {
+      const r = await fetch('/api/sms_events/summary',
+                            { credentials: 'same-origin' });
+      if (!r.ok) return;
+      const s = await r.json();
+      const fmt = n => (typeof n === 'number' ? n.toLocaleString() : '—');
+      document.getElementById('stat_sent').textContent          = fmt(s.sent);
+      document.getElementById('stat_rescued').textContent       = fmt(s.rescued);
+      document.getElementById('stat_ref_in_passed').textContent = fmt(s.ref_in_passed);
+      document.getElementById('stat_ref_not_found').textContent = fmt(s.ref_not_found);
+    } catch (e) { /* silent — cards just stay '—' */ }
+  };
+  loadStats();
+  // Refresh every 60s so the dashboard stays live without a hard reload
+  setInterval(loadStats, 60_000);
+
   let searchTimer = null;
   $search.addEventListener('input', (e) => {
     clearTimeout(searchTimer);

@@ -477,6 +477,56 @@ def sms_events_list():
     return _paginated_query('sms_events', TABLES['sms_events'])
 
 
+@ui.route('/api/sms_events/summary', methods=['GET'])
+@login_required
+def sms_events_summary():
+    """Today's SMS stats for the dashboard cards. Returns:
+      {sent, rescued, ref_in_passed, ref_not_found}
+    where `sent` is the total count of events processed today (regardless
+    of outcome). "Today" is measured in EAT (UTC+3) to match Tanzania
+    wall-clock — customers care about their local day, not UTC."""
+    import os, requests
+    from datetime import datetime, timedelta, timezone
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '') \
+          or os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
+    if not (url and key):
+        return jsonify({'error': 'supabase_env_missing'}), 500
+    hdr = {'apikey': key, 'Authorization': f'Bearer {key}',
+           'Prefer': 'count=exact'}
+
+    # Start of today in EAT = start of today's UTC day - 3h
+    eat = timezone(timedelta(hours=3))
+    today_start_eat = datetime.now(eat).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    since = today_start_eat.astimezone(timezone.utc).strftime(
+        '%Y-%m-%dT%H:%M:%S')
+
+    def count(extra_params: dict) -> int:
+        params = {'select': 'id',
+                  'processed_at': f'gte.{since}'}
+        params.update(extra_params)
+        try:
+            r = requests.get(
+                f'{url}/rest/v1/sms_events',
+                params=params,
+                headers={**hdr, 'Range': '0-0'},
+                timeout=15,
+            )
+            cr = r.headers.get('content-range') or ''
+            return int(cr.split('/')[-1]) if '/' in cr else 0
+        except Exception:
+            return 0
+
+    return jsonify({
+        'day_start_eat': today_start_eat.isoformat(),
+        'sent':          count({}),
+        'rescued':       count({'outcome': 'eq.rescued'}),
+        'ref_in_passed': count({'outcome': 'eq.ref_in_passed'}),
+        'ref_not_found': count({'outcome': 'eq.ref_not_found'}),
+    })
+
+
 # ── users (admin only) ───────────────────────────────────────────────────────
 @ui.route('/api/users', methods=['GET'])
 @require_role('admin')
