@@ -5,11 +5,12 @@ import os
 bind = "0.0.0.0:10000"
 
 # Worker processes
-# 2 sync workers so no single slow request (retry sweeps, big NMB
-# CSV uploads) can block real customer traffic — the other worker
-# stays available. Per-worker RSS is ~150 MB, so 2 workers ~= 300 MB
-# on an 8 GB VPS — plenty of headroom.
-workers = 2
+# 6 sync workers — cheap headroom on the 8 GB VPS (~150 MB per
+# worker → ~900 MB total). Any single slow request (big NMB CSV,
+# a background sweep) can't monopolize enough workers to starve
+# the CRDB/NMB upload endpoints. Bumped from 2 → 6 after the
+# retry-sweep spam incident starved uploads at 2 workers.
+workers = 6
 worker_class = 'sync'
 threads = 1
 
