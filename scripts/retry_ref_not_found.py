@@ -61,6 +61,16 @@ MAX_EVENTS = int(os.environ.get('RETRY_MAX_EVENTS', '30'))
 TIME_BUDGET_SEC = int(os.environ.get('RETRY_TIME_BUDGET_SEC', '45'))
 MIN_AGE_MIN = int(os.environ.get('RETRY_MIN_AGE_MIN', '5'))
 MAX_AGE_MIN = int(os.environ.get('RETRY_MAX_AGE_MIN', '1440'))
+# Outcomes eligible for retry. ref_not_found handles the timing-race
+# case (customer texted before puller landed the tx). plate_not_in_records
+# handles the case where the plate was missing from Supabase customers
+# but was later added by the sync_customers_from_sheet.py timer.
+RETRY_OUTCOMES = tuple(
+    x.strip() for x in os.environ.get(
+        'RETRY_OUTCOMES',
+        'ref_not_found,plate_not_in_records'
+    ).split(',') if x.strip()
+)
 
 # Match app.py's constants (kept in sync manually — same as they always
 # were between app.py and iliyopata_writer.py).
@@ -362,6 +372,7 @@ def main() -> int:
     lower = (now - timedelta(minutes=MAX_AGE_MIN)).strftime(
         '%Y-%m-%dT%H:%M:%S')
 
+    outcome_filter = f'in.({",".join(RETRY_OUTCOMES)})'
     try:
         r = requests.get(
             f'{supa_url}/rest/v1/sms_events',
@@ -369,7 +380,7 @@ def main() -> int:
                 'select':
                     'id,sender,body,received_at,processed_at,'
                     'extracted_plate,extracted_ref',
-                'outcome': 'eq.ref_not_found',
+                'outcome': outcome_filter,
                 'processed_at': f'gte.{lower}',
                 'order': 'processed_at.asc',
                 'limit': str(MAX_EVENTS),
