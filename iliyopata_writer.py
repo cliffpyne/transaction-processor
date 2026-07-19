@@ -286,14 +286,17 @@ def append_iliyopata_row(*, origin_source_tab, tx, customer, new_date_text):
                 original_date = tx.get('transaction_date') or new_date_text or ''
                 description = tx.get('description') or ''
 
-                # Bank-specific format convention. CRDB's puller writes
-                # date and description with a leading space (' 15.07.2026
-                # 07:15:00', ' REF:...'). The DB storage often loses that
-                # space on the date field, so re-inject it here so rescue
-                # rows are indistinguishable from puller-written rows in
-                # the PASSED tab. NMB uses no leading space; matched by
-                # doing nothing.
-                if bank_label == 'CRDB':
+                # Bank-specific format convention. CRDB and IPHONE
+                # pullers both write date and description with a leading
+                # space (' 15.07.2026 07:15:00', ' REF:...'). iPhone runs
+                # on CRDB rails so BANK_PASSED follows the same convention
+                # — verified live: 4253/4903 (87%) of BANK_PASSED rows
+                # have a leading space on the date, 3223/4892 on the
+                # description. The DB often strips the leading space from
+                # the date at ingest, so re-inject it here so rescue
+                # rows match puller-written rows in the PASSED tab.
+                # NMB uses no leading space; matched by doing nothing.
+                if bank_label in ('CRDB', 'IPHONE'):
                     if original_date and not original_date.startswith(' '):
                         original_date = ' ' + original_date
                     if description and not description.startswith(' '):
