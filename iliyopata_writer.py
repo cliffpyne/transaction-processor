@@ -52,13 +52,28 @@ _ORIGIN_TO_SHEET = {
     'IPHONEFAILED': ('IPHONE', IPHONE_SHEET_ID),
 }
 
-# PASSED tab per bank sheet. Both CRDB and NMB just call it 'PASSED'
-# (there is no 'PASSED_NMB' tab on the NMB sheet). iPhone uses BANK_PASSED.
-_PASSED_TAB = {
-    'CRDB':   'PASSED',
-    'NMB':    'PASSED',
-    'IPHONE': 'BANK_PASSED',
+# PASSED tab per (origin bank, customer source_tab). SAVCOM customers
+# have their own dedicated passed tab per bank sheet — PASSED_SAV on
+# CRDB, PASSED_SAV_NMB on NMB. Rescues for SAVCOM customers must land
+# there, not in the regular PASSED tab, or accounting can't tell BODA
+# vs SAVCOM apart.
+_PASSED_TAB_MAP = {
+    ('CRDB',   'BODA_RECORDS'):   'PASSED',
+    ('CRDB',   'SAVCOM_RECORDS'): 'PASSED_SAV',
+    ('NMB',    'BODA_RECORDS'):   'PASSED',
+    ('NMB',    'SAVCOM_RECORDS'): 'PASSED_SAV_NMB',
+    ('IPHONE', 'IPHONE_RECORDS'): 'BANK_PASSED',
 }
+
+
+def _passed_tab_for(bank_label: str, customer_source_tab: str | None) -> str | None:
+    """Return the PASSED tab name for this (bank, customer) combo,
+    or None if we can't classify (row still lands in DB + ILIYOPATA;
+    just no PASSED mirror). Fallback for a BODA-labelled customer
+    with an odd origin uses the regular PASSED tab."""
+    src = customer_source_tab or 'BODA_RECORDS'
+    return _PASSED_TAB_MAP.get((bank_label, src)) \
+        or _PASSED_TAB_MAP.get((bank_label, 'BODA_RECORDS'))
 
 # FAILED tab per bank sheet — where the row still sits after rescue. We
 # stamp column I on that row so accounting can see at a glance which rows
@@ -224,7 +239,7 @@ def append_iliyopata_row(*, origin_source_tab, tx, customer, new_date_text):
     if not binding:
         return {'ok': False, 'error': f'unknown origin {origin_source_tab}'}
     bank_label, sheet_id = binding
-    passed_tab = _PASSED_TAB.get(bank_label)
+    passed_tab = _passed_tab_for(bank_label, customer.get('source_tab'))
 
     try:
         service = _service()
