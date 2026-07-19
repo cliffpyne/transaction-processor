@@ -284,11 +284,26 @@ def append_iliyopata_row(*, origin_source_tab, tx, customer, new_date_text):
                 # the original bank date. Fall back to new_date_text
                 # only when the original is somehow missing (defensive).
                 original_date = tx.get('transaction_date') or new_date_text or ''
+                description = tx.get('description') or ''
+
+                # Bank-specific format convention. CRDB's puller writes
+                # date and description with a leading space (' 15.07.2026
+                # 07:15:00', ' REF:...'). The DB storage often loses that
+                # space on the date field, so re-inject it here so rescue
+                # rows are indistinguishable from puller-written rows in
+                # the PASSED tab. NMB uses no leading space; matched by
+                # doing nothing.
+                if bank_label == 'CRDB':
+                    if original_date and not original_date.startswith(' '):
+                        original_date = ' ' + original_date
+                    if description and not description.startswith(' '):
+                        description = ' ' + description
+
                 passed_row = [
                     passed_id,
                     original_date,
                     bank_label,
-                    tx.get('description') or '',
+                    description,
                     tx.get('credit_amount') if tx.get('credit_amount') is not None else '',
                     tx.get('identifier') or customer.get('plate') or '',
                     customer.get('name') or '',
