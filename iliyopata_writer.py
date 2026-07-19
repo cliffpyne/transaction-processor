@@ -272,9 +272,21 @@ def append_iliyopata_row(*, origin_source_tab, tx, customer, new_date_text):
         if passed_tab:
             try:
                 passed_id = _passed_last_id(service, sheet_id, passed_tab) + 1
+                # Use the ORIGINAL bank transaction date on the PASSED
+                # row — not the rescue timestamp. Accounting reads PASSED
+                # as the ledger of when customers actually paid, so it
+                # has to match the bank's record. The rescue timestamp
+                # still shows on ILIYOPATAAUTO (audit) and on the FAILED
+                # column-I marker.
+                #
+                # tx was fetched BEFORE the PATCH in the rescue flow, so
+                # tx.get('transaction_date') is the pre-rescue value =
+                # the original bank date. Fall back to new_date_text
+                # only when the original is somehow missing (defensive).
+                original_date = tx.get('transaction_date') or new_date_text or ''
                 passed_row = [
                     passed_id,
-                    new_date_text or '',
+                    original_date,
                     bank_label,
                     tx.get('description') or '',
                     tx.get('credit_amount') if tx.get('credit_amount') is not None else '',
