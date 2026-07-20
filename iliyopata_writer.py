@@ -269,7 +269,38 @@ def append_iliyopata_row(*, origin_source_tab, tx, customer, new_date_text):
         # PASSED 8-col row — same data minus customer_id.
         passed_id = None
         passed_err = None
-        if passed_tab:
+        passed_skipped_reason = None
+
+        # Dedup guard — read col H (refs) of the target PASSED tab and
+        # bail if the ref is already there. Rescue's DB check
+        # (source_tab in FAILED, rescue_locked_at is null) only
+        # guarantees the DB state is FAILED; it doesn't know if the
+        # SHEET already has a row with this ref from a puller
+        # reprocess or an earlier rescue write. Without this guard,
+        # such a scenario creates a duplicate PASSED row that BRAIN
+        # / QB / Frappe re-invoice.
+        target_ref = (tx.get('ref_number') or '').strip().lower()
+        already_in_passed = False
+        if passed_tab and target_ref:
+            try:
+                check = service.spreadsheets().values().get(
+                    spreadsheetId=sheet_id,
+                    range=f"'{passed_tab}'!H:H",
+                    valueRenderOption='UNFORMATTED_VALUE',
+                ).execute()
+                existing = {
+                    str(row[0]).strip().lower()
+                    for row in check.get('values', []) if row
+                }
+                if target_ref in existing:
+                    already_in_passed = True
+                    passed_skipped_reason = 'ref_already_in_passed'
+            except Exception as e:
+                # If the dedup read fails, fall through and attempt the
+                # append — better a possible duplicate than a lost rescue.
+                passed_err = f'dedup_check_failed: {str(e)[:120]}'
+
+        if passed_tab and not already_in_passed:
             try:
                 passed_id = _passed_last_id(service, sheet_id, passed_tab) + 1
                 # Use the ORIGINAL bank transaction date on the PASSED
@@ -346,6 +377,7 @@ def append_iliyopata_row(*, origin_source_tab, tx, customer, new_date_text):
             'appended_id': next_id,
             'passed_id': passed_id,
             'passed_err': passed_err,
+            'passed_skipped_reason': passed_skipped_reason,
             'failed_marker': marker_result,
         }
     except Exception as e:
