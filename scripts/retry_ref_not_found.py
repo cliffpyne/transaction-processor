@@ -382,7 +382,15 @@ def main() -> int:
                     'extracted_plate,extracted_ref',
                 'outcome': outcome_filter,
                 'processed_at': f'gte.{lower}',
-                'order': 'processed_at.asc',
+                # NEWEST FIRST — critical for the timing-race case.
+                # With oldest-first + a batch cap, the sweep gets pinned
+                # on the oldest never-resolvable events (typos, m-pesa
+                # refs, txns the puller never fetched) and never advances
+                # to newer events that actually can resolve. Newest-first
+                # ensures recent SMSes always get retried within minutes.
+                # Old events either resolve or naturally age out of the
+                # 24h window.
+                'order': 'processed_at.desc',
                 'limit': str(MAX_EVENTS),
             },
             headers={**h, 'Range': f'0-{MAX_EVENTS - 1}',
