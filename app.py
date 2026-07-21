@@ -4197,6 +4197,19 @@ _SMS_REF_PATTERNS = [
     r'^[a-f0-9]{16,}$',          # CRDB hex hash
 ]
 
+# Substring-anchored patterns for when the customer's text has a prefix
+# glued on by the carrier (e.g. "ID 224111699101" before the real ref)
+# or a trailing noise character (e.g. "…A50s"). Searched INSIDE the
+# message with re.search, tried in order — first hit wins. Uppercase-
+# only tail (`[A-Z0-9]`) so we don't grab a trailing lowercase 's' that
+# would break the ref_number ilike lookup.
+_SMS_REF_SUBSTRING_PATTERNS = [
+    r'PS\d{10,}',                   # CRDB TIPS
+    r'\d{3}AG[A-Z]{1,3}[A-Z0-9]{6,}',  # NMB agent (101AGD…, 224AGPS…, 101TPFT via a variant regex)
+    r'\d{3}TPFT[A-Z0-9]{6,}',       # NMB TIPS routing
+    r'19f[a-f0-9]{13}',             # modern CRDB hex refs (16 chars, `19f` prefix)
+]
+
 
 def _extract_ref_from_sms(msg, plate=None):
     """Find the token most likely to be the bank reference.
@@ -4222,6 +4235,26 @@ def _extract_ref_from_sms(msg, plate=None):
         for t in tokens:
             if rgx.match(t):
                 return t
+
+    # Substring scan — pull the ref out of a token even if it's glued
+    # to a carrier-added prefix ('ID 224111699101' before the real ref)
+    # or a stray trailing char ('…A50s'). This catches the bulk of
+    # noisy real-world SMSes from customers.
+    for pat in _SMS_REF_SUBSTRING_PATTERNS:
+        rgx = re.compile(pat, re.IGNORECASE)
+        for t in tokens:
+            m = rgx.search(t)
+            if m:
+                result = m.group(0)
+                # NMB agent-style refs (\d{3}AG…, \d{3}TPFT…) are all
+                # uppercase after the digit prefix. IGNORECASE lets a
+                # trailing 's' or similar lowercase carrier noise sneak
+                # in — strip it so the ref_number ilike lookup matches
+                # what's stored in Supabase. CRDB hex refs already only
+                # use [a-f0-9] so this is a no-op for them.
+                if re.match(r'\d{3}(AG|TPFT)|PS', result, re.IGNORECASE):
+                    result = re.sub(r'[a-z]+$', '', result)
+                return result
 
     # Whitespace-collapsed hex scan — catches split refs like
     # '19f468a9fbad 249' that customers sometimes type with a stray
