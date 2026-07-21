@@ -57,8 +57,8 @@ if _APP_ROOT not in sys.path:
 import iliyopata_writer  # noqa: E402
 
 
-MAX_EVENTS = int(os.environ.get('RETRY_MAX_EVENTS', '30'))
-TIME_BUDGET_SEC = int(os.environ.get('RETRY_TIME_BUDGET_SEC', '45'))
+MAX_EVENTS = int(os.environ.get('RETRY_MAX_EVENTS', '100'))
+TIME_BUDGET_SEC = int(os.environ.get('RETRY_TIME_BUDGET_SEC', '90'))
 MIN_AGE_MIN = int(os.environ.get('RETRY_MIN_AGE_MIN', '5'))
 MAX_AGE_MIN = int(os.environ.get('RETRY_MAX_AGE_MIN', '1440'))
 # Outcomes eligible for retry. ref_not_found handles the timing-race
@@ -405,10 +405,24 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    events = [
+    raw_events = [
         e for e in r.json()
         if (e.get('processed_at') or '')[:19] <= upper
     ]
+    # Collapse (sender, body) duplicates — retry loops in the past created
+    # many identical log rows for the same message. Keep ONLY the newest
+    # row per unique (sender, body) so we spend our per-fire slots on
+    # unique customer messages, not churn. The events came in newest-first
+    # order, so the first occurrence of each key is the newest.
+    seen_keys = set()
+    events = []
+    for e in raw_events:
+        key = (e.get('sender') or '', e.get('body') or '')
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        events.append(e)
+    dedup_ratio = f'{len(events)}/{len(raw_events)}' if raw_events else '0/0'
     if not events:
         print(f'no events in retry window '
               f'({MIN_AGE_MIN}-{MAX_AGE_MIN} min)')
@@ -449,6 +463,7 @@ def main() -> int:
 
     print(json.dumps({
         'window_min': [MIN_AGE_MIN, MAX_AGE_MIN],
+        'dedup': dedup_ratio,
         'runtime_sec': round(time.monotonic() - start, 2),
         'tally': tally,
     }))
