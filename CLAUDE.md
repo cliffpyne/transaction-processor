@@ -70,3 +70,16 @@ Not touched this session. BRAIN's payment-batches / m6pm-automation received the
 
 - **EleganskyBrain** — main app that calls this service. See its CLAUDE.md.
 - **invoice-payment-app** — sacred payment allocation algorithm origin. See its CLAUDE.md.
+
+## Cross-repo context (BRAIN is upstream)
+
+When Claude Code loads this file, it also auto-loads the two imports below —
+so you know what BRAIN is, what its sacred rules are, and what changed there
+recently. Never re-derive BRAIN state from scratch when the answer is here.
+
+@/var/www/html/EleganskyBrain/CLAUDE.md
+@/home/clifforddennis/.claude/projects/-var-www-html-EleganskyBrain/memory/MEMORY.md
+
+For recent BRAIN activity, run:
+
+    git -C /var/www/html/EleganskyBrain log --oneline -20
