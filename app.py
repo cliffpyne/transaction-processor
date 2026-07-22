@@ -1224,6 +1224,46 @@ def lookup_iphone_customer(details, iphone_lookup):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+_DEPOSITOR_RX = re.compile(
+    # `FROM <NAME> TO FRANK` — allows spaces, dots, apostrophes in the
+    # name; stops greedy match at ' TO FRANK'. Case-insensitive because
+    # descriptions are inconsistent about case.
+    r'\bFROM\s+([A-Z][A-Z\s.\'"-]{2,80}?)\s+TO\s+FRANK\b',
+    re.IGNORECASE,
+)
+
+
+def _extract_depositor_name(desc: str) -> str | None:
+    """Pull the depositor name out of a CRDB description of the shape
+    'REF:… SIMUSSD FT FROM DENIS RAYMOND TESHA TO FRANK N/A'. Returns the
+    UPPERCASED name for direct lookup in depositor_lookup, or None if the
+    pattern isn't there."""
+    if not desc:
+        return None
+    m = _DEPOSITOR_RX.search(str(desc))
+    if not m:
+        return None
+    name = re.sub(r'\s+', ' ', m.group(1)).strip().upper()
+    # Guard against tiny/noisy matches
+    if len(name) < 5 or len(name.split()) < 2:
+        return None
+    return name
+
+
+def _lookup_depositor(desc: str, depositor_lookup: dict) -> tuple | None:
+    """Try to resolve a description to a customer via the depositor lookup
+    (col D name → row's (plate, customer_name)). Returns
+    (plate, customer_name, depositor_name) on hit, or None on miss."""
+    name = _extract_depositor_name(desc)
+    if not name:
+        return None
+    hit = depositor_lookup.get(name)
+    if not hit:
+        return None
+    plate, customer_name = hit
+    return (plate, customer_name, name)
+
+
 def load_all_customers(service):
     """Load all customers from pikipiki records sheet.
 
@@ -1234,6 +1274,17 @@ def load_all_customers(service):
     refuse to accept a payload smaller than the smallest we've ever seen
     (LOOKUP_MIN_ROWS). Row counts are always logged so a shrinkage shows
     up in the logs.
+
+    Returns:
+      phone_lookup     — {phone → customer_name} for phone-only CRDB refs
+      plate_lookup     — {plate → customer_name} for the normal plate path
+      depositor_lookup — {DEPOSITOR_NAME_UPPER → (plate, customer_name)} for
+                         CRDB descriptions with no plate but a
+                         'FROM <name> TO FRANK' depositor (col D of pikipiki
+                         records holds a depositor name instead of a phone).
+                         Multiple depositors per plate are supported —
+                         each pikipiki row with a name in col D becomes
+                         its own key.
     """
     import time as _time
     LOOKUP_MIN_ROWS = 800  # BODA fleet has ~2k active — anything under this is a truncation
@@ -1246,21 +1297,33 @@ def load_all_customers(service):
                 valueRenderOption='UNFORMATTED_VALUE',
             ).execute()
             values = result.get('values', [])
-            phone_lookup, plate_lookup = {}, {}
+            phone_lookup, plate_lookup, depositor_lookup = {}, {}, {}
             for row in values[1:]:
                 plate_col = row[1] if len(row) > 1 else ''
                 phone_col = row[3] if len(row) > 3 else ''
                 name_col  = row[2] if len(row) > 2 else ''
                 if not plate_col and not phone_col:
                     continue
+                plate_clean = ''
                 if plate_col:
                     plate_clean = str(plate_col).replace(' ', '').upper()
                     if plate_clean:
                         plate_lookup[plate_clean] = name_col
+                # Col D holds either a phone number (all digits) or a
+                # depositor name (contains letters). Route to the right
+                # lookup based on shape.
                 if phone_col:
-                    phone_clean = str(phone_col).replace(' ', '').replace('-', '')
-                    if phone_clean:
-                        phone_lookup[phone_clean] = name_col
+                    d_str = str(phone_col).strip()
+                    if d_str and any(c.isalpha() for c in d_str):
+                        # Depositor name — key on the uppercased name so
+                        # matching against the description is case-insensitive
+                        depositor_lookup[d_str.upper()] = (
+                            plate_clean, name_col,
+                        )
+                    else:
+                        phone_clean = d_str.replace(' ', '').replace('-', '')
+                        if phone_clean:
+                            phone_lookup[phone_clean] = name_col
             n_rows = len(values)
             if n_rows < LOOKUP_MIN_ROWS:
                 # Sheets returned a truncated payload — retry rather than
@@ -1269,13 +1332,13 @@ def load_all_customers(service):
                 print(f"⚠️ pikipiki records truncated ({n_rows} rows, attempt {attempt}) — retrying")
                 _time.sleep(2 * attempt)
                 continue
-            return phone_lookup, plate_lookup
+            return phone_lookup, plate_lookup, depositor_lookup
         except Exception as e:
             last_err = e
             print(f"pikipiki records load error (attempt {attempt}): {e}")
             _time.sleep(2 * attempt)
     print(f"❌ load_all_customers gave up after 4 attempts, last error: {last_err}")
-    return {}, {}
+    return {}, {}, {}
 
 def load_all_customers_sav(service):
     """🔥 UPDATED: Load all customers from pikipiki records2 sheet (for PASSED_SAV) - includes customer IDs"""
@@ -1730,7 +1793,7 @@ def process_crdb_transactions(filepath):
         
         # ── Load customer lookups ──────────────────────────────────────────────
         print("Loading customer database from pikipiki records...")
-        phone_lookup, plate_lookup = load_all_customers(service)
+        phone_lookup, plate_lookup, depositor_lookup = load_all_customers(service)
         
         print("\nLoading customer database from pikipiki records2 (SAV)...")
         phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)
@@ -2182,9 +2245,36 @@ def process_crdb_transactions(filepath):
                                     stats['failed'] += 1
                                     print(f"  ⚠️ FUZZY MULTI ({len(fuzzy_cands)} cands) → FAILED: {[c['plate'] for c in fuzzy_cands]}")
                             else:
-                                last_failed_id += 1
-                                failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
-                                stats['failed'] += 1
+                                # ── Depositor-name fallback (CRDB) ──
+                                # For descriptions like 'REF:… SIMUSSD FT FROM
+                                # DENIS RAYMOND TESHA TO FRANK N/A' where no
+                                # plate/phone was extractable, try matching
+                                # the depositor name against col D of pikipiki
+                                # records. If a row is found, resolve to that
+                                # row's (plate, customer_name) and route to
+                                # CRDB PASSED — normal BODA layout with
+                                # customer_name in col G, empty col I.
+                                dep_hit = _lookup_depositor(details, depositor_lookup)
+                                if dep_hit:
+                                    dep_plate, dep_customer, dep_name = dep_hit
+                                    last_passed_id += 1
+                                    passed_data.append([
+                                        last_passed_id,
+                                        posting_date,
+                                        'CRDB',
+                                        details,
+                                        credit_amount,
+                                        dep_plate,
+                                        dep_customer,
+                                        ref_number or '',
+                                        ''
+                                    ])
+                                    stats['passed'] += 1
+                                    print(f"✅ PASSED (via depositor {dep_name!r}): {dep_customer} - {dep_plate} - {credit_amount}")
+                                else:
+                                    last_failed_id += 1
+                                    failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
+                                    stats['failed'] += 1
                 else:
                     # ── RESCUE before FAILED ──────────────────────────────────
                     rescue_plates = _rescue_find_plates(details)
@@ -2229,10 +2319,34 @@ def process_crdb_transactions(filepath):
                                 stats['failed'] += 1
                                 print(f"  ⚠️ FUZZY MULTI ({len(fuzzy_cands)} cands) → FAILED: {[c['plate'] for c in fuzzy_cands]}")
                         else:
-                            last_failed_id += 1
-                            failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
-                            stats['failed'] += 1
-                            print(f"❌ FAILED: No phone/plate found in: {details[:80]} (REF: {ref_number})")
+                            # ── Depositor-name fallback (CRDB) ──
+                            # Same lookup as the identifier-not-found path:
+                            # 'REF:… SIMUSSD FT FROM DENIS RAYMOND TESHA TO
+                            # FRANK N/A' has no extractable plate/phone but
+                            # the depositor name may be registered against
+                            # a customer's plate on pikipiki records col D.
+                            dep_hit = _lookup_depositor(details, depositor_lookup)
+                            if dep_hit:
+                                dep_plate, dep_customer, dep_name = dep_hit
+                                last_passed_id += 1
+                                passed_data.append([
+                                    last_passed_id,
+                                    posting_date,
+                                    'CRDB',
+                                    details,
+                                    credit_amount,
+                                    dep_plate,
+                                    dep_customer,
+                                    ref_number or '',
+                                    ''
+                                ])
+                                stats['passed'] += 1
+                                print(f"✅ PASSED (via depositor {dep_name!r}): {dep_customer} - {dep_plate} - {credit_amount}")
+                            else:
+                                last_failed_id += 1
+                                failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
+                                stats['failed'] += 1
+                                print(f"❌ FAILED: No phone/plate found in: {details[:80]} (REF: {ref_number})")
         
         # ── Flush iPhone buckets immediately (no review flow needed) ──────────
         if bank_passed_data:
@@ -2655,7 +2769,7 @@ def process_nmb_transactions(filepath):
         
         # ── Load BOTH customer sources separately ──────────────────────────────
         print("Loading customer database from pikipiki records (sheet 1)...")
-        phone_lookup, plate_lookup = load_all_customers(service)
+        phone_lookup, plate_lookup, depositor_lookup = load_all_customers(service)
 
         print("Loading customer database from pikipiki records2 (SAV)...")
         phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)
