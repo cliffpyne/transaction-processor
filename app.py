@@ -1242,7 +1242,12 @@ _DEPOSITOR_RX = re.compile(
     # `FROM <NAME> TO FRANK` — allows spaces, dots, apostrophes in the
     # name; stops greedy match at ' TO FRANK'. Case-insensitive because
     # descriptions are inconsistent about case.
-    r'\bFROM\s+([A-Z][A-Z\s.\'"-]{2,80}?)\s+TO\s+FRANK\b',
+    # Trailing `\b` was intentionally dropped: CRDB's SIMUSSD path emits
+    # `TO FRANKN/A` (no space before N/A), and the word boundary refused
+    # to match K→N. Non-greedy `{2,80}?` still bounds the capture; no
+    # Tanzanian bank routes to Frankfurt/Franklin so the theoretical
+    # over-match is a non-issue in this domain.
+    r'\bFROM\s+([A-Z][A-Z\s.\'"-]{2,80}?)\s+TO\s+FRANK',
     re.IGNORECASE,
 )
 
