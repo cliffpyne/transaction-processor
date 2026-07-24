@@ -41,11 +41,14 @@ License: https://keenthemes.com/metronic/tailwind/docs/getting-started/license
   <script src="assets/js/elegansky-loader.js"></script>
 {% if role == 'viewer' %}
  <style>
-  /* Viewer-role cosmetic gating — hide the demo Metronic surfaces so a
-     branch officer never sees the vendor breadcrumbs. Admins/editors are
-     unaffected. */
-  #headerContainer > *:not(.kt-viewer-nav) { display: none !important; }
-  .kt-viewer-nav { display: flex !important; gap: 1.5rem; align-items: center; flex: 1; width: 100%; }
+  /* Viewer-role cosmetic gating — hide the demo Metronic megamenu
+     (Home/Profiles/My Account/…) so a branch officer never sees the
+     vendor breadcrumbs, but KEEP the right side of the header intact
+     so the Metronic profile-circle dropdown (which owns the Logout
+     link) stays where every user already expects to find it.
+     Admins/editors are unaffected. */
+  #megaMenuContainer { display: none !important; }
+  .kt-viewer-nav { display: flex !important; gap: 1.5rem; align-items: center; }
   .kt-viewer-nav a {
     text-decoration: none;
     font-size: 0.875rem;
@@ -78,18 +81,16 @@ License: https://keenthemes.com/metronic/tailwind/docs/getting-started/license
       nav.appendChild(mkLink('Dashboard', '/home'));
       nav.appendChild(mkLink('Transactions', '/home/transactions'));
 
-      // Logout link — every user (viewer included) needs a way to sign out.
-      // Styled as a subtle destructive-tinted link so it doesn't compete with
-      // the primary nav but stays discoverable at the far right.
-      var logout = document.createElement('a');
-      logout.textContent = 'Logout';
-      logout.href = '/logout';
-      logout.style.color = 'hsl(var(--destructive))';
-      logout.style.marginLeft = 'auto';   // push to the far right of the flex row
-      logout.style.fontWeight = '500';
-      nav.appendChild(logout);
-
-      header.appendChild(nav);
+      // Drop the viewer nav in where the megamenu used to sit, so the
+      // right side of the header (search / notifications / theme /
+      // PROFILE CIRCLE DROPDOWN with Logout) stays exactly where every
+      // user already knows to find it.
+      var mega = document.getElementById('megaMenuContainer');
+      if (mega && mega.parentNode) {
+        mega.parentNode.insertBefore(nav, mega);
+      } else {
+        header.appendChild(nav);
+      }
     }
     // ── Sidebar — hide every accordion except Dashboards + Transactions ──
     var KEEP = ['Dashboards', 'Transactions'];
