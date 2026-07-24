@@ -9,6 +9,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import json
 import pickle
+import requests  # customer_registry lookups (via Supabase PostgREST)
 from datetime import datetime, timedelta
 import pdfplumber  # For PDF extraction
 import supabase_writer  # Dual-write mirror to Supabase — no-op unless WRITE_TO_SUPABASE is set
@@ -44,6 +45,19 @@ else:
 # the transaction falls through to fuzzy rescue / FAILED — empirically, the
 # review team always declines these many-candidate reviews, so they're noise.
 MAX_REVIEW_CANDIDATES = int(os.environ.get('MAX_REVIEW_CANDIDATES', 1))
+
+# ── Customer-record source cutover ──────────────────────────────────────────
+# Historically the plate/phone/depositor lookups came from Google Sheets
+# (pikipiki records + pikipiki records2 + IPHONE_RECORDS). We're moving to
+# the customer_registry table (separate Supabase project). CUSTOMER_SOURCE
+# controls the switch so we can roll forward and back without a redeploy:
+#   sheet    — original behaviour, sheets only
+#   registry — DB only (fully cut over)
+#   both     — DB primary, sheet fallback merged in (safety net, default
+#              during the 7-day monitor window post-cutover)
+CUSTOMER_SOURCE            = os.environ.get('CUSTOMER_SOURCE', 'sheet').lower()
+SUPABASE_URL_REGISTRY      = os.environ.get('SUPABASE_URL_REGISTRY', '').rstrip('/')
+SUPABASE_KEY_REGISTRY      = os.environ.get('SUPABASE_SERVICE_KEY_REGISTRY', '')
 
 # Google Sheets configuration
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -1387,6 +1401,183 @@ def load_all_customers_sav(service):
         print(f"⚠️ Error loading pikipiki records2 (SAV): {e}")
         return {}, {}, {}
 
+
+# ── customer_registry (Supabase DB) loader ──────────────────────────────────
+# Returns the same 7 lookup dicts the sheet loaders combined produce, so the
+# pipeline downstream doesn't change shape when CUSTOMER_SOURCE flips.
+
+def _iphone_phone_variants(phone_raw: str):
+    """Yield every phone form the pipeline might see for one number so the
+    iphone_lookup can be indexed by any of them. Kept in sync with
+    normalize_phone_iphone() and extract_phone_for_iphone() in this file."""
+    if not phone_raw:
+        return
+    p = re.sub(r'\D', '', str(phone_raw))
+    if len(p) < 9:
+        return
+    forms = {p}
+    if p.startswith('255') and len(p) == 12:
+        forms.add('0' + p[3:])
+        forms.add(p[3:])          # 9-digit form used by normalize_phone_iphone
+    elif p.startswith('0') and len(p) == 10:
+        forms.add('255' + p[1:])
+        forms.add(p[1:])
+    elif len(p) == 9:
+        forms.add('0' + p)
+        forms.add('255' + p)
+    for f in forms:
+        yield f
+
+
+def _apply_registry_row(row,
+                        phone_lookup, plate_lookup, depositor_lookup,
+                        phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
+                        iphone_lookup):
+    """Route one customer_registry row into the correct lookup dicts by
+    customer_type. Shapes match load_all_customers / load_all_customers_sav /
+    load_iphone_customers so existing downstream code is untouched."""
+    name = (row.get('customer_name') or '').strip()
+    if not name:
+        return
+    plate  = re.sub(r'\s+', '', str(row.get('plate') or '')).upper()
+    phone  = re.sub(r'[\s-]+', '', str(row.get('phone') or ''))
+    phones = row.get('phones') or []
+    bank_upper = (row.get('bank_account_name') or '').strip().upper()
+    ctype  = (row.get('customer_type') or 'boda').lower()
+    sav_id = (row.get('sav_customer_id') or '').strip()
+
+    if ctype == 'boda':
+        if plate:
+            plate_lookup[plate] = name
+        if phone:
+            phone_lookup[phone] = name
+        # bank_account_name → depositor lookup: the "FROM XYZ TO FRANK" path
+        # that resolves a description where col-D of the sheet used to hold
+        # a name instead of a phone.
+        if bank_upper and plate:
+            depositor_lookup[bank_upper] = (plate, name)
+    elif ctype == 'savcom':
+        if plate:
+            plate_lookup_sav[plate] = name
+            if sav_id:
+                id_lookup_sav[plate] = sav_id
+        if phone:
+            phone_lookup_sav[phone] = name
+            if sav_id and phone not in id_lookup_sav:
+                id_lookup_sav[phone] = sav_id
+        # SAVCOM can also have a bank_account_name — same depositor mechanic.
+        # We reuse the BODA depositor_lookup because _lookup_depositor()
+        # is called against the BODA path only; adding sav here would change
+        # existing behaviour, so leave for a future ticket.
+    elif ctype == 'iphone':
+        # iPhone lookups are phone-first. Every entry in phones[] gets
+        # registered under every normalised form so the extractor's output
+        # (whatever format it produces) still matches.
+        all_phones = list(phones or [])
+        if phone and phone not in all_phones:
+            all_phones.insert(0, phone)
+        for ph in all_phones:
+            for form in _iphone_phone_variants(ph):
+                iphone_lookup[form] = name
+
+
+def load_customers_from_registry():
+    """Load every customer_registry row (paginated) from the SUPABASE_URL_REGISTRY
+    project and return the 7-tuple the pipeline consumes.
+
+    Returns (phone_lookup, plate_lookup, depositor_lookup,
+             phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
+             iphone_lookup)."""
+    empty = ({}, {}, {}, {}, {}, {}, {})
+    if not (SUPABASE_URL_REGISTRY and SUPABASE_KEY_REGISTRY):
+        print("⚠️ registry: SUPABASE_URL_REGISTRY / SUPABASE_SERVICE_KEY_REGISTRY not set")
+        return empty
+    h = {'apikey': SUPABASE_KEY_REGISTRY,
+         'Authorization': f'Bearer {SUPABASE_KEY_REGISTRY}'}
+    (phone_lookup, plate_lookup, depositor_lookup,
+     phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
+     iphone_lookup) = ({}, {}, {}, {}, {}, {}, {})
+
+    step  = 1000
+    lower = 0
+    total = 0
+    while True:
+        try:
+            r = requests.get(
+                f'{SUPABASE_URL_REGISTRY}/rest/v1/customer_registry',
+                params={
+                    'select': ('customer_name,plate,phone,phones,'
+                               'bank_account_name,customer_type,'
+                               'sav_customer_id'),
+                    'order':  'id.asc',
+                },
+                headers={**h,
+                         'Range-Unit': 'items',
+                         'Range':      f'{lower}-{lower + step - 1}'},
+                timeout=30,
+            )
+        except requests.RequestException as e:
+            print(f"❌ registry: fetch failed at offset {lower}: {e}")
+            break
+        if r.status_code not in (200, 206):
+            print(f"❌ registry: HTTP {r.status_code}: {r.text[:200]}")
+            break
+        rows = r.json() or []
+        for row in rows:
+            _apply_registry_row(row,
+                                phone_lookup, plate_lookup, depositor_lookup,
+                                phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
+                                iphone_lookup)
+        total += len(rows)
+        if len(rows) < step:
+            break
+        lower += step
+
+    print(f"✅ registry: {total} rows → "
+          f"boda(plate={len(plate_lookup)}, phone={len(phone_lookup)}, "
+          f"dep={len(depositor_lookup)}), "
+          f"sav(plate={len(plate_lookup_sav)}, phone={len(phone_lookup_sav)}), "
+          f"iphone(phone={len(iphone_lookup)})")
+    return (phone_lookup, plate_lookup, depositor_lookup,
+            phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
+            iphone_lookup)
+
+
+def load_customers_dispatch(service):
+    """Feature-flag router. Chooses between the sheet-based loaders and the
+    customer_registry DB loader based on CUSTOMER_SOURCE.
+    Returns the same 7-tuple regardless of source.
+
+    - sheet    : original behaviour, sheets only
+    - registry : DB only
+    - both     : DB primary, sheets merged in as fallback (DB wins on collision)
+    """
+    if CUSTOMER_SOURCE == 'registry':
+        return load_customers_from_registry()
+
+    if CUSTOMER_SOURCE == 'both':
+        r = load_customers_from_registry()
+        s_p,  s_pl, s_d   = load_all_customers(service)
+        s_ps, s_pls, s_id = load_all_customers_sav(service)
+        s_ip = load_iphone_customers(service)
+        # {**sheet, **registry} → registry wins on key collision
+        return (
+            {**s_p,   **r[0]},
+            {**s_pl,  **r[1]},
+            {**s_d,   **r[2]},
+            {**s_ps,  **r[3]},
+            {**s_pls, **r[4]},
+            {**s_id,  **r[5]},
+            {**s_ip,  **r[6]},
+        )
+
+    # Default: sheet
+    p,  pl,  d   = load_all_customers(service)
+    ps, pls, ids = load_all_customers_sav(service)
+    ip = load_iphone_customers(service)
+    return p, pl, d, ps, pls, ids, ip
+
+
 def lookup_customer_from_cache(identifier, lookup_type, phone_lookup, plate_lookup):
     """Look up customer from cached data"""
     if lookup_type == 'phone':
@@ -1792,16 +1983,13 @@ def process_crdb_transactions(filepath):
         service = get_google_service()
         
         # ── Load customer lookups ──────────────────────────────────────────────
-        print("Loading customer database from pikipiki records...")
-        phone_lookup, plate_lookup, depositor_lookup = load_all_customers(service)
-        
-        print("\nLoading customer database from pikipiki records2 (SAV)...")
-        phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)
+        # Source is controlled by CUSTOMER_SOURCE (sheet | registry | both).
+        # See load_customers_dispatch() for the routing.
+        print(f"Loading customer database (source={CUSTOMER_SOURCE})...")
+        (phone_lookup, plate_lookup, depositor_lookup,
+         phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
+         iphone_lookup) = load_customers_dispatch(service)
 
-        # 🔥 NEW: Load iPhone customer lookup from separate sheet
-        print("\nLoading iPhone customer database from IPHONE_RECORDS...")
-        iphone_lookup = load_iphone_customers(service)
-        
         # ── Load existing refs (duplicate guard) ──────────────────────────────
         print("Loading existing references from PASSED sheet...")
         existing_passed_refs, existing_passed_messages = get_existing_refs(service, 'PASSED')
@@ -2767,16 +2955,13 @@ def process_nmb_transactions(filepath):
         # Initialize Google Sheets service
         service = get_google_service()
         
-        # ── Load BOTH customer sources separately ──────────────────────────────
-        print("Loading customer database from pikipiki records (sheet 1)...")
-        phone_lookup, plate_lookup, depositor_lookup = load_all_customers(service)
-
-        print("Loading customer database from pikipiki records2 (SAV)...")
-        phone_lookup_sav, plate_lookup_sav, id_lookup_sav = load_all_customers_sav(service)
-
-        # 🔥 NEW: Load iPhone lookup for NMB iPhone channel
-        print("\nLoading iPhone customer database from IPHONE_RECORDS...")
-        iphone_lookup = load_iphone_customers(service)
+        # ── Load customer lookups ──────────────────────────────────────────────
+        # Source is controlled by CUSTOMER_SOURCE (sheet | registry | both).
+        # See load_customers_dispatch() for the routing.
+        print(f"Loading customer database (source={CUSTOMER_SOURCE})...")
+        (phone_lookup, plate_lookup, depositor_lookup,
+         phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
+         iphone_lookup) = load_customers_dispatch(service)
 
         # ── Duplicate-check refs across ALL relevant tabs ──────────────────────
         # Check BOTH old sheet (PASSED_SHEET_ID) AND new NMB sheet to cover
