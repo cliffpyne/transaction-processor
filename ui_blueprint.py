@@ -34,6 +34,23 @@ _H = {
     'Content-Type':  'application/json',
 }
 
+# customer_registry lives in a SEPARATE Supabase project (see the migration
+# in scripts/002_customer_registry.sql). Kept isolated from the main
+# `customers` helper table so the rescue pipeline stays on the original
+# project untouched. Falls back to the main project if the _REGISTRY vars
+# aren't set — useful for local dev.
+SUPABASE_URL_REGISTRY = (
+    os.environ.get('SUPABASE_URL_REGISTRY', SUPABASE_URL).rstrip('/')
+)
+SUPABASE_KEY_REGISTRY = (
+    os.environ.get('SUPABASE_SERVICE_KEY_REGISTRY', SUPABASE_KEY)
+)
+_H_REGISTRY = {
+    'apikey':        SUPABASE_KEY_REGISTRY,
+    'Authorization': f'Bearer {SUPABASE_KEY_REGISTRY}',
+    'Content-Type':  'application/json',
+}
+
 
 ui = Blueprint('ui', __name__)
 
@@ -129,9 +146,10 @@ def _records_compat(sub=None):
 
 # ── SPA shell ────────────────────────────────────────────────────────────────
 _HOME_SUBPAGES = {
-    'customers':    'customers_page.html',
-    'transactions': 'transactions_page.html',
-    'sms':          'sms_events_page.html',
+    'customers':          'customers_page.html',
+    'transactions':       'transactions_page.html',
+    'sms':                'sms_events_page.html',
+    'customers-registry': 'customers_registry_page.html',
     # dedup_alerts, users, record_edits — added as pages ship
 }
 
@@ -468,6 +486,171 @@ def transactions_rescue(row_id):
 @login_required
 def dedup_alerts_list():
     return _paginated_query('dedup_alerts', TABLES['dedup_alerts'])
+
+
+# ── customer_registry (authoritative customer records, separate project) ────
+# Talks to SUPABASE_URL_REGISTRY / SUPABASE_SERVICE_KEY_REGISTRY, not the
+# main project. Kept off _paginated_query on purpose — that helper is
+# hard-wired to the main SUPABASE_URL, and adding a project arg to it just
+# for one table would ripple through every existing endpoint.
+_REGISTRY_EDITABLE_COLS = [
+    'customer_name', 'plate', 'phone', 'bank_account_name',
+    'start_date', 'loan_amount_tsh', 'customer_type',
+    'sav_customer_id', 'notes',
+]
+
+
+def _registry_pick(payload: dict) -> dict:
+    """Whitelist + light coerce for POST/PATCH bodies."""
+    body: dict = {}
+    for k in _REGISTRY_EDITABLE_COLS:
+        if k not in payload:
+            continue
+        v = payload.get(k)
+        if isinstance(v, str):
+            v = v.strip() or None
+        body[k] = v
+    return body
+
+
+@ui.route('/api/customer_registry', methods=['GET'])
+@login_required
+def customer_registry_list():
+    """Paginated list with optional filters:
+       ?page=1&size=25&search=...&customer_type=boda
+       search is OR'd across customer_name, plate, phone, bank_account_name."""
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+        size = max(1, min(1000, int(request.args.get('size', 25))))
+    except ValueError:
+        return jsonify({'error': 'page/size must be integers'}), 400
+    lower = (page - 1) * size
+    upper = lower + size - 1
+
+    params: list[tuple[str, str]] = [('select', '*'),
+                                     ('order', 'id.desc')]
+
+    ctype = (request.args.get('customer_type') or '').strip()
+    if ctype in ('boda', 'savcom', 'iphone'):
+        params.append(('customer_type', f'eq.{ctype}'))
+
+    search = (request.args.get('search') or '').strip()
+    if search:
+        # PostgREST OR filter across the 4 text columns worth searching.
+        # % as wildcard so partial matches work.
+        pattern = search.replace(',', '')
+        or_terms = ','.join([
+            f'customer_name.ilike.*{pattern}*',
+            f'plate.ilike.*{pattern}*',
+            f'phone.ilike.*{pattern}*',
+            f'bank_account_name.ilike.*{pattern}*',
+        ])
+        params.append(('or', f'({or_terms})'))
+
+    try:
+        r = requests.get(
+            f'{SUPABASE_URL_REGISTRY}/rest/v1/customer_registry',
+            params=params,
+            headers={**_H_REGISTRY,
+                     'Range-Unit': 'items',
+                     'Range': f'{lower}-{upper}',
+                     'Prefer': 'count=exact'},
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        return jsonify({'error': f'registry unreachable: {e}'}), 502
+    if r.status_code not in (200, 206):
+        return jsonify({'error': r.text[:400]}), r.status_code
+
+    total = 0
+    cr = r.headers.get('content-range', '')
+    if '/' in cr:
+        try:
+            total = int(cr.split('/')[-1])
+        except ValueError:
+            total = 0
+    last_page = max(1, (total + size - 1) // size)
+    return jsonify({
+        'data':      r.json(),
+        'total':     total,
+        'page':      page,
+        'size':      size,
+        'last_page': last_page,
+    })
+
+
+@ui.route('/api/customer_registry', methods=['POST'])
+@require_role('admin', 'editor')
+def customer_registry_create():
+    payload = request.get_json(silent=True) or {}
+    body = _registry_pick(payload)
+    if not body.get('customer_name'):
+        return jsonify({'error': 'customer_name is required'}), 400
+    body.setdefault('customer_type', 'boda')
+    body['created_by'] = (
+        current_user.username if getattr(current_user, 'is_authenticated', False)
+        else None
+    )
+    try:
+        r = requests.post(
+            f'{SUPABASE_URL_REGISTRY}/rest/v1/customer_registry',
+            headers={**_H_REGISTRY, 'Prefer': 'return=representation'},
+            json=body, timeout=15,
+        )
+    except requests.RequestException as e:
+        return jsonify({'error': f'registry unreachable: {e}'}), 502
+    if not r.ok:
+        return jsonify({'error': r.text[:400]}), r.status_code
+    created = r.json()[0] if r.json() else {}
+    return jsonify(created), 201
+
+
+@ui.route('/api/customer_registry/<int:row_id>', methods=['PATCH'])
+@require_role('admin', 'editor')
+def customer_registry_update(row_id):
+    payload = request.get_json(silent=True) or {}
+    body = _registry_pick(payload)
+    if not body:
+        return jsonify({'error': 'no editable fields in payload'}), 400
+    try:
+        r = requests.patch(
+            f'{SUPABASE_URL_REGISTRY}/rest/v1/customer_registry?id=eq.{row_id}',
+            headers={**_H_REGISTRY, 'Prefer': 'return=representation'},
+            json=body, timeout=15,
+        )
+    except requests.RequestException as e:
+        return jsonify({'error': f'registry unreachable: {e}'}), 502
+    if not r.ok:
+        return jsonify({'error': r.text[:400]}), r.status_code
+    after = r.json()[0] if r.json() else {}
+    return jsonify(after)
+
+
+@ui.route('/api/customer_registry/summary', methods=['GET'])
+@login_required
+def customer_registry_summary():
+    """Counts per customer_type for the dashboard cards."""
+    stats = {'total': 0, 'boda': 0, 'savcom': 0, 'iphone': 0}
+    for key, filt in (
+        ('total',  {}),
+        ('boda',   {'customer_type': 'eq.boda'}),
+        ('savcom', {'customer_type': 'eq.savcom'}),
+        ('iphone', {'customer_type': 'eq.iphone'}),
+    ):
+        params = {'select': 'id', **filt}
+        try:
+            r = requests.get(
+                f'{SUPABASE_URL_REGISTRY}/rest/v1/customer_registry',
+                params=params,
+                headers={**_H_REGISTRY, 'Range': '0-0',
+                         'Prefer': 'count=exact'},
+                timeout=10,
+            )
+            cr = r.headers.get('content-range') or ''
+            stats[key] = int(cr.split('/')[-1]) if '/' in cr else 0
+        except (requests.RequestException, ValueError):
+            pass
+    return jsonify(stats)
 
 
 # ── sms_events (read-only, audit) ────────────────────────────────────────────

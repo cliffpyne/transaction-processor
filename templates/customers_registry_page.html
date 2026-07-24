@@ -1,0 +1,180 @@
+{% extends "home.html" %}
+{% block content %}
+ <!-- Container: title + create button -->
+ <div class="kt-container-fixed" id="contentContainer"></div>
+ <div class="kt-container-fixed">
+  <div class="flex flex-wrap items-center lg:items-end justify-between gap-5 pb-7.5">
+   <div class="flex flex-col justify-center gap-2">
+    <h1 class="text-xl font-medium leading-none text-mono">Customer Registry</h1>
+    <div class="flex items-center gap-2 text-sm font-normal text-secondary-foreground">
+     Authoritative list of every customer (BODA, SAVCOM, iPhone)
+    </div>
+   </div>
+   {% if role in ('admin', 'editor') %}
+   <div class="flex items-center gap-2.5">
+    <button class="kt-btn kt-btn-primary" id="btn_open_create">
+     <i class="ki-filled ki-plus"></i>
+     Add Customer
+    </button>
+   </div>
+   {% endif %}
+  </div>
+ </div>
+
+ <!-- Container: stat cards -->
+ <div class="kt-container-fixed">
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 lg:gap-7.5 pb-7.5">
+   <div class="kt-card p-5">
+    <div class="text-sm text-secondary-foreground">Total customers</div>
+    <div class="text-2xl font-semibold text-mono mt-1" id="stat_total">—</div>
+   </div>
+   <div class="kt-card p-5">
+    <div class="text-sm text-secondary-foreground">BODA</div>
+    <div class="text-2xl font-semibold text-mono mt-1" id="stat_boda">—</div>
+   </div>
+   <div class="kt-card p-5">
+    <div class="text-sm text-secondary-foreground">SAVCOM</div>
+    <div class="text-2xl font-semibold text-mono mt-1" id="stat_savcom">—</div>
+   </div>
+   <div class="kt-card p-5">
+    <div class="text-sm text-secondary-foreground">iPhone</div>
+    <div class="text-2xl font-semibold text-mono mt-1" id="stat_iphone">—</div>
+   </div>
+  </div>
+ </div>
+
+ <!-- Container: list table -->
+ <div class="kt-container-fixed">
+  <div class="grid gap-5 lg:gap-7.5">
+   <div class="kt-card kt-card-grid min-w-full">
+    <div class="kt-card-header flex-wrap gap-2">
+     <h3 class="kt-card-title text-sm" id="reg_showing">Loading customers…</h3>
+     <div class="flex flex-wrap gap-2 lg:gap-5">
+      <div class="flex">
+       <label class="kt-input">
+        <i class="ki-filled ki-magnifier"></i>
+        <input id="reg_search" placeholder="Name, plate, phone, bank account name…" type="text" value=""/>
+       </label>
+      </div>
+      <select class="kt-select w-36" data-kt-select="true" id="reg_type">
+       <option value="">All types</option>
+       <option value="boda">BODA</option>
+       <option value="savcom">SAVCOM</option>
+       <option value="iphone">iPhone</option>
+      </select>
+     </div>
+    </div>
+    <div class="kt-card-table">
+     <div class="grid">
+      <div class="kt-scrollable-x-auto">
+       <table class="kt-table kt-table-border">
+        <thead>
+         <tr>
+          <th class="w-[70px]"><span class="kt-table-col"><span class="kt-table-col-label">ID</span></span></th>
+          <th class="w-[80px]"><span class="kt-table-col"><span class="kt-table-col-label">Type</span></span></th>
+          <th class="min-w-[220px]"><span class="kt-table-col"><span class="kt-table-col-label">Name</span></span></th>
+          <th class="w-[110px]"><span class="kt-table-col"><span class="kt-table-col-label">Plate</span></span></th>
+          <th class="w-[130px]"><span class="kt-table-col"><span class="kt-table-col-label">Phone</span></span></th>
+          <th class="min-w-[200px]"><span class="kt-table-col"><span class="kt-table-col-label">Bank account name</span></span></th>
+          <th class="w-[110px]"><span class="kt-table-col"><span class="kt-table-col-label">Start date</span></span></th>
+          <th class="w-[130px]"><span class="kt-table-col"><span class="kt-table-col-label">Loan (TZS)</span></span></th>
+          <th class="w-[130px]"><span class="kt-table-col"><span class="kt-table-col-label">SAV ID</span></span></th>
+         </tr>
+        </thead>
+        <tbody id="reg_tbody">
+         <tr><td class="text-center text-secondary-foreground py-6" colspan="9">Loading…</td></tr>
+        </tbody>
+       </table>
+      </div>
+      <div class="kt-card-footer justify-center md:justify-between flex-col md:flex-row gap-5 text-secondary-foreground text-sm font-medium">
+       <div class="flex items-center gap-2 order-2 md:order-1">
+        Show
+        <select class="kt-select w-20" id="reg_perpage">
+         <option value="25">25</option>
+         <option value="50">50</option>
+         <option value="100">100</option>
+         <option value="500">500</option>
+         <option value="1000">1000</option>
+        </select>
+        per page
+       </div>
+       <div class="flex items-center gap-4 order-1 md:order-2">
+        <span id="reg_info"></span>
+        <div class="flex items-center gap-1" id="reg_pager"></div>
+       </div>
+      </div>
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>
+
+ <!-- Create modal (admin/editor only) -->
+ {% if role in ('admin', 'editor') %}
+ <div id="reg_modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50" style="display:none">
+  <div class="kt-card p-6 w-full max-w-lg mx-4">
+   <div class="flex items-center justify-between mb-4">
+    <h3 class="text-lg font-medium text-mono">Add Customer</h3>
+    <button class="kt-btn kt-btn-icon kt-btn-ghost" id="reg_modal_close">
+     <i class="ki-filled ki-cross"></i>
+    </button>
+   </div>
+   <form id="reg_form" class="grid gap-4">
+    <div>
+     <label class="text-sm font-medium text-mono">Customer name <span class="text-destructive">*</span></label>
+     <input class="kt-input w-full mt-1" name="customer_name" type="text" required placeholder="FULL NAME AS ON RECORDS"/>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+     <div>
+      <label class="text-sm font-medium text-mono">Type</label>
+      <select class="kt-select w-full mt-1" name="customer_type">
+       <option value="boda" selected>BODA</option>
+       <option value="savcom">SAVCOM</option>
+       <option value="iphone">iPhone</option>
+      </select>
+     </div>
+     <div>
+      <label class="text-sm font-medium text-mono">Plate</label>
+      <input class="kt-input w-full mt-1" name="plate" type="text" placeholder="MC###XXX"/>
+     </div>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+     <div>
+      <label class="text-sm font-medium text-mono">Phone</label>
+      <input class="kt-input w-full mt-1" name="phone" type="text" placeholder="255XXXXXXXXX"/>
+     </div>
+     <div>
+      <label class="text-sm font-medium text-mono">SAV customer ID</label>
+      <input class="kt-input w-full mt-1" name="sav_customer_id" type="text" placeholder="9633000XXX"/>
+     </div>
+    </div>
+    <div>
+     <label class="text-sm font-medium text-mono">Bank account name</label>
+     <input class="kt-input w-full mt-1" name="bank_account_name" type="text" placeholder="Name on their bank account (if depositing themselves)"/>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+     <div>
+      <label class="text-sm font-medium text-mono">Loan start date</label>
+      <input class="kt-input w-full mt-1" name="start_date" type="date"/>
+     </div>
+     <div>
+      <label class="text-sm font-medium text-mono">Loan amount (TZS)</label>
+      <input class="kt-input w-full mt-1" name="loan_amount_tsh" type="number" step="0.01" min="0" placeholder="e.g. 3000000"/>
+     </div>
+    </div>
+    <div>
+     <label class="text-sm font-medium text-mono">Notes</label>
+     <textarea class="kt-input w-full mt-1" name="notes" rows="2" placeholder="Optional"></textarea>
+    </div>
+    <div class="text-sm text-destructive" id="reg_form_err"></div>
+    <div class="flex justify-end gap-2 mt-2">
+     <button type="button" class="kt-btn kt-btn-outline" id="reg_modal_cancel">Cancel</button>
+     <button type="submit" class="kt-btn kt-btn-primary" id="reg_submit">Save customer</button>
+    </div>
+   </form>
+  </div>
+ </div>
+ {% endif %}
+
+ <script src="/static/customers_registry_page.js" defer></script>
+{% endblock %}
