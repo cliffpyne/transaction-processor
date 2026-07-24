@@ -12,7 +12,12 @@
    </div>
    {% if role in ('admin', 'editor') %}
    <div class="flex items-center gap-2.5">
-    <button type="button" class="kt-btn kt-btn-primary" id="btn_open_create">
+    <!-- Inline onclick is a defence-in-depth handler. The JS module wires
+         up richer behaviour (form reset, error clearing, body-scroll lock),
+         but even if that IIFE errors out before wiring, the raw
+         setProperty here still opens the modal. -->
+    <button type="button" class="kt-btn kt-btn-primary" id="btn_open_create"
+            onclick="(function(){var m=document.getElementById('reg_modal'); if(m){m.style.setProperty('display','flex','important');}})();">
      <i class="ki-filled ki-plus"></i>
      Add Customer
     </button>
@@ -176,7 +181,8 @@
   <div class="kt-card p-6 w-full max-w-lg mx-auto">
    <div class="flex items-center justify-between mb-4">
     <h3 class="text-lg font-medium text-mono">Add Customer</h3>
-    <button type="button" class="kt-btn kt-btn-icon kt-btn-ghost" id="reg_modal_close">
+    <button type="button" class="kt-btn kt-btn-icon kt-btn-ghost" id="reg_modal_close"
+            onclick="(function(){var m=document.getElementById('reg_modal'); if(m){m.style.setProperty('display','none','important');}})();">
      <i class="ki-filled ki-cross"></i>
     </button>
    </div>
@@ -229,7 +235,8 @@
     </div>
     <div class="text-sm text-destructive" id="reg_form_err"></div>
     <div class="flex justify-end gap-2 mt-2">
-     <button type="button" class="kt-btn kt-btn-outline" id="reg_modal_cancel">Cancel</button>
+     <button type="button" class="kt-btn kt-btn-outline" id="reg_modal_cancel"
+             onclick="(function(){var m=document.getElementById('reg_modal'); if(m){m.style.setProperty('display','none','important');}})();">Cancel</button>
      <button type="submit" class="kt-btn kt-btn-primary" id="reg_submit">Save customer</button>
     </div>
    </form>
@@ -237,5 +244,7 @@
  </div>
  {% endif %}
 
- <script src="/static/customers_registry_page.js" defer></script>
+ <!-- Cache-buster query string bumped whenever the JS changes so stale
+      browser caches never mask a deploy. Bump the number by hand next edit. -->
+ <script src="/static/customers_registry_page.js?v=20260724-4" defer></script>
 {% endblock %}
