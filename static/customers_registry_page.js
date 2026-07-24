@@ -180,32 +180,36 @@
   const $formErr   = $('reg_form_err');
   const $btnSubmit = $('reg_submit');
 
-  // Use setProperty(..., 'important') so this beats any Tailwind/Metronic
-  // class-based display rule regardless of stylesheet load order.
-  const showModal = (el) => el.style.setProperty('display', 'flex', 'important');
-  const hideModal = (el) => el.style.setProperty('display', 'none', 'important');
+  // The modal is a native <dialog>. showModal() puts it in the browser's
+  // top layer above every other element, close() hides it. If the browser
+  // doesn't support <dialog> (ancient), fall back to inline display style.
+  const showModal = (el) => {
+    if (el.showModal) { try { el.showModal(); return; } catch (_) {} }
+    el.style.setProperty('display', 'flex', 'important');
+  };
+  const hideModal = (el) => {
+    if (el.close && el.open) { try { el.close(); return; } catch (_) {} }
+    el.style.setProperty('display', 'none', 'important');
+  };
 
   const openModal = () => {
     if (!$modal) { alert('Add-customer form is not loaded — please refresh.'); return; }
     if ($formErr) $formErr.textContent = '';
     if ($form)    $form.reset();
     showModal($modal);
-    document.body.style.overflow = 'hidden'; // prevent scroll behind
   };
   const closeModal = () => {
     if (!$modal) return;
     hideModal($modal);
-    document.body.style.overflow = '';
   };
   if ($btnOpen)   $btnOpen.addEventListener('click', openModal);
   if ($btnClose)  $btnClose.addEventListener('click', closeModal);
   if ($btnCancel) $btnCancel.addEventListener('click', closeModal);
+  // Backdrop click closes: on a native <dialog>, clicks outside the inner
+  // panel land on the dialog element itself (its backdrop pseudo). Esc-close
+  // is handled by the browser automatically for <dialog>.
   if ($modal) $modal.addEventListener('click', (e) => {
     if (e.target === $modal) closeModal();
-  });
-  // Esc closes the modal
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && $modal && $modal.style.display !== 'none') closeModal();
   });
 
   if ($form) $form.addEventListener('submit', async (e) => {

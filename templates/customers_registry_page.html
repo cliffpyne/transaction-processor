@@ -12,12 +12,14 @@
    </div>
    {% if role in ('admin', 'editor') %}
    <div class="flex items-center gap-2.5">
-    <!-- Inline onclick is a defence-in-depth handler. The JS module wires
-         up richer behaviour (form reset, error clearing, body-scroll lock),
-         but even if that IIFE errors out before wiring, the raw
-         setProperty here still opens the modal. -->
+    <!-- Inline onclick calls the native <dialog> showModal() API, which
+         puts the dialog in the browser's top-layer above every other
+         element regardless of z-index, cannot be intercepted by
+         Metronic's reparent JS, and cannot be hidden by any CSS class
+         war. This is the bulletproof path — the JS module still wires
+         up richer form behaviour on top. -->
     <button type="button" class="kt-btn kt-btn-primary" id="btn_open_create"
-            onclick="(function(){var m=document.getElementById('reg_modal'); if(m){m.style.setProperty('display','flex','important');}})();">
+            onclick="var d=document.getElementById('reg_modal'); if(d&&d.showModal){d.showModal();}else if(d){d.style.setProperty('display','flex','important');}">
      <i class="ki-filled ki-plus"></i>
      Add Customer
     </button>
@@ -169,20 +171,21 @@
   </div>
  </div>
 
- <!-- Create modal (admin/editor only). Display state is driven by inline
-      style with !important, applied via JS `setProperty('display', ..., 'important')`.
-      That beats both the UA `[hidden]{display:none}` rule AND Tailwind's
-      `.flex` class, so we never end up with a modal that's stuck open or
-      stuck closed due to specificity accidents. Base state = closed. -->
+ <!-- Create modal (admin/editor only). Native <dialog> element:
+      showModal() puts it in the browser's top layer (above every other
+      element, no z-index math), close() hides it, Esc-to-close is
+      automatic, click-outside-to-close is wired manually below. Because
+      it's not in the normal flow, no Metronic reparent can move it away,
+      no Tailwind class-vs-style war can trap it. This is the resilient
+      shape for a modal that has to survive an aggressive theme. -->
  {% if role in ('admin', 'editor') %}
- <div id="reg_modal"
-      class="fixed inset-0 z-[9999] items-center justify-center bg-black/60 p-4"
-      style="display: none;">
-  <div class="kt-card p-6 w-full max-w-lg mx-auto">
+ <dialog id="reg_modal"
+         class="p-0 rounded-lg bg-background text-foreground w-full max-w-lg backdrop:bg-black/60">
+  <div class="p-6">
    <div class="flex items-center justify-between mb-4">
     <h3 class="text-lg font-medium text-mono">Add Customer</h3>
     <button type="button" class="kt-btn kt-btn-icon kt-btn-ghost" id="reg_modal_close"
-            onclick="(function(){var m=document.getElementById('reg_modal'); if(m){m.style.setProperty('display','none','important');}})();">
+            onclick="var d=document.getElementById('reg_modal'); if(d&&d.close){d.close();}">
      <i class="ki-filled ki-cross"></i>
     </button>
    </div>
@@ -236,15 +239,15 @@
     <div class="text-sm text-destructive" id="reg_form_err"></div>
     <div class="flex justify-end gap-2 mt-2">
      <button type="button" class="kt-btn kt-btn-outline" id="reg_modal_cancel"
-             onclick="(function(){var m=document.getElementById('reg_modal'); if(m){m.style.setProperty('display','none','important');}})();">Cancel</button>
+             onclick="var d=document.getElementById('reg_modal'); if(d&&d.close){d.close();}">Cancel</button>
      <button type="submit" class="kt-btn kt-btn-primary" id="reg_submit">Save customer</button>
     </div>
    </form>
   </div>
- </div>
+ </dialog>
  {% endif %}
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260724-4" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260724-5" defer></script>
 {% endblock %}
