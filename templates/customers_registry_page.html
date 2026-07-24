@@ -164,14 +164,15 @@
   </div>
  </div>
 
- <!-- Create modal (admin/editor only). The `hidden` attribute is the
-      single source of truth for open/closed — no CSS class fights, no
-      inline-style vs class-!important priority bugs. Toggled by JS via
-      $modal.hidden = true/false. -->
+ <!-- Create modal (admin/editor only). Display state is driven by inline
+      style with !important, applied via JS `setProperty('display', ..., 'important')`.
+      That beats both the UA `[hidden]{display:none}` rule AND Tailwind's
+      `.flex` class, so we never end up with a modal that's stuck open or
+      stuck closed due to specificity accidents. Base state = closed. -->
  {% if role in ('admin', 'editor') %}
- <div id="reg_modal" hidden
-      class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4"
-      style="display: flex;">
+ <div id="reg_modal"
+      class="fixed inset-0 z-[9999] items-center justify-center bg-black/60 p-4"
+      style="display: none;">
   <div class="kt-card p-6 w-full max-w-lg mx-auto">
    <div class="flex items-center justify-between mb-4">
     <h3 class="text-lg font-medium text-mono">Add Customer</h3>

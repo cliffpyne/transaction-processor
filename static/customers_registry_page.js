@@ -180,16 +180,21 @@
   const $formErr   = $('reg_form_err');
   const $btnSubmit = $('reg_submit');
 
+  // Use setProperty(..., 'important') so this beats any Tailwind/Metronic
+  // class-based display rule regardless of stylesheet load order.
+  const showModal = (el) => el.style.setProperty('display', 'flex', 'important');
+  const hideModal = (el) => el.style.setProperty('display', 'none', 'important');
+
   const openModal = () => {
     if (!$modal) { alert('Add-customer form is not loaded — please refresh.'); return; }
     if ($formErr) $formErr.textContent = '';
     if ($form)    $form.reset();
-    $modal.hidden = false;
+    showModal($modal);
     document.body.style.overflow = 'hidden'; // prevent scroll behind
   };
   const closeModal = () => {
     if (!$modal) return;
-    $modal.hidden = true;
+    hideModal($modal);
     document.body.style.overflow = '';
   };
   if ($btnOpen)   $btnOpen.addEventListener('click', openModal);
@@ -200,7 +205,7 @@
   });
   // Esc closes the modal
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && $modal && !$modal.hidden) closeModal();
+    if (e.key === 'Escape' && $modal && $modal.style.display !== 'none') closeModal();
   });
 
   if ($form) $form.addEventListener('submit', async (e) => {
@@ -293,7 +298,7 @@
   }
 
   // Start hidden — modal opens only via the Add Customer button
-  if ($modal) $modal.hidden = true;
+  if ($modal) hideModal($modal);
 
   loadStats();
   load();
