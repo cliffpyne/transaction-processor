@@ -516,9 +516,20 @@ def _registry_pick(payload: dict) -> dict:
 @ui.route('/api/customer_registry', methods=['GET'])
 @login_required
 def customer_registry_list():
-    """Paginated list with optional filters:
-       ?page=1&size=25&search=...&customer_type=boda
-       search is OR'd across customer_name, plate, phone, bank_account_name."""
+    """Paginated list with optional filters.
+
+    Filters — every one is optional, combined with AND:
+      ?page=1&size=25
+      &search=...              OR-search across name/plate/phone/bank_name
+      &customer_type=boda|savcom|iphone
+      &name=...                ilike substring on customer_name
+      &plate=...               ilike substring on plate
+      &phone=...               ilike substring on phone
+      &bank_account_name=...   ilike substring on bank_account_name
+      &start_date_from=YYYY-MM-DD  &start_date_to=YYYY-MM-DD  (inclusive range)
+      &loan_min=<num>          &loan_max=<num>                (inclusive range)
+      &created_from=YYYY-MM-DD &created_to=YYYY-MM-DD         (inclusive range on created_at::date)
+    """
     try:
         page = max(1, int(request.args.get('page', 1)))
         size = max(1, min(1000, int(request.args.get('size', 25))))
@@ -546,6 +557,48 @@ def customer_registry_list():
             f'bank_account_name.ilike.*{pattern}*',
         ])
         params.append(('or', f'({or_terms})'))
+
+    # ── Per-column text filters (ilike substring) ────────────────────────
+    for arg, col in (
+        ('name',              'customer_name'),
+        ('plate',             'plate'),
+        ('phone',             'phone'),
+        ('bank_account_name', 'bank_account_name'),
+    ):
+        val = (request.args.get(arg) or '').strip().replace(',', '')
+        if val:
+            params.append((col, f'ilike.*{val}*'))
+
+    # ── Date range filters (inclusive) ───────────────────────────────────
+    # start_date is a date column — plain gte/lte works.
+    for arg, op, col in (
+        ('start_date_from', 'gte', 'start_date'),
+        ('start_date_to',   'lte', 'start_date'),
+    ):
+        val = (request.args.get(arg) or '').strip()
+        if val:
+            params.append((col, f'{op}.{val}'))
+
+    # created_at is timestamptz. For an INCLUSIVE date range in EAT the safest
+    # PostgREST-side approach is to compare against the ISO date bounds; a
+    # trailing 'T23:59:59.999+03:00' on the upper bound catches everything
+    # keyed that day even for UTC-stored timestamps.
+    cfrom = (request.args.get('created_from') or '').strip()
+    if cfrom:
+        params.append(('created_at', f'gte.{cfrom}T00:00:00+03:00'))
+    cto = (request.args.get('created_to') or '').strip()
+    if cto:
+        params.append(('created_at', f'lte.{cto}T23:59:59.999+03:00'))
+
+    # ── Loan amount range (numeric) ──────────────────────────────────────
+    for arg, op in (('loan_min', 'gte'), ('loan_max', 'lte')):
+        raw = (request.args.get(arg) or '').strip()
+        if raw:
+            try:
+                float(raw)  # sanity check — no injection into PostgREST
+            except ValueError:
+                return jsonify({'error': f'{arg} must be numeric'}), 400
+            params.append(('loan_amount_tsh', f'{op}.{raw}'))
 
     try:
         r = requests.get(

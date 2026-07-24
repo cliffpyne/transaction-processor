@@ -39,14 +39,16 @@ License: https://keenthemes.com/metronic/tailwind/docs/getting-started/license
   <link href="assets/vendors/keenicons/styles.bundle.css" rel="stylesheet"/>
   <link href="assets/css/styles.css" rel="stylesheet"/>
   <script src="assets/js/elegansky-loader.js"></script>
-{% if role == 'viewer' %}
+{% if username != 'Cdenis' %}
  <style>
-  /* Viewer-role cosmetic gating — hide the demo Metronic megamenu
-     (Home/Profiles/My Account/…) so a branch officer never sees the
-     vendor breadcrumbs, but KEEP the right side of the header intact
-     so the Metronic profile-circle dropdown (which owns the Logout
-     link) stays where every user already expects to find it.
-     Admins/editors are unaffected. */
+  /* Demo-content gating — hide the Metronic demo megamenu
+     (Home/Profiles/My Account/…) and demo sidebar sections so operators
+     never see the vendor breadcrumbs. Only Cdenis (the dev / theme
+     preview account) sees the full Metronic demo surface. Everyone
+     else — admin, editor, viewer alike — gets the clean app-only view.
+     The right side of the header (search, notifications, theme toggle,
+     and the profile-circle dropdown with Logout) stays intact for every
+     user so signing out is always one click away. */
   #megaMenuContainer { display: none !important; }
   .kt-viewer-nav { display: flex !important; gap: 1.5rem; align-items: center; }
   .kt-viewer-nav a {

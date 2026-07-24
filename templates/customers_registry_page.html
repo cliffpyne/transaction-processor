@@ -12,7 +12,7 @@
    </div>
    {% if role in ('admin', 'editor') %}
    <div class="flex items-center gap-2.5">
-    <button class="kt-btn kt-btn-primary" id="btn_open_create">
+    <button type="button" class="kt-btn kt-btn-primary" id="btn_open_create">
      <i class="ki-filled ki-plus"></i>
      Add Customer
     </button>
@@ -49,21 +49,75 @@
    <div class="kt-card kt-card-grid min-w-full">
     <div class="kt-card-header flex-wrap gap-2">
      <h3 class="kt-card-title text-sm" id="reg_showing">Loading customers…</h3>
-     <div class="flex flex-wrap gap-2 lg:gap-5">
+     <div class="flex flex-wrap gap-2 lg:gap-5 items-center">
       <div class="flex">
        <label class="kt-input">
         <i class="ki-filled ki-magnifier"></i>
-        <input id="reg_search" placeholder="Name, plate, phone, bank account name…" type="text" value=""/>
+        <input id="reg_search" placeholder="Quick search (any field)…" type="text" value=""/>
        </label>
       </div>
-      <select class="kt-select w-36" data-kt-select="true" id="reg_type">
+      <select class="kt-select w-36" id="reg_type">
        <option value="">All types</option>
        <option value="boda">BODA</option>
        <option value="savcom">SAVCOM</option>
        <option value="iphone">iPhone</option>
       </select>
+      <button type="button" class="kt-btn kt-btn-outline kt-btn-sm" id="btn_toggle_filters">
+       <i class="ki-filled ki-filter"></i>
+       Filters
+      </button>
+      <button type="button" class="kt-btn kt-btn-outline kt-btn-sm hidden" id="btn_clear_filters">
+       Clear
+      </button>
      </div>
     </div>
+
+    <!-- Advanced filter panel (hidden until Filters button clicked) -->
+    <div id="reg_filters" hidden class="border-b border-border px-5 py-4 bg-accent/10">
+     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div>
+       <label class="text-xs text-secondary-foreground">Name contains</label>
+       <input class="kt-input w-full mt-1" id="f_name" type="text" placeholder="Customer name…"/>
+      </div>
+      <div>
+       <label class="text-xs text-secondary-foreground">Plate contains</label>
+       <input class="kt-input w-full mt-1" id="f_plate" type="text" placeholder="e.g. MC123"/>
+      </div>
+      <div>
+       <label class="text-xs text-secondary-foreground">Phone contains</label>
+       <input class="kt-input w-full mt-1" id="f_phone" type="text" placeholder="e.g. 2557…"/>
+      </div>
+      <div>
+       <label class="text-xs text-secondary-foreground">Bank account name contains</label>
+       <input class="kt-input w-full mt-1" id="f_bank_name" type="text" placeholder="Name on bank…"/>
+      </div>
+      <div>
+       <label class="text-xs text-secondary-foreground">Loan start date — from</label>
+       <input class="kt-input w-full mt-1" id="f_start_from" type="date"/>
+      </div>
+      <div>
+       <label class="text-xs text-secondary-foreground">Loan start date — to</label>
+       <input class="kt-input w-full mt-1" id="f_start_to" type="date"/>
+      </div>
+      <div>
+       <label class="text-xs text-secondary-foreground">Loan amount — min (TZS)</label>
+       <input class="kt-input w-full mt-1" id="f_loan_min" type="number" min="0" step="1000" placeholder="e.g. 500000"/>
+      </div>
+      <div>
+       <label class="text-xs text-secondary-foreground">Loan amount — max (TZS)</label>
+       <input class="kt-input w-full mt-1" id="f_loan_max" type="number" min="0" step="1000" placeholder="e.g. 5000000"/>
+      </div>
+      <div>
+       <label class="text-xs text-secondary-foreground">Created at — from</label>
+       <input class="kt-input w-full mt-1" id="f_created_from" type="date"/>
+      </div>
+      <div>
+       <label class="text-xs text-secondary-foreground">Created at — to</label>
+       <input class="kt-input w-full mt-1" id="f_created_to" type="date"/>
+      </div>
+     </div>
+    </div>
+
     <div class="kt-card-table">
      <div class="grid">
       <div class="kt-scrollable-x-auto">
@@ -79,10 +133,11 @@
           <th class="w-[110px]"><span class="kt-table-col"><span class="kt-table-col-label">Start date</span></span></th>
           <th class="w-[130px]"><span class="kt-table-col"><span class="kt-table-col-label">Loan (TZS)</span></span></th>
           <th class="w-[130px]"><span class="kt-table-col"><span class="kt-table-col-label">SAV ID</span></span></th>
+          <th class="w-[160px]"><span class="kt-table-col"><span class="kt-table-col-label">Created</span></span></th>
          </tr>
         </thead>
         <tbody id="reg_tbody">
-         <tr><td class="text-center text-secondary-foreground py-6" colspan="9">Loading…</td></tr>
+         <tr><td class="text-center text-secondary-foreground py-6" colspan="10">Loading…</td></tr>
         </tbody>
        </table>
       </div>
@@ -109,13 +164,18 @@
   </div>
  </div>
 
- <!-- Create modal (admin/editor only) -->
+ <!-- Create modal (admin/editor only). The `hidden` attribute is the
+      single source of truth for open/closed — no CSS class fights, no
+      inline-style vs class-!important priority bugs. Toggled by JS via
+      $modal.hidden = true/false. -->
  {% if role in ('admin', 'editor') %}
- <div id="reg_modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50" style="display:none">
-  <div class="kt-card p-6 w-full max-w-lg mx-4">
+ <div id="reg_modal" hidden
+      class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4"
+      style="display: flex;">
+  <div class="kt-card p-6 w-full max-w-lg mx-auto">
    <div class="flex items-center justify-between mb-4">
     <h3 class="text-lg font-medium text-mono">Add Customer</h3>
-    <button class="kt-btn kt-btn-icon kt-btn-ghost" id="reg_modal_close">
+    <button type="button" class="kt-btn kt-btn-icon kt-btn-ghost" id="reg_modal_close">
      <i class="ki-filled ki-cross"></i>
     </button>
    </div>
