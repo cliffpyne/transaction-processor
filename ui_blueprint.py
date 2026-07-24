@@ -158,11 +158,75 @@ _HOME_SUBPAGES = {
 @ui.route('/home/<path:sub>')
 @login_required
 def home_page(sub=None):
+    # Add-customer page is a dedicated route below so we can handle POST.
+    # Falling through here would render the list template on GET, which
+    # would work but wouldn't POST — cleaner to route explicitly.
+    if (sub or '').strip('/') == 'customers-registry/new':
+        return customer_registry_new_page()
     template = _HOME_SUBPAGES.get((sub or '').strip('/').split('/')[0], 'home.html')
     return render_template(template,
                            username=current_user.username,
                            full_name=current_user.full_name,
                            role=current_user.role)
+
+
+@ui.route('/home/customers-registry/new', methods=['GET', 'POST'])
+@require_role('admin', 'editor')
+def customer_registry_new_page():
+    """Dedicated create-customer page. Bypasses the modal-in-list-page
+    entirely — POSTs here, on success redirects to the list page. On
+    validation error, re-renders with the submitted values so the user
+    doesn't lose their typing."""
+    form_ctx = {}
+    err = None
+    if request.method == 'POST':
+        form_ctx = {k: (v or '').strip() for k, v in request.form.items()}
+        # Same coercions the JSON API used to do client-side
+        if form_ctx.get('plate'):
+            form_ctx['plate'] = form_ctx['plate'].replace(' ', '').upper()
+        if not form_ctx.get('customer_name'):
+            err = 'Customer name is required.'
+        else:
+            # Build the API payload — only fields the whitelist accepts.
+            body = _registry_pick(form_ctx)
+            body.setdefault('customer_type', 'boda')
+            body['created_by'] = current_user.username
+            # Handle the phones_extra text box for iPhone multi-phone entries.
+            # We put every non-empty comma-separated token into phones[],
+            # prepend the primary phone if present, and dedupe.
+            phones: list[str] = []
+            seen: set[str] = set()
+            primary = (form_ctx.get('phone') or '').strip()
+            if primary:
+                phones.append(primary)
+                seen.add(primary)
+            extras_raw = form_ctx.get('phones_extra') or ''
+            for tok in [t.strip() for t in extras_raw.split(',')]:
+                if tok and tok not in seen:
+                    phones.append(tok)
+                    seen.add(tok)
+            if phones:
+                body['phones'] = phones
+            try:
+                r = requests.post(
+                    f'{SUPABASE_URL_REGISTRY}/rest/v1/customer_registry',
+                    headers={**_H_REGISTRY,
+                             'Prefer': 'return=representation'},
+                    json=body, timeout=15,
+                )
+            except requests.RequestException as e:
+                err = f'Registry unreachable: {e}'
+            else:
+                if not r.ok:
+                    err = f'Save failed ({r.status_code}): {r.text[:300]}'
+                else:
+                    return redirect(url_for('ui.home_page',
+                                            sub='customers-registry'))
+    return render_template('customers_registry_new.html',
+                           username=current_user.username,
+                           full_name=current_user.full_name,
+                           role=current_user.role,
+                           form=form_ctx, err=err)
 
 
 # ── REST API — generic list endpoint ────────────────────────────────────────

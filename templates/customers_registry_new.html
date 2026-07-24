@@ -1,0 +1,110 @@
+{% extends "home.html" %}
+{% block content %}
+ <div class="kt-container-fixed" id="contentContainer"></div>
+ <div class="kt-container-fixed">
+  <div class="flex flex-wrap items-center lg:items-end justify-between gap-5 pb-7.5">
+   <div class="flex flex-col justify-center gap-2">
+    <h1 class="text-xl font-medium leading-none text-mono">Add Customer</h1>
+    <div class="flex items-center gap-2 text-sm font-normal text-secondary-foreground">
+     Register a new customer in the registry
+    </div>
+   </div>
+   <div class="flex items-center gap-2.5">
+    <a class="kt-btn kt-btn-outline" href="/home/customers-registry">
+     <i class="ki-filled ki-arrow-left"></i>
+     Back to registry
+    </a>
+   </div>
+  </div>
+ </div>
+
+ <div class="kt-container-fixed">
+  <div class="grid gap-5 lg:gap-7.5">
+   <div class="kt-card p-6 max-w-2xl w-full">
+
+    {% if err %}
+     <div class="kt-alert kt-alert-destructive mb-4 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+      {{ err }}
+     </div>
+    {% endif %}
+
+    <form id="reg_new_form" class="grid gap-4" method="POST" action="/home/customers-registry/new">
+     <div>
+      <label class="text-sm font-medium text-mono">Customer name <span class="text-destructive">*</span></label>
+      <input class="kt-input w-full mt-1" name="customer_name" type="text" required
+             placeholder="FULL NAME AS ON RECORDS" value="{{ form.customer_name or '' }}" autofocus/>
+     </div>
+
+     <div class="grid grid-cols-2 gap-3">
+      <div>
+       <label class="text-sm font-medium text-mono">Type</label>
+       <select class="kt-select w-full mt-1" name="customer_type">
+        <option value="boda"   {% if form.customer_type == 'boda' or not form.customer_type %}selected{% endif %}>BODA</option>
+        <option value="savcom" {% if form.customer_type == 'savcom' %}selected{% endif %}>SAVCOM</option>
+        <option value="iphone" {% if form.customer_type == 'iphone' %}selected{% endif %}>iPhone</option>
+       </select>
+      </div>
+      <div>
+       <label class="text-sm font-medium text-mono">Plate</label>
+       <input class="kt-input w-full mt-1" name="plate" type="text"
+              placeholder="MC###XXX" value="{{ form.plate or '' }}"/>
+      </div>
+     </div>
+
+     <div class="grid grid-cols-2 gap-3">
+      <div>
+       <label class="text-sm font-medium text-mono">Phone (primary)</label>
+       <input class="kt-input w-full mt-1" name="phone" type="text"
+              placeholder="255XXXXXXXXX" value="{{ form.phone or '' }}"/>
+      </div>
+      <div>
+       <label class="text-sm font-medium text-mono">SAV customer ID</label>
+       <input class="kt-input w-full mt-1" name="sav_customer_id" type="text"
+              placeholder="9633000XXX" value="{{ form.sav_customer_id or '' }}"/>
+      </div>
+     </div>
+
+     <div>
+      <label class="text-sm font-medium text-mono">Additional phones (iPhone only)</label>
+      <input class="kt-input w-full mt-1" name="phones_extra" type="text"
+             placeholder="Comma-separated extras: 0752…, 0754…, 0763…"
+             value="{{ form.phones_extra or '' }}"/>
+      <div class="text-xs text-secondary-foreground mt-1">
+       Every listed phone is added to this customer's `phones[]` and matched during lookup.
+      </div>
+     </div>
+
+     <div>
+      <label class="text-sm font-medium text-mono">Bank account name</label>
+      <input class="kt-input w-full mt-1" name="bank_account_name" type="text"
+             placeholder="Name on their bank account (if depositing themselves)"
+             value="{{ form.bank_account_name or '' }}"/>
+     </div>
+
+     <div class="grid grid-cols-2 gap-3">
+      <div>
+       <label class="text-sm font-medium text-mono">Loan start date</label>
+       <input class="kt-input w-full mt-1" name="start_date" type="date"
+              value="{{ form.start_date or '' }}"/>
+      </div>
+      <div>
+       <label class="text-sm font-medium text-mono">Loan amount (TZS)</label>
+       <input class="kt-input w-full mt-1" name="loan_amount_tsh" type="number" step="0.01" min="0"
+              placeholder="e.g. 3000000" value="{{ form.loan_amount_tsh or '' }}"/>
+      </div>
+     </div>
+
+     <div>
+      <label class="text-sm font-medium text-mono">Notes</label>
+      <textarea class="kt-input w-full mt-1" name="notes" rows="2" placeholder="Optional">{{ form.notes or '' }}</textarea>
+     </div>
+
+     <div class="flex justify-end gap-2 mt-2">
+      <a class="kt-btn kt-btn-outline" href="/home/customers-registry">Cancel</a>
+      <button type="submit" class="kt-btn kt-btn-primary">Save customer</button>
+     </div>
+    </form>
+   </div>
+  </div>
+ </div>
+{% endblock %}

@@ -12,17 +12,13 @@
    </div>
    {% if role in ('admin', 'editor') %}
    <div class="flex items-center gap-2.5">
-    <!-- Inline onclick calls the native <dialog> showModal() API, which
-         puts the dialog in the browser's top-layer above every other
-         element regardless of z-index, cannot be intercepted by
-         Metronic's reparent JS, and cannot be hidden by any CSS class
-         war. This is the bulletproof path — the JS module still wires
-         up richer form behaviour on top. -->
-    <button type="button" class="kt-btn kt-btn-primary" id="btn_open_create"
-            onclick="var d=document.getElementById('reg_modal'); if(d&&d.showModal){d.showModal();}else if(d){d.style.setProperty('display','flex','important');}">
+    <!-- Plain link to a dedicated create page. No modal, no z-index war,
+         no Metronic JS interference — a real navigation the browser
+         handles at the HTTP layer. -->
+    <a class="kt-btn kt-btn-primary" href="/home/customers-registry/new">
      <i class="ki-filled ki-plus"></i>
      Add Customer
-    </button>
+    </a>
    </div>
    {% endif %}
   </div>
@@ -171,83 +167,12 @@
   </div>
  </div>
 
- <!-- Create modal (admin/editor only). Native <dialog> element:
-      showModal() puts it in the browser's top layer (above every other
-      element, no z-index math), close() hides it, Esc-to-close is
-      automatic, click-outside-to-close is wired manually below. Because
-      it's not in the normal flow, no Metronic reparent can move it away,
-      no Tailwind class-vs-style war can trap it. This is the resilient
-      shape for a modal that has to survive an aggressive theme. -->
- {% if role in ('admin', 'editor') %}
- <dialog id="reg_modal"
-         class="p-0 rounded-lg bg-background text-foreground w-full max-w-lg backdrop:bg-black/60">
-  <div class="p-6">
-   <div class="flex items-center justify-between mb-4">
-    <h3 class="text-lg font-medium text-mono">Add Customer</h3>
-    <button type="button" class="kt-btn kt-btn-icon kt-btn-ghost" id="reg_modal_close"
-            onclick="var d=document.getElementById('reg_modal'); if(d&&d.close){d.close();}">
-     <i class="ki-filled ki-cross"></i>
-    </button>
-   </div>
-   <form id="reg_form" class="grid gap-4">
-    <div>
-     <label class="text-sm font-medium text-mono">Customer name <span class="text-destructive">*</span></label>
-     <input class="kt-input w-full mt-1" name="customer_name" type="text" required placeholder="FULL NAME AS ON RECORDS"/>
-    </div>
-    <div class="grid grid-cols-2 gap-3">
-     <div>
-      <label class="text-sm font-medium text-mono">Type</label>
-      <select class="kt-select w-full mt-1" name="customer_type">
-       <option value="boda" selected>BODA</option>
-       <option value="savcom">SAVCOM</option>
-       <option value="iphone">iPhone</option>
-      </select>
-     </div>
-     <div>
-      <label class="text-sm font-medium text-mono">Plate</label>
-      <input class="kt-input w-full mt-1" name="plate" type="text" placeholder="MC###XXX"/>
-     </div>
-    </div>
-    <div class="grid grid-cols-2 gap-3">
-     <div>
-      <label class="text-sm font-medium text-mono">Phone</label>
-      <input class="kt-input w-full mt-1" name="phone" type="text" placeholder="255XXXXXXXXX"/>
-     </div>
-     <div>
-      <label class="text-sm font-medium text-mono">SAV customer ID</label>
-      <input class="kt-input w-full mt-1" name="sav_customer_id" type="text" placeholder="9633000XXX"/>
-     </div>
-    </div>
-    <div>
-     <label class="text-sm font-medium text-mono">Bank account name</label>
-     <input class="kt-input w-full mt-1" name="bank_account_name" type="text" placeholder="Name on their bank account (if depositing themselves)"/>
-    </div>
-    <div class="grid grid-cols-2 gap-3">
-     <div>
-      <label class="text-sm font-medium text-mono">Loan start date</label>
-      <input class="kt-input w-full mt-1" name="start_date" type="date"/>
-     </div>
-     <div>
-      <label class="text-sm font-medium text-mono">Loan amount (TZS)</label>
-      <input class="kt-input w-full mt-1" name="loan_amount_tsh" type="number" step="0.01" min="0" placeholder="e.g. 3000000"/>
-     </div>
-    </div>
-    <div>
-     <label class="text-sm font-medium text-mono">Notes</label>
-     <textarea class="kt-input w-full mt-1" name="notes" rows="2" placeholder="Optional"></textarea>
-    </div>
-    <div class="text-sm text-destructive" id="reg_form_err"></div>
-    <div class="flex justify-end gap-2 mt-2">
-     <button type="button" class="kt-btn kt-btn-outline" id="reg_modal_cancel"
-             onclick="var d=document.getElementById('reg_modal'); if(d&&d.close){d.close();}">Cancel</button>
-     <button type="submit" class="kt-btn kt-btn-primary" id="reg_submit">Save customer</button>
-    </div>
-   </form>
-  </div>
- </dialog>
- {% endif %}
+ <!-- Add Customer is now a real page at /home/customers-registry/new — no
+      modal, no client-side JS to break the form flow. The link above
+      navigates there via a plain <a href>. Everything the modal used to
+      do (validation, submit, redirect) is handled by the new page. -->
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260724-5" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260724-6" defer></script>
 {% endblock %}

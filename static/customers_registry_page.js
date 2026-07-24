@@ -1,9 +1,8 @@
-// Customer Registry page — list + create + per-column filters.
+// Customer Registry page — list + per-column filters.
 //
-// Modal open/close is driven by the HTML5 `hidden` attribute (not a CSS
-// class), so nothing in the Tailwind/Metronic layer can override it via
-// specificity accidents. Every input filter debounces to keep PostgREST
-// happy at 2k+ rows.
+// Add Customer is a real page at /home/customers-registry/new (no JS-
+// driven modal). Every input filter debounces to keep PostgREST happy
+// at 2k+ rows.
 
 (function () {
   const state = {
@@ -171,78 +170,8 @@
     renderPager(state.page, lastPage);
   };
 
-  // ── Create modal wiring (only present if role is admin/editor) ──
-  const $modal     = $('reg_modal');
-  const $btnOpen   = $('btn_open_create');
-  const $btnClose  = $('reg_modal_close');
-  const $btnCancel = $('reg_modal_cancel');
-  const $form      = $('reg_form');
-  const $formErr   = $('reg_form_err');
-  const $btnSubmit = $('reg_submit');
-
-  // The modal is a native <dialog>. showModal() puts it in the browser's
-  // top layer above every other element, close() hides it. If the browser
-  // doesn't support <dialog> (ancient), fall back to inline display style.
-  const showModal = (el) => {
-    if (el.showModal) { try { el.showModal(); return; } catch (_) {} }
-    el.style.setProperty('display', 'flex', 'important');
-  };
-  const hideModal = (el) => {
-    if (el.close && el.open) { try { el.close(); return; } catch (_) {} }
-    el.style.setProperty('display', 'none', 'important');
-  };
-
-  const openModal = () => {
-    if (!$modal) { alert('Add-customer form is not loaded — please refresh.'); return; }
-    if ($formErr) $formErr.textContent = '';
-    if ($form)    $form.reset();
-    showModal($modal);
-  };
-  const closeModal = () => {
-    if (!$modal) return;
-    hideModal($modal);
-  };
-  if ($btnOpen)   $btnOpen.addEventListener('click', openModal);
-  if ($btnClose)  $btnClose.addEventListener('click', closeModal);
-  if ($btnCancel) $btnCancel.addEventListener('click', closeModal);
-  // Backdrop click closes: on a native <dialog>, clicks outside the inner
-  // panel land on the dialog element itself (its backdrop pseudo). Esc-close
-  // is handled by the browser automatically for <dialog>.
-  if ($modal) $modal.addEventListener('click', (e) => {
-    if (e.target === $modal) closeModal();
-  });
-
-  if ($form) $form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    $formErr.textContent = '';
-    $btnSubmit.disabled = true;
-    const fd = new FormData($form);
-    const payload = {};
-    for (const [k, v] of fd.entries()) {
-      const s = String(v).trim();
-      if (s) payload[k] = s;
-    }
-    if (payload.plate) payload.plate = payload.plate.replace(/\s+/g, '').toUpperCase();
-    if (payload.customer_name) payload.customer_name = payload.customer_name.trim();
-
-    try {
-      const r = await fetch('/api/customer_registry', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || r.statusText);
-      closeModal();
-      state.page = 1;
-      await Promise.all([load(), loadStats()]);
-    } catch (err) {
-      $formErr.textContent = 'Save failed: ' + err.message;
-    } finally {
-      $btnSubmit.disabled = false;
-    }
-  });
+  // ── Modal wiring removed — Add Customer is now a real page at
+  // /home/customers-registry/new. No JS-driven modal to break. ──
 
   // ── Filter wiring (quick-search bar + type dropdown + per-column) ──
   const debounce = (fn, ms) => {
