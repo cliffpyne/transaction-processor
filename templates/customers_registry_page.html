@@ -1,4 +1,6 @@
-{% extends "home.html" %}
+{% extends "app.html" %}
+{% set nav_active = 'customers' %}
+{% block title %}Customer Registry{% endblock %}
 {% block content %}
  <!-- Container: title + create button -->
  <div class="kt-container-fixed" id="contentContainer"></div>
@@ -278,5 +280,5 @@
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260725-8" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260725-9" defer></script>
 {% endblock %}

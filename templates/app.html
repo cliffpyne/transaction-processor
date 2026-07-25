@@ -1,0 +1,231 @@
+{# ─────────────────────────────────────────────────────────────────────
+   app.html — lean app base template.
+
+   home.html carried 8,280 lines and 424 KB of Metronic demo content
+   (share-profile modal, report-user modal, product cards, activity feeds,
+   megamenu with every demo section) that pages like customers_registry
+   don't need. Every render shipped all of it and the browser had to
+   parse it, which is what caused the 10-minute reports on the customer
+   registry page.
+
+   This base template ships ONLY the essentials Metronic components need
+   to work (kt-modal, kt-dropdown, kt-menu accordions):
+     - Metronic CSS bundle + Keenicons + Inter font
+     - <div class="kt-sidebar"> with the app's real nav
+     - <div class="kt-wrapper"> with a minimal <header> (logo + profile
+       dropdown that owns Logout)
+     - {% block content %} for the page body
+     - core.bundle.js + ktui.min.js at the bottom
+
+   Every page (customers registry, transactions, sms, dashboard) can
+   extend this instead of home.html and load in a fraction of the time.
+────────────────────────────────────────────────────────────────────── #}
+<!DOCTYPE html>
+<html class="h-full" data-kt-theme="true" data-kt-theme-mode="light" dir="ltr" lang="en">
+ <head>
+  <base href="/static/demo/">
+  <title>Elegansky — {% block title %}{% endblock %}</title>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1, shrink-to-fit=no" name="viewport"/>
+  <link href="assets/media/app/apple-touch-icon.png" rel="apple-touch-icon" sizes="180x180"/>
+  <link href="assets/media/app/favicon-32x32.png" rel="icon" sizes="32x32" type="image/png"/>
+  <link href="assets/media/app/favicon-16x16.png" rel="icon" sizes="16x16" type="image/png"/>
+  <link href="assets/media/app/favicon.ico" rel="shortcut icon"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <link href="assets/vendors/keenicons/styles.bundle.css" rel="stylesheet"/>
+  <link href="assets/css/styles.css" rel="stylesheet"/>
+  <script>
+   // Theme mode probe — reads localStorage (kt-theme) or falls back to the
+   // OS `prefers-color-scheme` media query. Runs synchronously so the
+   // theme class is on <html> before first paint (no light→dark flash).
+   const defaultThemeMode = 'light';
+   let themeMode;
+   if (document.documentElement) {
+    if (localStorage.getItem('kt-theme')) {
+     themeMode = localStorage.getItem('kt-theme');
+    } else if (document.documentElement.hasAttribute('data-kt-theme-mode')) {
+     themeMode = document.documentElement.getAttribute('data-kt-theme-mode');
+    } else { themeMode = defaultThemeMode; }
+    if (themeMode === 'system') {
+     themeMode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    document.documentElement.classList.add(themeMode);
+   }
+  </script>
+  {% block head_extra %}{% endblock %}
+ </head>
+ <body class="antialiased flex h-full text-base text-foreground bg-background demo1 kt-sidebar-fixed kt-header-fixed">
+
+  <div class="flex grow">
+
+   {# ── SIDEBAR ──────────────────────────────────────────────────── #}
+   <div class="kt-sidebar bg-background border-e border-e-border fixed top-0 bottom-0 z-20 hidden lg:flex flex-col items-stretch shrink-0 [--kt-drawer-enable:true] lg:[--kt-drawer-enable:false]"
+        data-kt-drawer="true"
+        data-kt-drawer-class="kt-drawer kt-drawer-start top-0 bottom-0"
+        id="sidebar">
+    <div class="kt-sidebar-header hidden lg:flex items-center relative justify-between px-3 lg:px-6 shrink-0" id="sidebar_header">
+     <a class="dark:hidden" href="/home">
+      <img class="default-logo min-h-[22px] max-w-none" src="assets/media/app/default-logo.svg"/>
+      <img class="small-logo min-h-[22px] max-w-none" src="assets/media/app/mini-logo.svg"/>
+     </a>
+     <a class="hidden dark:block" href="/home">
+      <img class="default-logo min-h-[22px] max-w-none" src="assets/media/app/default-logo-dark.svg"/>
+      <img class="small-logo min-h-[22px] max-w-none" src="assets/media/app/mini-logo.svg"/>
+     </a>
+     <button class="kt-btn kt-btn-outline kt-btn-icon size-[30px] absolute start-full top-2/4 -translate-x-2/4 -translate-y-2/4 rtl:translate-x-2/4"
+             data-kt-toggle="body" data-kt-toggle-class="kt-sidebar-collapse" id="sidebar_toggle">
+      <i class="ki-filled ki-black-left-line kt-toggle-active:rotate-180 transition-all duration-300"></i>
+     </button>
+    </div>
+
+    <div class="kt-sidebar-content flex grow shrink-0 py-5 pe-2" id="sidebar_content">
+     <div class="kt-scrollable-y-hover grow shrink-0 flex ps-2 lg:ps-5 pe-1 lg:pe-3"
+          data-kt-scrollable="true"
+          data-kt-scrollable-dependencies="#sidebar_header"
+          data-kt-scrollable-height="auto"
+          data-kt-scrollable-offset="0px"
+          data-kt-scrollable-wrappers="#sidebar_content"
+          id="sidebar_scrollable">
+      {# `nav_active` is set by each page's template — used to mark the
+         corresponding kt-menu-item as `active`. E.g. customers_registry
+         sets nav_active='customers'. #}
+      <div class="kt-menu flex flex-col grow gap-0.5" data-kt-menu="true">
+
+       <div class="kt-menu-item {% if nav_active == 'dashboard' %}active{% endif %}">
+        <a class="kt-menu-link" href="/home">
+         <span class="kt-menu-icon"><i class="ki-filled ki-element-11"></i></span>
+         <span class="kt-menu-title">Dashboard</span>
+        </a>
+       </div>
+
+       <div class="kt-menu-item {% if nav_active == 'transactions' %}active{% endif %}">
+        <a class="kt-menu-link" href="/home/transactions">
+         <span class="kt-menu-icon"><i class="ki-filled ki-arrow-two-diagonals"></i></span>
+         <span class="kt-menu-title">Transactions</span>
+        </a>
+       </div>
+
+       <div class="kt-menu-item {% if nav_active == 'sms' %}active{% endif %}">
+        <a class="kt-menu-link" href="/home/sms">
+         <span class="kt-menu-icon"><i class="ki-filled ki-messages"></i></span>
+         <span class="kt-menu-title">SMS</span>
+        </a>
+       </div>
+
+       {# Customers accordion. Expands when any of its sub-links is active. #}
+       <div class="kt-menu-item {% if nav_active == 'customers' %}here show{% endif %}"
+            data-kt-menu-item-toggle="accordion" data-kt-menu-item-trigger="click">
+        <div class="kt-menu-link">
+         <span class="kt-menu-icon"><i class="ki-filled ki-people"></i></span>
+         <span class="kt-menu-title">Customers</span>
+         <span class="kt-menu-arrow"><i class="ki-filled ki-plus kt-menu-item-show:hidden"></i><i class="ki-filled ki-minus hidden kt-menu-item-show:inline-flex"></i></span>
+        </div>
+        <div class="kt-menu-accordion gap-0.5 ps-[10px] {% if nav_active == 'customers' %}show{% endif %}">
+         <div class="kt-menu-item {% if nav_sub == 'boda' %}active{% endif %}">
+          <a class="kt-menu-link" href="/home/customers-registry?customer_type=boda">
+           <span class="kt-menu-bullet"><span class="w-[6px] h-[6px] rounded-full bg-primary/60"></span></span>
+           <span class="kt-menu-title">BODA</span>
+          </a>
+         </div>
+         <div class="kt-menu-item {% if nav_sub == 'savcom' %}active{% endif %}">
+          <a class="kt-menu-link" href="/home/customers-registry?customer_type=savcom">
+           <span class="kt-menu-bullet"><span class="w-[6px] h-[6px] rounded-full bg-info/60"></span></span>
+           <span class="kt-menu-title">SAV</span>
+          </a>
+         </div>
+         <div class="kt-menu-item {% if nav_sub == 'iphone' %}active{% endif %}">
+          <a class="kt-menu-link" href="/home/customers-registry?customer_type=iphone">
+           <span class="kt-menu-bullet"><span class="w-[6px] h-[6px] rounded-full bg-secondary-foreground/60"></span></span>
+           <span class="kt-menu-title">iPhone</span>
+          </a>
+         </div>
+         {% if role in ('admin', 'editor') %}
+         <div class="kt-menu-item {% if nav_sub == 'new' %}active{% endif %}">
+          <a class="kt-menu-link" href="/home/customers-registry?open=add">
+           <span class="kt-menu-icon"><i class="ki-filled ki-plus"></i></span>
+           <span class="kt-menu-title">Create new customer</span>
+          </a>
+         </div>
+         {% endif %}
+        </div>
+       </div>
+
+      </div>
+     </div>
+    </div>
+   </div>
+
+   {# ── MAIN AREA ────────────────────────────────────────────────── #}
+   <div class="kt-wrapper flex grow flex-col">
+
+    {# ── HEADER (minimal — logo on mobile + profile dropdown) ──── #}
+    <header class="kt-header fixed top-0 z-10 start-0 end-0 flex items-stretch shrink-0 bg-background"
+            data-kt-sticky="true" data-kt-sticky-class="border-b border-border"
+            data-kt-sticky-name="header" id="header">
+     <div class="kt-container-fixed flex justify-between items-stretch lg:gap-4" id="headerContainer">
+
+      <!-- Mobile Logo + drawer toggle -->
+      <div class="flex gap-2.5 lg:hidden items-center -ms-1">
+       <a class="shrink-0" href="/home">
+        <img class="max-h-[25px] w-full" src="assets/media/app/mini-logo.svg"/>
+       </a>
+       <button class="kt-btn kt-btn-icon kt-btn-ghost" data-kt-drawer-toggle="#sidebar">
+        <i class="ki-filled ki-menu"></i>
+       </button>
+      </div>
+
+      <!-- Spacer -->
+      <div class="flex items-center grow"></div>
+
+      <!-- Profile dropdown (with Logout) -->
+      <div class="flex items-center gap-2">
+       <div class="shrink-0"
+            data-kt-dropdown="true" data-kt-dropdown-offset="10px, 10px"
+            data-kt-dropdown-placement="bottom-end" data-kt-dropdown-trigger="click">
+        <div class="cursor-pointer shrink-0" data-kt-dropdown-toggle="true">
+         <img class="size-9 rounded-full border-2 border-green-500 shrink-0" alt="" src="assets/media/avatars/300-2.png"/>
+        </div>
+        <div class="kt-dropdown-menu w-[250px]" data-kt-dropdown-menu="true">
+         <div class="flex items-center justify-between px-2.5 py-1.5 gap-1.5">
+          <div class="flex items-center gap-2">
+           <img class="size-9 shrink-0 rounded-full border-2 border-green-500" alt="" src="assets/media/avatars/300-2.png"/>
+           <div class="flex flex-col gap-1">
+            <span class="text-sm text-foreground font-semibold leading-none">{{ full_name or username or 'User' }}</span>
+            <span class="text-xs text-secondary-foreground leading-none">{{ role or '' }}</span>
+           </div>
+          </div>
+         </div>
+         <div class="kt-dropdown-menu-separator"></div>
+         <ul class="kt-dropdown-menu-sub">
+          <li>
+           <a class="kt-dropdown-menu-link" href="/logout">
+            <i class="ki-filled ki-exit-right"></i>
+            Log out
+           </a>
+          </li>
+         </ul>
+        </div>
+       </div>
+      </div>
+
+     </div>
+    </header>
+
+    <!-- Content -->
+    <main class="grow content" id="content" role="content">
+     <div class="pt-5">
+      {% block content %}{% endblock %}
+     </div>
+    </main>
+
+   </div>
+  </div>
+
+  <!-- Metronic core JS — needed for kt-modal, kt-dropdown, kt-menu accordion,
+       kt-drawer, kt-sticky. ktui.min.js layers the higher-level widgets. -->
+  <script src="assets/js/core.bundle.js"></script>
+  <script src="assets/vendors/ktui/ktui.min.js"></script>
+  <script src="assets/js/layouts/demo1.js"></script>
+  {% block body_extra %}{% endblock %}
+ </body>
+</html>

@@ -1,16 +1,24 @@
-// Customer Registry page — list + per-column filters.
+// Customer Registry page — list + per-column filters + Add-Customer modal.
 //
-// Add Customer is a real page at /home/customers-registry/new (no JS-
-// driven modal). Every input filter debounces to keep PostgREST happy
-// at 2k+ rows.
+// Modal is Metronic-native (kt-modal + data-kt-modal-toggle/dismiss),
+// dynamic form fields toggled by customer_type. Debounced filters keep
+// PostgREST happy at 2k+ rows.
+//
+// URL query string honoured on load:
+//   ?customer_type=boda|savcom|iphone → pre-set the type filter
+//   ?open=add                         → auto-open Add-Customer modal
 
 (function () {
+  // ── URL query params for pre-filtering + auto-open ──
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialType = urlParams.get('customer_type') || '';
+
   const state = {
     page: 1,
     size: 25,
     // Global quick-search + type dropdown from the card header
     search: '',
-    type: '',
+    type: ['boda', 'savcom', 'iphone'].includes(initialType) ? initialType : '',
     // Per-column filters (from the collapsible Filters panel)
     filters: {
       name: '',
@@ -323,8 +331,21 @@
     });
   }
 
-  // Start hidden — modal opens only via the Add Customer button
-  if ($modal) hideModal($modal);
+  // ── URL query bootstrap ────────────────────────────────────────────
+  // Pre-set the type dropdown so the sidebar sub-nav (?customer_type=boda)
+  // lands in a pre-filtered view.
+  if (state.type && $type) {
+    $type.value = state.type;
+  }
+  // Auto-open the Add-Customer modal when the sidebar's "Create new
+  // customer" link is clicked (routes to ?open=add). Wait a tick so
+  // Metronic's core.bundle.js has finished wiring data-kt-modal-toggle.
+  if (urlParams.get('open') === 'add') {
+    setTimeout(() => {
+      const trigger = document.querySelector('[data-kt-modal-toggle="#reg_add_modal"]');
+      if (trigger) trigger.click();
+    }, 100);
+  }
 
   loadStats();
   load();
