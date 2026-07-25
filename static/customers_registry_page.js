@@ -179,6 +179,33 @@
   const $addErr    = $('reg_add_err');
   const $addSubmit = $('reg_add_submit');
   const $addModal  = $('reg_add_modal');
+  const $addType   = $('reg_add_type');
+
+  // ── Dynamic fields: show/hide by customer type ─────────────────────
+  // Each conditional field carries data-reg-show-for="boda savcom" etc.
+  // The plate column disappears for iPhone, sav_customer_id only shows
+  // for SAVCOM, additional phones only for iPhone. Hidden fields ALSO
+  // have their inputs cleared and disabled so the form submit never
+  // sends stale values from a type the user switched away from.
+  const applyTypeVisibility = (t) => {
+    document.querySelectorAll('#reg_add_form [data-reg-field]').forEach(el => {
+      const showFor = (el.dataset.regShowFor || '').split(/\s+/).filter(Boolean);
+      const visible = showFor.length === 0 || showFor.includes(t);
+      el.style.display = visible ? '' : 'none';
+      el.querySelectorAll('input, select, textarea').forEach(inp => {
+        if (!visible) {
+          inp.value = '';
+          inp.disabled = true;
+        } else {
+          inp.disabled = false;
+        }
+      });
+    });
+  };
+  if ($addType) {
+    applyTypeVisibility($addType.value || 'boda');
+    $addType.addEventListener('change', (e) => applyTypeVisibility(e.target.value));
+  }
 
   const closeAddModal = () => {
     if (!$addModal) return;

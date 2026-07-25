@@ -190,44 +190,57 @@
       <input name="customer_name" type="text" required placeholder="FULL NAME AS ON RECORDS"/>
      </label>
     </div>
-    <div class="grid grid-cols-2 gap-3">
-     <div>
-      <label class="text-sm font-medium text-mono">Type</label>
-      <select class="kt-select w-full mt-1" name="customer_type">
-       <option value="boda" selected>BODA</option>
-       <option value="savcom">SAVCOM</option>
-       <option value="iphone">iPhone</option>
-      </select>
-     </div>
-     <div>
-      <label class="text-sm font-medium text-mono">Plate</label>
-      <label class="kt-input mt-1">
-       <input name="plate" type="text" placeholder="MC###XXX"/>
-      </label>
-     </div>
-    </div>
-    <div class="grid grid-cols-2 gap-3">
-     <div>
-      <label class="text-sm font-medium text-mono">Phone (primary)</label>
-      <label class="kt-input mt-1">
-       <input name="phone" type="text" placeholder="255XXXXXXXXX"/>
-      </label>
-     </div>
-     <div>
-      <label class="text-sm font-medium text-mono">SAV customer ID</label>
-      <label class="kt-input mt-1">
-       <input name="sav_customer_id" type="text" placeholder="9633000XXX"/>
-      </label>
-     </div>
-    </div>
+
+    <!-- Type drives which downstream fields render (plate/sav_customer_id/
+         additional phones). Fields carry data-reg-show-for="…" attributes
+         and the JS reads customer_type on change to toggle them. -->
     <div>
-     <label class="text-sm font-medium text-mono">Additional phones (iPhone only)</label>
+     <label class="text-sm font-medium text-mono">Type</label>
+     <select class="kt-select w-full mt-1" name="customer_type" id="reg_add_type">
+      <option value="boda" selected>BODA</option>
+      <option value="savcom">SAVCOM</option>
+      <option value="iphone">iPhone</option>
+     </select>
+    </div>
+
+    <!-- Plate — hidden for iPhone (no plate). -->
+    <div data-reg-field data-reg-show-for="boda savcom">
+     <label class="text-sm font-medium text-mono">Plate</label>
+     <label class="kt-input mt-1">
+      <input name="plate" type="text" placeholder="MC###XXX"/>
+     </label>
+    </div>
+
+    <!-- Phone (primary) — always visible. -->
+    <div>
+     <label class="text-sm font-medium text-mono">Phone (primary)</label>
+     <label class="kt-input mt-1">
+      <input name="phone" type="text" placeholder="255XXXXXXXXX"/>
+     </label>
+    </div>
+
+    <!-- SAV customer ID — only shown for SAVCOM, never required. -->
+    <div data-reg-field data-reg-show-for="savcom">
+     <label class="text-sm font-medium text-mono">SAV customer ID <span class="text-secondary-foreground text-xs">(optional)</span></label>
+     <label class="kt-input mt-1">
+      <input name="sav_customer_id" type="text" placeholder="9633000XXX"/>
+     </label>
+    </div>
+
+    <!-- Additional phones — only shown for iPhone (multi-phone customers). -->
+    <div data-reg-field data-reg-show-for="iphone">
+     <label class="text-sm font-medium text-mono">Additional phones</label>
      <label class="kt-input mt-1">
       <input name="phones_extra" type="text" placeholder="Comma-separated: 0752…, 0754…"/>
      </label>
+     <div class="text-xs text-secondary-foreground mt-1">
+      Every phone listed lands in this customer's phones[] and matches during lookup.
+     </div>
     </div>
+
+    <!-- Bank account name — optional for every type. -->
     <div>
-     <label class="text-sm font-medium text-mono">Bank account name</label>
+     <label class="text-sm font-medium text-mono">Bank account name <span class="text-secondary-foreground text-xs">(optional)</span></label>
      <label class="kt-input mt-1">
       <input name="bank_account_name" type="text" placeholder="Name on their bank account, if depositing themselves"/>
      </label>
@@ -265,5 +278,5 @@
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260725-7" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260725-8" defer></script>
 {% endblock %}
