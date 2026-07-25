@@ -12,13 +12,15 @@
    </div>
    {% if role in ('admin', 'editor') %}
    <div class="flex items-center gap-2.5">
-    <!-- Plain link to a dedicated create page. No modal, no z-index war,
-         no Metronic JS interference — a real navigation the browser
-         handles at the HTTP layer. -->
-    <a class="kt-btn kt-btn-primary" href="/home/customers-registry/new">
+    <!-- Metronic-native modal trigger. `data-kt-modal-toggle` is wired
+         by core.bundle.js on page load and opens #reg_add_modal instantly
+         — no navigation, no re-render of the 424KB Metronic shell, no
+         custom JS to fight the theme. -->
+    <button type="button" class="kt-btn kt-btn-primary"
+            data-kt-modal-toggle="#reg_add_modal">
      <i class="ki-filled ki-plus"></i>
      Add Customer
-    </a>
+    </button>
    </div>
    {% endif %}
   </div>
@@ -167,12 +169,101 @@
   </div>
  </div>
 
- <!-- Add Customer is now a real page at /home/customers-registry/new — no
-      modal, no client-side JS to break the form flow. The link above
-      navigates there via a plain <a href>. Everything the modal used to
-      do (validation, submit, redirect) is handled by the new page. -->
+ <!-- Metronic-native Add Customer modal. Same shape as home.html's
+      share_profile_modal / report_user_modal. Metronic core.bundle.js
+      owns show/hide via data-kt-modal-toggle and data-kt-modal-dismiss —
+      no custom JS to fight the theme, opens instantly. -->
+ {% if role in ('admin', 'editor') %}
+ <div class="kt-modal" data-kt-modal="true" id="reg_add_modal">
+  <div class="kt-modal-content max-w-[560px] top-5 lg:top-[10%]">
+   <div class="kt-modal-header">
+    <h3 class="kt-modal-title">Add Customer</h3>
+    <button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost shrink-0"
+            data-kt-modal-dismiss="true">
+     <i class="ki-filled ki-cross"></i>
+    </button>
+   </div>
+   <form id="reg_add_form" class="kt-modal-body grid gap-4 px-5 py-5">
+    <div>
+     <label class="text-sm font-medium text-mono">Customer name <span class="text-destructive">*</span></label>
+     <label class="kt-input mt-1">
+      <input name="customer_name" type="text" required placeholder="FULL NAME AS ON RECORDS"/>
+     </label>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+     <div>
+      <label class="text-sm font-medium text-mono">Type</label>
+      <select class="kt-select w-full mt-1" name="customer_type">
+       <option value="boda" selected>BODA</option>
+       <option value="savcom">SAVCOM</option>
+       <option value="iphone">iPhone</option>
+      </select>
+     </div>
+     <div>
+      <label class="text-sm font-medium text-mono">Plate</label>
+      <label class="kt-input mt-1">
+       <input name="plate" type="text" placeholder="MC###XXX"/>
+      </label>
+     </div>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+     <div>
+      <label class="text-sm font-medium text-mono">Phone (primary)</label>
+      <label class="kt-input mt-1">
+       <input name="phone" type="text" placeholder="255XXXXXXXXX"/>
+      </label>
+     </div>
+     <div>
+      <label class="text-sm font-medium text-mono">SAV customer ID</label>
+      <label class="kt-input mt-1">
+       <input name="sav_customer_id" type="text" placeholder="9633000XXX"/>
+      </label>
+     </div>
+    </div>
+    <div>
+     <label class="text-sm font-medium text-mono">Additional phones (iPhone only)</label>
+     <label class="kt-input mt-1">
+      <input name="phones_extra" type="text" placeholder="Comma-separated: 0752…, 0754…"/>
+     </label>
+    </div>
+    <div>
+     <label class="text-sm font-medium text-mono">Bank account name</label>
+     <label class="kt-input mt-1">
+      <input name="bank_account_name" type="text" placeholder="Name on their bank account, if depositing themselves"/>
+     </label>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+     <div>
+      <label class="text-sm font-medium text-mono">Loan start date</label>
+      <label class="kt-input mt-1">
+       <input name="start_date" type="date"/>
+      </label>
+     </div>
+     <div>
+      <label class="text-sm font-medium text-mono">Loan amount (TZS)</label>
+      <label class="kt-input mt-1">
+       <input name="loan_amount_tsh" type="number" step="0.01" min="0" placeholder="e.g. 3000000"/>
+      </label>
+     </div>
+    </div>
+    <div>
+     <label class="text-sm font-medium text-mono">Notes</label>
+     <textarea class="kt-input w-full mt-1" name="notes" rows="2" placeholder="Optional"></textarea>
+    </div>
+    <div class="text-sm text-destructive" id="reg_add_err"></div>
+    <div class="flex justify-end gap-2 mt-2">
+     <button type="button" class="kt-btn kt-btn-outline"
+             data-kt-modal-dismiss="true">Cancel</button>
+     <button type="submit" class="kt-btn kt-btn-primary" id="reg_add_submit">
+      Save customer
+     </button>
+    </div>
+   </form>
+  </div>
+ </div>
+ {% endif %}
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260724-6" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260725-7" defer></script>
 {% endblock %}

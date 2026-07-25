@@ -4644,6 +4644,74 @@ def _sms_event_insert(sender, body, received_at, status, outcome, plate,
         pass  # audit is best-effort; never break the primary response
 
 
+# Map customer_type in customer_registry → the source_tab shape the rest
+# of the rescue pipeline (iliyopata_writer, _ILIYOPATA_TARGET_FROM_CUSTOMER)
+# expects. Registry types are lowercased ('boda'/'savcom'/'iphone');
+# downstream code speaks in the sheet's BODA_RECORDS / SAVCOM_RECORDS /
+# IPHONE_RECORDS enum.
+_REGISTRY_TYPE_TO_SOURCE_TAB = {
+    'boda':   'BODA_RECORDS',
+    'savcom': 'SAVCOM_RECORDS',
+    'iphone': 'IPHONE_RECORDS',
+}
+
+
+def _lookup_customer_by_plate_registry_first(plate: str, _unused_hdr=None,
+                                             _unused_url=None):
+    """Registry-first (and registry-only) plate → customer lookup.
+
+    Both rescue paths — /api/sms-rescue and /api/transactions/<id>/rescue —
+    used to query the sheet-mirror `customers` Supabase table with
+    `LIMIT 1` and no ORDER, so whichever historical duplicate Postgres
+    surfaced first won. That's how MC792FPJ resolved to ISMAIL SELEMANI
+    ISMAIL (customers table had 4 stale copies) instead of SAMSON ANTONY
+    FRANCIS (the clean row in customer_registry).
+
+    Operator directive 2026-07-25: the registry is now the source of
+    truth; do NOT fall back to `customers`. If a plate isn't in the
+    registry, we surface plate_not_in_records so the operator can add
+    them via the portal.
+
+    Returns a dict shaped like the old `customers` table row so the
+    downstream code (iliyopata_writer.append_iliyopata_row) needs no
+    changes:  {name, plate, customer_id, source_tab}
+    Returns None on miss.
+    """
+    if not (SUPABASE_URL_REGISTRY and SUPABASE_KEY_REGISTRY):
+        return None
+    h = {'apikey':        SUPABASE_KEY_REGISTRY,
+         'Authorization': f'Bearer {SUPABASE_KEY_REGISTRY}'}
+    try:
+        r = requests.get(
+            f'{SUPABASE_URL_REGISTRY}/rest/v1/customer_registry',
+            params={
+                'plate':  f'eq.{plate}',
+                'select': ('id,customer_name,customer_type,plate,'
+                           'sav_customer_id'),
+                # Prefer BODA over SAVCOM when the same plate is registered
+                # in both books (Type C collisions from the audit). BODA is
+                # the primary book and matches historical routing.
+                'order':  'customer_type.asc',
+            },
+            headers=h, timeout=10,
+        )
+    except requests.RequestException:
+        return None
+    if r.status_code not in (200, 206):
+        return None
+    rows = r.json() or []
+    if not rows:
+        return None
+    row = rows[0]
+    ctype = (row.get('customer_type') or 'boda').lower()
+    return {
+        'name':        row.get('customer_name') or '',
+        'plate':       row.get('plate') or plate,
+        'customer_id': row.get('sav_customer_id') or '',
+        'source_tab':  _REGISTRY_TYPE_TO_SOURCE_TAB.get(ctype, 'BODA_RECORDS'),
+    }
+
+
 @app.route('/api/sms-rescue', methods=['POST'])
 def sms_rescue():
     """POST { "message": "raw SMS body", "sender": "...", "received_at": iso }
@@ -4728,24 +4796,17 @@ def sms_rescue():
                         'source_tab': tx['source_tab'],
                         'row_id': tx['id']}), 409
 
-    # 2. Fetch the customer by plate (pull plate + customer_id for the
-    #    ILIYOPATA sheet append)
-    cust_r = requests.get(
-        f'{url}/rest/v1/customers?plate=eq.{plate}'
-        '&select=id,name,plate,customer_id,source_tab&limit=1',
-        headers=hdr, timeout=15,
-    )
-    if not cust_r.ok:
-        _sms_event_insert(sender, msg, received_at, 500, 'server_error',
-                          plate, ref, None, None, cust_r.text[:400])
-        return jsonify({'error': cust_r.text[:400]}), 500
-    cust_rows = cust_r.json()
-    if not cust_rows:
+    # 2. Fetch the customer by plate — registry-first (clean data), then
+    #    customers-table fallback. The old code queried `customers` with
+    #    LIMIT 1 no-order, which returned whichever duplicate row Postgres
+    #    surfaced first; that's how MC792FPJ resolved to ISMAIL SELEMANI
+    #    ISMAIL instead of SAMSON ANTONY FRANCIS. Registry is deduped.
+    cust = _lookup_customer_by_plate_registry_first(plate, hdr, url)
+    if not cust:
         _sms_event_insert(sender, msg, received_at, 404, 'plate_not_in_records',
                           plate, ref, None, None, None)
         return jsonify({'error': 'plate_not_in_records',
                         'plate': plate, 'ref': ref}), 404
-    cust = cust_rows[0]
     target_tab = _ILIYOPATA_TARGET_FROM_CUSTOMER.get(cust['source_tab'])
     if not target_tab:
         _sms_event_insert(sender, msg, received_at, 400, 'server_error',

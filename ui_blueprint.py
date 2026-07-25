@@ -158,75 +158,11 @@ _HOME_SUBPAGES = {
 @ui.route('/home/<path:sub>')
 @login_required
 def home_page(sub=None):
-    # Add-customer page is a dedicated route below so we can handle POST.
-    # Falling through here would render the list template on GET, which
-    # would work but wouldn't POST — cleaner to route explicitly.
-    if (sub or '').strip('/') == 'customers-registry/new':
-        return customer_registry_new_page()
     template = _HOME_SUBPAGES.get((sub or '').strip('/').split('/')[0], 'home.html')
     return render_template(template,
                            username=current_user.username,
                            full_name=current_user.full_name,
                            role=current_user.role)
-
-
-@ui.route('/home/customers-registry/new', methods=['GET', 'POST'])
-@require_role('admin', 'editor')
-def customer_registry_new_page():
-    """Dedicated create-customer page. Bypasses the modal-in-list-page
-    entirely — POSTs here, on success redirects to the list page. On
-    validation error, re-renders with the submitted values so the user
-    doesn't lose their typing."""
-    form_ctx = {}
-    err = None
-    if request.method == 'POST':
-        form_ctx = {k: (v or '').strip() for k, v in request.form.items()}
-        # Same coercions the JSON API used to do client-side
-        if form_ctx.get('plate'):
-            form_ctx['plate'] = form_ctx['plate'].replace(' ', '').upper()
-        if not form_ctx.get('customer_name'):
-            err = 'Customer name is required.'
-        else:
-            # Build the API payload — only fields the whitelist accepts.
-            body = _registry_pick(form_ctx)
-            body.setdefault('customer_type', 'boda')
-            body['created_by'] = current_user.username
-            # Handle the phones_extra text box for iPhone multi-phone entries.
-            # We put every non-empty comma-separated token into phones[],
-            # prepend the primary phone if present, and dedupe.
-            phones: list[str] = []
-            seen: set[str] = set()
-            primary = (form_ctx.get('phone') or '').strip()
-            if primary:
-                phones.append(primary)
-                seen.add(primary)
-            extras_raw = form_ctx.get('phones_extra') or ''
-            for tok in [t.strip() for t in extras_raw.split(',')]:
-                if tok and tok not in seen:
-                    phones.append(tok)
-                    seen.add(tok)
-            if phones:
-                body['phones'] = phones
-            try:
-                r = requests.post(
-                    f'{SUPABASE_URL_REGISTRY}/rest/v1/customer_registry',
-                    headers={**_H_REGISTRY,
-                             'Prefer': 'return=representation'},
-                    json=body, timeout=15,
-                )
-            except requests.RequestException as e:
-                err = f'Registry unreachable: {e}'
-            else:
-                if not r.ok:
-                    err = f'Save failed ({r.status_code}): {r.text[:300]}'
-                else:
-                    return redirect(url_for('ui.home_page',
-                                            sub='customers-registry'))
-    return render_template('customers_registry_new.html',
-                           username=current_user.username,
-                           full_name=current_user.full_name,
-                           role=current_user.role,
-                           form=form_ctx, err=err)
 
 
 # ── REST API — generic list endpoint ────────────────────────────────────────
@@ -451,6 +387,54 @@ _ILIYOPATA_TARGET = {
 }
 _FAILED_SOURCE_TABS = {'CRDBFAILED', 'NMBFAILED', 'IPHONEFAILED'}
 
+# customer_registry.customer_type → the sheet's source_tab enum the rest
+# of the rescue pipeline (iliyopata_writer, _ILIYOPATA_TARGET) speaks.
+_REGISTRY_TYPE_TO_SOURCE_TAB = {
+    'boda':   'BODA_RECORDS',
+    'savcom': 'SAVCOM_RECORDS',
+    'iphone': 'IPHONE_RECORDS',
+}
+
+
+def _lookup_customer_in_registry_by_plate(plate: str):
+    """Registry-first plate → customer resolution used by the UI rescue
+    endpoint. Returns a dict shaped like the sheet-mirror `customers` row
+    ({name, plate, customer_id, source_tab}) so the downstream code needs
+    no changes. None on miss so the caller can fall back.
+
+    Prefers BODA over SAVCOM on same-plate registrations (Type C from the
+    audit) — matches historical routing where the primary book is BODA.
+    """
+    if not (plate and SUPABASE_URL_REGISTRY and SUPABASE_KEY_REGISTRY):
+        return None
+    try:
+        r = requests.get(
+            f'{SUPABASE_URL_REGISTRY}/rest/v1/customer_registry',
+            params={
+                'plate':  f'eq.{plate}',
+                'select': ('id,customer_name,customer_type,plate,'
+                           'sav_customer_id'),
+                'order':  'customer_type.asc',  # BODA before SAVCOM alphabetically
+            },
+            headers=_H_REGISTRY, timeout=10,
+        )
+    except requests.RequestException:
+        return None
+    if r.status_code not in (200, 206):
+        return None
+    rows = r.json() or []
+    if not rows:
+        return None
+    row = rows[0]
+    ctype = (row.get('customer_type') or 'boda').lower()
+    return {
+        'id':          row.get('id'),
+        'name':        row.get('customer_name') or '',
+        'plate':       row.get('plate') or plate,
+        'customer_id': row.get('sav_customer_id') or '',
+        'source_tab':  _REGISTRY_TYPE_TO_SOURCE_TAB.get(ctype, 'BODA_RECORDS'),
+    }
+
 
 @ui.route('/api/transactions/<int:row_id>/rescue', methods=['POST'])
 @login_required
@@ -460,8 +444,13 @@ def transactions_rescue(row_id):
     if not customer_id:
         return jsonify({'error': 'customer_id required'}), 400
 
-    # Fetch txn + customer — pull every field the ILIYOPATA sheet append
-    # needs so we don't have to re-fetch after PATCH.
+    # Fetch txn + the operator's picked customer row. We still take the
+    # operator's customer_id as the plate anchor, but the AUTHORITATIVE
+    # name/customer_id/source_tab come from customer_registry (the DB the
+    # sheet-mirror `customers` table was retired in favour of on 2026-07-25).
+    # This closes the class of bugs where MC792FPJ landed on ISMAIL
+    # SELEMANI ISMAIL because the polluted `customers` table had 4 stale
+    # rows for that plate.
     tx_r = requests.get(
         f'{SUPABASE_URL}/rest/v1/transactions?id=eq.{row_id}'
         '&select=id,source_tab,transaction_date,customer_name,ref_number,'
@@ -469,19 +458,19 @@ def transactions_rescue(row_id):
         'rescue_locked_at',
         headers=_H, timeout=15,
     )
-    cust_r = requests.get(
+    picked_r = requests.get(
         f'{SUPABASE_URL}/rest/v1/customers?id=eq.{customer_id}'
         '&select=id,name,plate,customer_id,source_tab',
         headers=_H, timeout=15,
     )
-    if not tx_r.ok or not cust_r.ok:
+    if not tx_r.ok or not picked_r.ok:
         return jsonify({'error': 'lookup_failed'}), 500
 
-    tx = (tx_r.json() or [None])[0]
-    cust = (cust_r.json() or [None])[0]
+    tx     = (tx_r.json() or [None])[0]
+    picked = (picked_r.json() or [None])[0]
     if not tx:
         return jsonify({'error': 'transaction not found'}), 404
-    if not cust:
+    if not picked:
         return jsonify({'error': 'customer not found'}), 404
     if tx.get('rescue_locked_at'):
         return jsonify({'error': 'already_rescued',
@@ -489,6 +478,17 @@ def transactions_rescue(row_id):
     if tx['source_tab'] not in _FAILED_SOURCE_TABS:
         return jsonify({'error': 'not a failed row',
                         'current_state': tx['source_tab']}), 409
+
+    # Resolve the CLEAN customer from customer_registry via the plate the
+    # operator picked. If the plate isn't in the registry, we fall back to
+    # the operator's picked row so the rescue isn't blocked — the sweep
+    # script will reconcile these later.
+    plate_upper = (picked.get('plate') or '').replace(' ', '').upper()
+    cust = None
+    if plate_upper:
+        cust = _lookup_customer_in_registry_by_plate(plate_upper)
+    if cust is None:
+        cust = picked  # legacy path — polluted customers-table row
     target_tab = _ILIYOPATA_TARGET.get(cust['source_tab'])
     if not target_tab:
         return jsonify({'error': 'unknown customer source_tab',

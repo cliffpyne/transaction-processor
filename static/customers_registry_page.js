@@ -170,8 +170,74 @@
     renderPager(state.page, lastPage);
   };
 
-  // ── Modal wiring removed — Add Customer is now a real page at
-  // /home/customers-registry/new. No JS-driven modal to break. ──
+  // ── Add-Customer form submit ──────────────────────────────────────
+  // The Metronic modal (kt-modal + data-kt-modal-toggle/dismiss) is
+  // opened/closed entirely by core.bundle.js. We only handle the form
+  // submit here: POST to /api/customer_registry, close the modal via
+  // Metronic's own API, then refresh the list + stats.
+  const $addForm   = $('reg_add_form');
+  const $addErr    = $('reg_add_err');
+  const $addSubmit = $('reg_add_submit');
+  const $addModal  = $('reg_add_modal');
+
+  const closeAddModal = () => {
+    if (!$addModal) return;
+    // Metronic exposes an instance API via getInstance() when available.
+    try {
+      if (window.KTModal && window.KTModal.getInstance) {
+        const inst = window.KTModal.getInstance($addModal);
+        if (inst && inst.hide) { inst.hide(); return; }
+      }
+    } catch (_) {}
+    // Fallback for older builds: click a dismiss button.
+    const btn = $addModal.querySelector('[data-kt-modal-dismiss="true"]');
+    if (btn) btn.click();
+  };
+
+  if ($addForm) $addForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if ($addErr) $addErr.textContent = '';
+    if ($addSubmit) $addSubmit.disabled = true;
+    const fd = new FormData($addForm);
+    const payload = {};
+    for (const [k, v] of fd.entries()) {
+      const s = String(v).trim();
+      if (s) payload[k] = s;
+    }
+    if (payload.plate) payload.plate = payload.plate.replace(/\s+/g, '').toUpperCase();
+    if (payload.customer_name) payload.customer_name = payload.customer_name.trim();
+    // phones_extra → phones[] array (dedup + include primary phone first)
+    const phones = [];
+    const seen = new Set();
+    if (payload.phone && !seen.has(payload.phone)) { phones.push(payload.phone); seen.add(payload.phone); }
+    if (payload.phones_extra) {
+      for (const tok of payload.phones_extra.split(/[,;]+/)) {
+        const t = tok.trim();
+        if (t && !seen.has(t)) { phones.push(t); seen.add(t); }
+      }
+    }
+    if (phones.length) payload.phones = phones;
+    delete payload.phones_extra;
+
+    try {
+      const r = await fetch('/api/customer_registry', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      $addForm.reset();
+      closeAddModal();
+      state.page = 1;
+      await Promise.all([load(), loadStats()]);
+    } catch (err) {
+      if ($addErr) $addErr.textContent = 'Save failed: ' + err.message;
+    } finally {
+      if ($addSubmit) $addSubmit.disabled = false;
+    }
+  });
 
   // ── Filter wiring (quick-search bar + type dropdown + per-column) ──
   const debounce = (fn, ms) => {
