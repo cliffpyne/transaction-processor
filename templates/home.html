@@ -94,8 +94,12 @@ License: https://keenthemes.com/metronic/tailwind/docs/getting-started/license
         header.appendChild(nav);
       }
     }
-    // ── Sidebar — hide every accordion except Dashboards + Transactions ──
-    var KEEP = ['Dashboards', 'Transactions'];
+    // ── Sidebar — keep every top-level app entry (Dashboards + Transactions
+    //    + SMS + Customers). Every user can SEE all four, regardless of role;
+    //    create/edit UI (Add-Customer button, "Create new customer" sub-link)
+    //    is separately gated by {% if role in ('admin', 'editor') %} in the
+    //    templates, so viewers get read-only access without a second guard.
+    var KEEP = ['Dashboards', 'Transactions', 'SMS', 'Customers'];
     var items = document.querySelectorAll('#sidebar_content .kt-menu > .kt-menu-item');
     items.forEach(function (el) {
       var titleEl = el.querySelector('.kt-menu-title');
