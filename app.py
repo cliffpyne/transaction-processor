@@ -1255,15 +1255,20 @@ def lookup_iphone_customer(details, iphone_lookup):
 
 
 _DEPOSITOR_RX = re.compile(
-    # `FROM <NAME> TO FRANK` — allows spaces, dots, apostrophes in the
-    # name; stops greedy match at ' TO FRANK'. Case-insensitive because
-    # descriptions are inconsistent about case.
+    # `FROM <NAME> TO (FRANK|ELEGANSKY)` — allows spaces, dots,
+    # apostrophes in the name; stops greedy match at the beneficiary
+    # keyword. Case-insensitive because descriptions are inconsistent
+    # about case.
+    #
     # Trailing `\b` was intentionally dropped: CRDB's SIMUSSD path emits
-    # `TO FRANKN/A` (no space before N/A), and the word boundary refused
-    # to match K→N. Non-greedy `{2,80}?` still bounds the capture; no
-    # Tanzanian bank routes to Frankfurt/Franklin so the theoretical
-    # over-match is a non-issue in this domain.
-    r'\bFROM\s+([A-Z][A-Z\s.\'"-]{2,80}?)\s+TO\s+FRANK',
+    # variants like `TO FRANKN/A` and `TO ELEGANSKYN/A` (no space before
+    # the N/A), and the word boundary refused to match K→N or Y→N.
+    # Non-greedy `{2,80}?` still bounds the capture cleanly.
+    #
+    # Beneficiary is BOTH names because the same customer can pay into
+    # either Frank Mlaki's personal or the Elegansky business account;
+    # both should route to the same depositor lookup. Frank 2026-07-27.
+    r'\bFROM\s+([A-Z][A-Z\s.\'"-]{2,80}?)\s+TO\s+(?:FRANK|ELEGANSKY)',
     re.IGNORECASE,
 )
 
