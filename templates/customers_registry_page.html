@@ -178,12 +178,16 @@
   {# Narrower + tighter modal. Metronic centres kt-modal-content by default;
      `mx-auto` is belt-and-braces so a stray flex parent can't left-align it.
 
-     Width is FIXED at each breakpoint so switching customer_type only
-     changes the modal HEIGHT (fields show/hide), never the WIDTH:
-       - mobile (< 640 px viewport): 92 vw
-       - sm+   (>= 640 px):          exactly 420 px
-     No content-based auto-sizing anywhere on the modal container. #}
-  <div class="kt-modal-content w-[92vw] sm:w-[420px] mx-auto top-5 lg:top-[10%]">
+     Width is FIXED via inline style so switching customer_type only changes
+     the modal HEIGHT (fields show/hide), never the WIDTH:
+       - mobile:  92vw (viewport-based floor)
+       - desktop: exactly 420px (via max-width)
+     Inline styles used deliberately — Metronic ships a PRE-BUILT Tailwind
+     CSS bundle, so arbitrary utilities like `w-[92vw]` and `sm:w-[420px]`
+     that weren't in the demo source at build time are missing from the
+     compiled CSS. Inline styles cannot be silently dropped that way. #}
+  <div class="kt-modal-content mx-auto top-5 lg:top-[10%]"
+       style="width: 92vw; max-width: 420px;">
    <div class="kt-modal-header">
     <h3 class="kt-modal-title">Add Customer</h3>
     <button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost shrink-0"
@@ -286,5 +290,5 @@
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260727-11" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260727-12" defer></script>
 {% endblock %}
