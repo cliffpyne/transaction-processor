@@ -1813,17 +1813,115 @@ def get_last_row_number(service, sheet_name):
         print(f"Error getting last row: {e}")
         return 0
 
+def _refs_already_in_transactions_db(refs):
+    """Query Supabase transactions.ref_number for every ref in `refs`.
+    Returns the set of refs that already exist. Empty set on any error
+    (fail-open — sheet write proceeds, get_existing_refs still guards).
+
+    Chunks PostgREST queries at 200 refs / call so the URL stays under
+    typical proxy limits. Idempotency ceiling — Supabase's strong
+    consistency here is exactly what the sheet lacks."""
+    if not refs:
+        return set()
+    url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+    if not url or not key:
+        return set()
+    h = {'apikey': key, 'Authorization': f'Bearer {key}'}
+    existing = set()
+    refs_list = list(refs)
+    CHUNK = 200
+    for i in range(0, len(refs_list), CHUNK):
+        chunk = refs_list[i:i + CHUNK]
+        try:
+            r = requests.get(
+                f'{url}/rest/v1/transactions',
+                params={'ref_number': f'in.({",".join(chunk)})',
+                        'select':     'ref_number'},
+                headers=h, timeout=15,
+            )
+        except requests.RequestException as e:
+            print(f'⚠️ DB-recheck: HTTP error, allowing sheet write: {e}')
+            return set()
+        if not r.ok:
+            print(f'⚠️ DB-recheck: HTTP {r.status_code}, allowing sheet write')
+            return set()
+        for row in r.json() or []:
+            ref = row.get('ref_number')
+            if ref:
+                existing.add(str(ref).strip())
+    return existing
+
+
+# Where the ref lives inside a row of `data` for each logical sheet.
+# PASSED / PASSED_SAV / BANK_PASSED  (BODA success shape)      col H (idx 7)
+# FAILED / FAILED_NMB / BANK_FAILED  (fail shape)              col H (idx 7)
+# NMB / IPHONE variants               follow the same layout
+# 🔥 The row layouts are set by build_row functions upstream — every
+# variant places the ref at column H. Kept as a constant here so a future
+# schema change surfaces in one place.
+_APPEND_REF_COL_INDEX = 7
+
+
+def _dedupe_data_against_db(data, sheet_name):
+    """Return (filtered_data, dropped_count). Drops any row whose ref is
+    already present in the transactions table. This is the second wall
+    behind the /process flock and the get_existing_refs() snapshot —
+    if a concurrent puller/watcher/operator raced past both, this stops
+    the sheet-side duplicate at the last mile."""
+    idx = _APPEND_REF_COL_INDEX
+    refs_in_batch = []
+    for row in data:
+        if len(row) > idx:
+            ref = str(row[idx] or '').strip()
+            if ref:
+                refs_in_batch.append(ref)
+    if not refs_in_batch:
+        return data, 0
+    existing = _refs_already_in_transactions_db(refs_in_batch)
+    if not existing:
+        return data, 0
+    filtered = []
+    dropped = 0
+    for row in data:
+        ref = (str(row[idx] or '').strip()
+               if len(row) > idx else '')
+        if ref and ref in existing:
+            dropped += 1
+            continue
+        filtered.append(row)
+    return filtered, dropped
+
+
 def append_to_sheet(service, sheet_name, data):
-    """Append data to Google Sheet - WORKS WITH FILTERS"""
+    """Append data to Google Sheet - WORKS WITH FILTERS.
+
+    Every row is DB-rechecked against transactions.ref_number before
+    the write. Refs already in the DB are dropped from the batch —
+    that's the second wall behind /process's flock, protecting against
+    race sources the flock can't cover (an operator hand-triggering a
+    reprocess while a puller is in flight, a watcher retry that races
+    with the primary, or a future new fire source we don't know about
+    yet). Frank's requirement 2026-07-27."""
     try:
+        # ── DB-recheck: never write a ref the transactions table already has ──
+        original_count = len(data)
+        data, db_dropped = _dedupe_data_against_db(data, sheet_name)
+        if db_dropped:
+            print(f"🔒 DB-recheck dropped {db_dropped}/{original_count} row(s) "
+                  f"already in transactions table (would have duplicated on {sheet_name})")
+        if not data:
+            print(f"🔒 DB-recheck: nothing new to append to {sheet_name}, skipping write")
+            return True
+
         target_sheet_id, actual_tab = _resolve_sheet(sheet_name)
         last_row = get_last_row_number(service, sheet_name)
         start_row = last_row + 1
         range_name = f'{actual_tab}!A{start_row}'
-        
+
         print(f"Attempting to append to {sheet_name} (tab:{actual_tab}) starting at row {start_row}")
         print(f"Adding {len(data)} rows")
-        
+
         result = service.spreadsheets().values().update(
             spreadsheetId=target_sheet_id,
             range=range_name,
