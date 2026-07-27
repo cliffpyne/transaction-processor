@@ -471,25 +471,39 @@ def extract_plate_number(text):
 
 def _clean_nmb_message(text):
     """
-    🔥 NEW: Clean NMB message text to remove false positive patterns
+    Clean bank-message text of substrings that produce false plate matches.
+
     Removes:
-    - "101 - NMB" bank identifier
-    - "Ter ID ###XXX" patterns (e.g., "Ter ID 2245105627")
-    - "agency @###" patterns
-    - "Trx ID" patterns
+      - CRDB REF hex prefix (`REF:19f9ede7c7320ade`) — 16-char hex strings
+        contain guaranteed \d{3}[A-Z]{3} patterns that P3 was picking up as
+        fake plates (e.g. `320ade` → MC320ADE, `795aca` → MC795ACA). The
+        REF is bank-identifier metadata, never contains a real plate; safe
+        to strip before extraction. Fix 2026-07-27 after Frank flagged
+        MC320ADE-not-found for ELIZABETH EDWARD ADRIANO and MC795ACA-not-
+        found for DENIS RAYMOND TESHA — both were bank_account_name
+        matches the false-plate hit stole from the depositor path.
+      - "101 - NMB" bank identifier
+      - "Ter ID ###XXX" patterns (create false XXX### plate hits)
+      - "agency @###" patterns (create false phone numbers)
+      - "Trx ID" patterns
     """
+    # 🔥 Strip REF hex FIRST — must happen before any regex that could match
+    # inside a 16-char hex string. Catches `REF:<hex>`, `REF: <hex>`,
+    # `REF <hex>` variants.
+    text = re.sub(r'\bREF\s*:?\s*[A-Fa-f0-9]{8,}', '', text)
+
     # Remove NMB bank identifier
     text = re.sub(r'\d{3}\s*-?\s*NMB\s+(HEAD\s+OFFICE|BANK)?', '', text, flags=re.IGNORECASE)
-    
+
     # 🔥 Remove "Ter ID" followed by any numbers (these create false XXX### patterns)
     text = re.sub(r'TER\s+ID\s+\d+', '', text, flags=re.IGNORECASE)
-    
+
     # 🔥 Remove "agency @" patterns (these create false phone numbers)
     text = re.sub(r'AGENCY\s+@\d+@', '', text, flags=re.IGNORECASE)
-    
+
     # 🔥 Remove "Trx ID" patterns
     text = re.sub(r'TRX\s+ID\s+\w+', '', text, flags=re.IGNORECASE)
-    
+
     return text
 
 
