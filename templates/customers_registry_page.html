@@ -195,7 +195,15 @@
      <i class="ki-filled ki-cross"></i>
     </button>
    </div>
-   <form id="reg_add_form" class="kt-modal-body grid gap-3 px-4 py-4">
+   {# w-full pins the form to the modal's inner width so a hidden field
+      can't let the intrinsic grid width fall below 100%. `scrollbar-gutter:
+      stable` reserves the scrollbar column always — BODA (short) and
+      SAVCOM (one row taller, so it may scroll) then have IDENTICAL usable
+      width; only height changes. `overflow-y: auto` keeps the scrollbar
+      only when actually needed but the reserved gutter means its
+      appearance no longer shifts the layout. #}
+   <form id="reg_add_form" class="kt-modal-body grid gap-3 px-4 py-4 w-full"
+         style="overflow-y: auto; scrollbar-gutter: stable;">
     <div>
      <label class="text-sm font-medium text-mono">Customer name <span class="text-destructive">*</span></label>
      <label class="kt-input w-full mt-1">
@@ -290,5 +298,5 @@
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260727-12" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260727-13" defer></script>
 {% endblock %}
