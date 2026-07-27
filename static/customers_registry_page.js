@@ -347,6 +347,30 @@
     }, 100);
   }
 
+  // ── Summary-cards toggle ──────────────────────────────────────────
+  // Default state = hidden so the table is the first thing the user
+  // sees. Preference persisted in localStorage — remembered across
+  // sessions per browser.
+  const $summary  = $('reg_summary_container');
+  const $btnSum   = $('btn_toggle_summary');
+  const SUMMARY_KEY = 'reg.summary.visible';
+
+  const applySummary = (visible) => {
+    if ($summary) $summary.style.display = visible ? '' : 'none';
+    if ($btnSum)  $btnSum.innerHTML = visible
+      ? '<i class="ki-filled ki-eye-slash"></i> Hide summary'
+      : '<i class="ki-filled ki-chart-simple"></i> Show summary';
+  };
+  const savedSummary = localStorage.getItem(SUMMARY_KEY);
+  applySummary(savedSummary === '1');
+  if ($btnSum) {
+    $btnSum.addEventListener('click', () => {
+      const nowVisible = ($summary && $summary.style.display === 'none');
+      applySummary(nowVisible);
+      localStorage.setItem(SUMMARY_KEY, nowVisible ? '1' : '0');
+    });
+  }
+
   loadStats();
   load();
   setInterval(loadStats, 60_000);

@@ -10,8 +10,14 @@
      Authoritative list of every customer (BODA, SAVCOM, iPhone)
     </div>
    </div>
-   {% if role in ('admin', 'editor') %}
    <div class="flex items-center gap-2.5">
+    <!-- Summary-cards toggle: default state = hidden so the table shows
+         above the fold. Preference persisted in localStorage. -->
+    <button type="button" class="kt-btn kt-btn-outline kt-btn-sm" id="btn_toggle_summary">
+     <i class="ki-filled ki-chart-simple"></i>
+     Show summary
+    </button>
+    {% if role in ('admin', 'editor') %}
     <!-- Metronic-native modal trigger. `data-kt-modal-toggle` is wired
          by core.bundle.js on page load and opens #reg_add_modal instantly
          — no navigation, no re-render of the 424KB Metronic shell, no
@@ -21,13 +27,13 @@
      <i class="ki-filled ki-plus"></i>
      Add Customer
     </button>
+    {% endif %}
    </div>
-   {% endif %}
   </div>
  </div>
 
- <!-- Container: stat cards -->
- <div class="kt-container-fixed">
+ <!-- Container: stat cards (hidden by default; toggled by btn_toggle_summary) -->
+ <div class="kt-container-fixed" id="reg_summary_container" style="display: none;">
   <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 lg:gap-7.5 pb-7.5">
    <div class="kt-card p-5">
     <div class="text-sm text-secondary-foreground">Total customers</div>
@@ -298,5 +304,5 @@
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260727-13" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260727-14" defer></script>
 {% endblock %}
