@@ -177,8 +177,13 @@
  <div class="kt-modal" data-kt-modal="true" id="reg_add_modal">
   {# Narrower + tighter modal. Metronic centres kt-modal-content by default;
      `mx-auto` is belt-and-braces so a stray flex parent can't left-align it.
-     ~420 px matches the demo's give-award/report-user modals. #}
-  <div class="kt-modal-content max-w-[420px] w-[92vw] mx-auto top-5 lg:top-[10%]">
+
+     Width is FIXED at each breakpoint so switching customer_type only
+     changes the modal HEIGHT (fields show/hide), never the WIDTH:
+       - mobile (< 640 px viewport): 92 vw
+       - sm+   (>= 640 px):          exactly 420 px
+     No content-based auto-sizing anywhere on the modal container. #}
+  <div class="kt-modal-content w-[92vw] sm:w-[420px] mx-auto top-5 lg:top-[10%]">
    <div class="kt-modal-header">
     <h3 class="kt-modal-title">Add Customer</h3>
     <button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost shrink-0"
@@ -189,7 +194,7 @@
    <form id="reg_add_form" class="kt-modal-body grid gap-3 px-4 py-4">
     <div>
      <label class="text-sm font-medium text-mono">Customer name <span class="text-destructive">*</span></label>
-     <label class="kt-input mt-1">
+     <label class="kt-input w-full mt-1">
       <input name="customer_name" type="text" required placeholder="FULL NAME AS ON RECORDS"/>
      </label>
     </div>
@@ -209,7 +214,7 @@
     <!-- Plate — hidden for iPhone (no plate). -->
     <div data-reg-field data-reg-show-for="boda savcom">
      <label class="text-sm font-medium text-mono">Plate</label>
-     <label class="kt-input mt-1">
+     <label class="kt-input w-full mt-1">
       <input name="plate" type="text" placeholder="MC###XXX"/>
      </label>
     </div>
@@ -217,7 +222,7 @@
     <!-- Phone (primary) — always visible. -->
     <div>
      <label class="text-sm font-medium text-mono">Phone (primary)</label>
-     <label class="kt-input mt-1">
+     <label class="kt-input w-full mt-1">
       <input name="phone" type="text" placeholder="255XXXXXXXXX"/>
      </label>
     </div>
@@ -225,7 +230,7 @@
     <!-- SAV customer ID — only shown for SAVCOM, never required. -->
     <div data-reg-field data-reg-show-for="savcom">
      <label class="text-sm font-medium text-mono">SAV customer ID <span class="text-secondary-foreground text-xs">(optional)</span></label>
-     <label class="kt-input mt-1">
+     <label class="kt-input w-full mt-1">
       <input name="sav_customer_id" type="text" placeholder="9633000XXX"/>
      </label>
     </div>
@@ -233,7 +238,7 @@
     <!-- Additional phones — only shown for iPhone (multi-phone customers). -->
     <div data-reg-field data-reg-show-for="iphone">
      <label class="text-sm font-medium text-mono">Additional phones</label>
-     <label class="kt-input mt-1">
+     <label class="kt-input w-full mt-1">
       <input name="phones_extra" type="text" placeholder="Comma-separated: 0752…, 0754…"/>
      </label>
      <div class="text-xs text-secondary-foreground mt-1">
@@ -244,20 +249,20 @@
     <!-- Bank account name — optional for every type. -->
     <div>
      <label class="text-sm font-medium text-mono">Bank account name <span class="text-secondary-foreground text-xs">(optional)</span></label>
-     <label class="kt-input mt-1">
+     <label class="kt-input w-full mt-1">
       <input name="bank_account_name" type="text" placeholder="Name on their bank account, if depositing themselves"/>
      </label>
     </div>
     <div class="grid grid-cols-2 gap-3">
      <div>
       <label class="text-sm font-medium text-mono">Loan start date</label>
-      <label class="kt-input mt-1">
+      <label class="kt-input w-full mt-1">
        <input name="start_date" type="date"/>
       </label>
      </div>
      <div>
       <label class="text-sm font-medium text-mono">Loan amount (TZS)</label>
-      <label class="kt-input mt-1">
+      <label class="kt-input w-full mt-1">
        <input name="loan_amount_tsh" type="number" step="0.01" min="0" placeholder="e.g. 3000000"/>
       </label>
      </div>
@@ -281,5 +286,5 @@
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260727-10" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260727-11" defer></script>
 {% endblock %}
