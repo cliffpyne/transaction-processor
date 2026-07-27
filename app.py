@@ -2281,13 +2281,41 @@ def process_crdb_transactions(filepath):
                 print(f"⚠️ FAILED (no description, CRDB) — ref={ref_number} amt={credit_amount} → SMS-rescue candidate")
                 continue
 
-            # ── Extract phone and plate ────────────────────────────────────────
+            # ── Resolution priority order: FROM → PHONE → PLATE ────────────────
+            # Frank 2026-07-27: the bank explicitly labels the sender in
+            # "FROM <NAME> TO FRANK" phrasing — that's the highest-signal field
+            # in the description. Try it BEFORE phone/plate extraction so a
+            # false-positive plate hit (e.g. MC320ADE picked out of a REF hex
+            # substring c7320ade) can't shadow a real depositor match. The
+            # phone/plate cascade runs only when FROM misses.
+
+            # ── Step 1: FROM depositor name ───────────────────────────────────
+            dep_hit = _lookup_depositor(details, depositor_lookup)
+            if dep_hit:
+                dep_plate, dep_customer, dep_name = dep_hit
+                last_passed_id += 1
+                passed_data.append([
+                    last_passed_id,
+                    posting_date,
+                    'CRDB',
+                    details,
+                    credit_amount,
+                    dep_plate,
+                    dep_customer,
+                    ref_number or '',
+                    ''
+                ])
+                stats['passed'] += 1
+                print(f"✅ PASSED (via FROM {dep_name!r}): {dep_customer} - {dep_plate} - {credit_amount}")
+                continue  # FROM won → skip phone/plate
+
+            # ── Step 2 + 3: Phone extraction → Plate extraction ───────────────
             phone = extract_phone_number(details)
             plate = extract_plate_number(details)
-            
+
             identifier  = None
             lookup_type = None
-            
+
             if phone:
                 identifier  = phone
                 lookup_type = 'phone'
