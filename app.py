@@ -9,6 +9,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import json
 import pickle
+import fcntl        # exclusive /process lock — see _process_lock() below
+import contextlib
 import requests  # customer_registry lookups (via Supabase PostgREST)
 from datetime import datetime, timedelta
 import pdfplumber  # For PDF extraction
@@ -1909,27 +1911,97 @@ def upload_file():
         traceback.print_exc()
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
+# Filesystem lock guarding /process — one processing run at a time across
+# every gunicorn worker (fcntl.flock is inherited across workers on the
+# same inode). Path lives on /tmp so an accidental delete after a crash
+# doesn't leave a stale lock (the OS releases fcntl locks when the holding
+# fd is closed, which happens automatically when the process/worker dies).
+_PROCESS_LOCK_PATH = os.environ.get(
+    'PROCESS_LOCK_PATH', '/tmp/transaction_processor_process.lock'
+)
+
+
+@contextlib.contextmanager
+def _process_lock():
+    """Yields (True, fd) if the lock was acquired non-blocking, (False, None)
+    if another /process invocation is already holding it. The fd stays open
+    for the whole `with` body and closes automatically on exit — that release
+    is guaranteed even if the wrapped code raises.
+
+    Root cause we're plugging: three quick /process fires on 26.07.2026 each
+    read get_existing_refs() from the PASSED sheet BEFORE any of them wrote,
+    so all three saw the same "before" state, filtered the same input as
+    novel, and each appended ~200 rows to the sheet → 3× duplication. The
+    DB held (unique ref_number) and Frappe held (idempotent txn_id) but the
+    sheet doesn't have that guarantee. This lock stops the race at the door.
+    """
+    fd = None
+    try:
+        fd = os.open(_PROCESS_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as e:
+        # If we can't even create the lock file, degrade to running unlocked
+        # rather than losing the request entirely. Log loudly so we notice.
+        print(f"⚠️ process-lock: could not open {_PROCESS_LOCK_PATH}: {e} — running UNLOCKED")
+        yield True, None
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Someone else is processing. Give up cleanly.
+        os.close(fd)
+        yield False, None
+        return
+    try:
+        # Optionally stamp the lock file for diagnostics — pid + start time.
+        try:
+            os.pwrite(fd, f'{os.getpid()} {datetime.utcnow().isoformat()}Z\n'.encode(), 0)
+            os.ftruncate(fd, os.lseek(fd, 0, os.SEEK_CUR))
+        except OSError:
+            pass
+        yield True, fd
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 @app.route('/process', methods=['POST'])
 def process_transactions():
-    try:
-        filepath = session.get('filepath')
-        bank_type = session.get('bank_type', 'CRDB')  # 🔥 NEW: Get bank type
-        
-        if not filepath or not os.path.exists(filepath):
-            return jsonify({'error': 'No file uploaded'}), 400
-        
-        print(f"🏦 Processing {bank_type} statement...")
-        
-        # 🔥 NEW: Route to appropriate processing function
-        if bank_type == 'NMB':
-            return process_nmb_transactions(filepath)
-        else:
-            return process_crdb_transactions(filepath)
-    
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    with _process_lock() as (got_lock, _fd):
+        if not got_lock:
+            # Another /process is already running. 409 Conflict is the
+            # semantically correct code — the client can retry after the
+            # current run finishes.
+            print("🔒 /process: rejected — another run is already in progress")
+            return jsonify({
+                'error':   'already_processing',
+                'message': 'Another /process run is currently in progress. '
+                           'Wait for it to finish before retrying.',
+            }), 409
+        try:
+            filepath = session.get('filepath')
+            bank_type = session.get('bank_type', 'CRDB')  # 🔥 NEW: Get bank type
+
+            if not filepath or not os.path.exists(filepath):
+                return jsonify({'error': 'No file uploaded'}), 400
+
+            print(f"🏦 Processing {bank_type} statement...")
+
+            # 🔥 NEW: Route to appropriate processing function
+            if bank_type == 'NMB':
+                return process_nmb_transactions(filepath)
+            else:
+                return process_crdb_transactions(filepath)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e)}), 500
 
 
 def process_crdb_transactions(filepath):
