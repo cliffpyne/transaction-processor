@@ -175,7 +175,10 @@
       no custom JS to fight the theme, opens instantly. -->
  {% if role in ('admin', 'editor') %}
  <div class="kt-modal" data-kt-modal="true" id="reg_add_modal">
-  <div class="kt-modal-content max-w-[560px] top-5 lg:top-[10%]">
+  {# Narrower + tighter modal. Metronic centres kt-modal-content by default;
+     `mx-auto` is belt-and-braces so a stray flex parent can't left-align it.
+     ~420 px matches the demo's give-award/report-user modals. #}
+  <div class="kt-modal-content max-w-[420px] w-[92vw] mx-auto top-5 lg:top-[10%]">
    <div class="kt-modal-header">
     <h3 class="kt-modal-title">Add Customer</h3>
     <button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost shrink-0"
@@ -183,7 +186,7 @@
      <i class="ki-filled ki-cross"></i>
     </button>
    </div>
-   <form id="reg_add_form" class="kt-modal-body grid gap-4 px-5 py-5">
+   <form id="reg_add_form" class="kt-modal-body grid gap-3 px-4 py-4">
     <div>
      <label class="text-sm font-medium text-mono">Customer name <span class="text-destructive">*</span></label>
      <label class="kt-input mt-1">
@@ -278,5 +281,5 @@
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260725-9" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260727-10" defer></script>
 {% endblock %}
