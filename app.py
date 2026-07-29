@@ -1294,12 +1294,16 @@ _DEPOSITOR_RX = re.compile(
     # Non-greedy `{2,80}?` still bounds the capture cleanly.
     #
     # Terminators accepted, all in one alternation group:
-    #   TO FRANK       — beneficiary is Frank Mlaki's personal account
-    #   TO ELEGANSKY   — beneficiary is the Elegansky business account
-    #   CHQ            — cheque-deposit format, e.g. "Funds Transfer From
-    #                    NAME                  CHQ. NO. …" (2026-07-29,
-    #                    row 27728 MWANAHAMISI OMARI KARATA)
-    r'\bFROM\s+([A-Z][A-Z\s.\'"-]{2,80}?)\s+(?:TO\s+(?:FRANK|ELEGANSKY)|CHQ)',
+    #   \s+ TO FRANK      — beneficiary is Frank Mlaki's personal account
+    #   \s+ TO ELEGANSKY  — beneficiary is the Elegansky business account
+    #   \s+ CHQ           — cheque-deposit format, e.g. "Funds Transfer
+    #                       From NAME                  CHQ. NO. …"
+    #   \s* $             — bare CRDB format ending right after the name
+    #                       with no beneficiary keyword or CHQ marker,
+    #                       e.g. "Funds Transfer From ABDALLAH SAIDI JIKA"
+    #                       (2026-07-29, several rows created today).
+    #                       `\s*` allows zero-or-more trailing whitespace.
+    r'\bFROM\s+([A-Z][A-Z\s.\'"-]{2,80}?)(?:\s+TO\s+(?:FRANK|ELEGANSKY)|\s+CHQ|\s*$)',
     re.IGNORECASE,
 )
 
