@@ -2046,11 +2046,15 @@ def process_transactions():
 
             print(f"🏦 Processing {bank_type} statement...")
 
-            # 🔥 NEW: Route to appropriate processing function
+            # 🔥 NEW: Route to appropriate processing function.
+            # For CRDB-flavoured banks (CRDB, HIGHERP — the second CRDB
+            # account uses a different label so the sheet's Bank column
+            # can tell the two accounts apart), the pipeline is identical;
+            # only the label written into the Bank column changes.
             if bank_type == 'NMB':
                 return process_nmb_transactions(filepath)
             else:
-                return process_crdb_transactions(filepath)
+                return process_crdb_transactions(filepath, bank_label=bank_type)
 
         except Exception as e:
             import traceback
@@ -2058,8 +2062,15 @@ def process_transactions():
             return jsonify({'error': str(e)}), 500
 
 
-def process_crdb_transactions(filepath):
-    """Process CRDB bank statement (existing logic + iPhone channel)"""
+def process_crdb_transactions(filepath, bank_label='CRDB'):
+    """Process a CRDB-flavoured bank statement (both the original CRDB
+    account and the second one — labelled HIGHERP by its puller —
+    share this pipeline; the ONLY difference is the string written into
+    the Bank column of every downstream row so the sheet + DB can tell
+    the two accounts apart).
+
+    bank_label default BANK keeps single-account callers unchanged."""
+    BANK = bank_label
     try:
         # Determine file type and read accordingly
         if filepath.endswith('.pdf'):
@@ -2258,7 +2269,7 @@ def process_crdb_transactions(filepath):
                     bank_passed_row = [
                         last_bank_passed_id,
                         posting_date,
-                        'CRDB',
+                        BANK,
                         details,
                         credit_amount,
                         display_phone,
@@ -2276,7 +2287,7 @@ def process_crdb_transactions(filepath):
                     bank_failed_row = [
                         last_bank_failed_id,
                         posting_date,
-                        'CRDB',
+                        BANK,
                         details,
                         credit_amount,
                         display_phone,
@@ -2317,7 +2328,7 @@ def process_crdb_transactions(filepath):
                 failed_data.append([
                     last_failed_id,
                     date,
-                    'CRDB',
+                    BANK,
                     'UNKNOWN',
                     credit_amount,
                     'UNKNOWN',
@@ -2344,7 +2355,7 @@ def process_crdb_transactions(filepath):
                 passed_data.append([
                     last_passed_id,
                     posting_date,
-                    'CRDB',
+                    BANK,
                     details,
                     credit_amount,
                     dep_plate,
@@ -2382,7 +2393,7 @@ def process_crdb_transactions(filepath):
                     passed_row = [
                         last_passed_id,
                         posting_date,
-                        'CRDB',
+                        BANK,
                         details,
                         credit_amount,
                         identifier,
@@ -2405,7 +2416,7 @@ def process_crdb_transactions(filepath):
                         passed_sav_row = [
                             last_passed_sav_id,
                             posting_date,
-                            'CRDB',
+                            BANK,
                             details,
                             credit_amount,
                             identifier,
@@ -2436,7 +2447,7 @@ def process_crdb_transactions(filepath):
                                     bank_passed_row = [
                                         last_bank_passed_id,
                                         posting_date,
-                                        'CRDB',
+                                        BANK,
                                         details,
                                         credit_amount,
                                         norm_phone,
@@ -2461,7 +2472,7 @@ def process_crdb_transactions(filepath):
                                 if len(fuzzy_cands) == 1:
                                     last_passed_id += 1
                                     fuzzy_row = fuzzy_rescue_to_passed_row(
-                                        last_passed_id, posting_date, 'CRDB', details,
+                                        last_passed_id, posting_date, BANK, details,
                                         credit_amount, ref_number, fuzzy_cands
                                     )
                                     fuzzy_passed_data.append(fuzzy_row)
@@ -2471,7 +2482,7 @@ def process_crdb_transactions(filepath):
                                     # Frank 2026-06-09: multi-candidate fuzzy → FAILED with '=' suggestions visible
                                     last_failed_id += 1
                                     failed_row = fuzzy_multi_to_failed_row(
-                                        last_failed_id, posting_date, 'CRDB', details,
+                                        last_failed_id, posting_date, BANK, details,
                                         credit_amount, ref_number, fuzzy_cands
                                     )
                                     failed_data.append(failed_row)
@@ -2494,7 +2505,7 @@ def process_crdb_transactions(filepath):
                             failed_row = [
                                 last_failed_id,
                                 posting_date,
-                                'CRDB',
+                                BANK,
                                 details,
                                 credit_amount,
                                 final_identifier,
@@ -2516,7 +2527,7 @@ def process_crdb_transactions(filepath):
                         last_failed_id += 1
                         suggested_list = ', '.join(s['suggested'] for s in plate_suggestions)
                         failed_data.append([
-                            last_failed_id, posting_date, 'CRDB', details, credit_amount,
+                            last_failed_id, posting_date, BANK, details, credit_amount,
                             suggested_list,
                             f'Multiple plate suggestions ({len(plate_suggestions)})',
                             ref_number or '',
@@ -2549,7 +2560,7 @@ def process_crdb_transactions(filepath):
                                 'target_sheet': 'PASSED' if customer_name else 'PASSED_SAV',
                                 'confidence': suggestion['confidence'],
                                 'reason': suggestion['reason'],
-                                'bank': 'CRDB'
+                                'bank': BANK
                             })
                             stats['needs_review'] += 1
                             print(f"🔍 NEEDS REVIEW: {suggestion['original']} -> {suggested_plate} -> {customer_name or customer_name_sav}")
@@ -2569,7 +2580,7 @@ def process_crdb_transactions(filepath):
                                         cid = lookup_customer_id_from_cache(rp, 'plate', id_lookup_sav)
                                 candidate_details.append({'plate': rp, 'customer_name': cn or cn_sav or '', 'customer_id': cid, 'target_sheet': 'PASSED' if cn else ('PASSED_SAV' if cn_sav else None)})
                         if 1 <= len(candidate_details) <= MAX_REVIEW_CANDIDATES:
-                            needs_review_data.append({'posting_date': posting_date, 'details': details, 'credit_amount': credit_amount, 'ref_number': ref_number or '', 'review_type': 'choose_plate', 'candidates': candidate_details, 'bank': 'CRDB'})
+                            needs_review_data.append({'posting_date': posting_date, 'details': details, 'credit_amount': credit_amount, 'ref_number': ref_number or '', 'review_type': 'choose_plate', 'candidates': candidate_details, 'bank': BANK})
                             stats['needs_review'] += 1
                             print(f"🔍 RESCUE REVIEW (CRDB): {[c['plate'] for c in candidate_details]}")
                         else:
@@ -2582,7 +2593,7 @@ def process_crdb_transactions(filepath):
                                 if len(fuzzy_cands) == 1:
                                     last_passed_id += 1
                                     fuzzy_row = fuzzy_rescue_to_passed_row(
-                                        last_passed_id, posting_date, 'CRDB', details,
+                                        last_passed_id, posting_date, BANK, details,
                                         credit_amount, ref_number, fuzzy_cands
                                     )
                                     fuzzy_passed_data.append(fuzzy_row)
@@ -2592,7 +2603,7 @@ def process_crdb_transactions(filepath):
                                     # Frank 2026-06-09: multi-candidate fuzzy → FAILED with '=' suggestions visible
                                     last_failed_id += 1
                                     failed_row = fuzzy_multi_to_failed_row(
-                                        last_failed_id, posting_date, 'CRDB', details,
+                                        last_failed_id, posting_date, BANK, details,
                                         credit_amount, ref_number, fuzzy_cands
                                     )
                                     failed_data.append(failed_row)
@@ -2615,7 +2626,7 @@ def process_crdb_transactions(filepath):
                                     passed_data.append([
                                         last_passed_id,
                                         posting_date,
-                                        'CRDB',
+                                        BANK,
                                         details,
                                         credit_amount,
                                         dep_plate,
@@ -2627,7 +2638,7 @@ def process_crdb_transactions(filepath):
                                     print(f"✅ PASSED (via depositor {dep_name!r}): {dep_customer} - {dep_plate} - {credit_amount}")
                                 else:
                                     last_failed_id += 1
-                                    failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
+                                    failed_data.append([last_failed_id, posting_date, BANK, details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
                                     stats['failed'] += 1
                 else:
                     # ── RESCUE before FAILED ──────────────────────────────────
@@ -2643,7 +2654,7 @@ def process_crdb_transactions(filepath):
                                     cid = lookup_customer_id_from_cache(rp, 'plate', id_lookup_sav)
                             candidate_details.append({'plate': rp, 'customer_name': cn or cn_sav or '', 'customer_id': cid, 'target_sheet': 'PASSED' if cn else ('PASSED_SAV' if cn_sav else None)})
                     if 1 <= len(candidate_details) <= MAX_REVIEW_CANDIDATES:
-                        needs_review_data.append({'posting_date': posting_date, 'details': details, 'credit_amount': credit_amount, 'ref_number': ref_number or '', 'review_type': 'choose_plate', 'candidates': candidate_details, 'bank': 'CRDB'})
+                        needs_review_data.append({'posting_date': posting_date, 'details': details, 'credit_amount': credit_amount, 'ref_number': ref_number or '', 'review_type': 'choose_plate', 'candidates': candidate_details, 'bank': BANK})
                         stats['needs_review'] += 1
                         print(f"🔍 RESCUE REVIEW (CRDB): {[c['plate'] for c in candidate_details]}")
                     else:
@@ -2656,7 +2667,7 @@ def process_crdb_transactions(filepath):
                             if len(fuzzy_cands) == 1:
                                 last_passed_id += 1
                                 fuzzy_row = fuzzy_rescue_to_passed_row(
-                                    last_passed_id, posting_date, 'CRDB', details,
+                                    last_passed_id, posting_date, BANK, details,
                                     credit_amount, ref_number, fuzzy_cands
                                 )
                                 fuzzy_passed_data.append(fuzzy_row)
@@ -2666,7 +2677,7 @@ def process_crdb_transactions(filepath):
                                 # Frank 2026-06-09: multi-candidate fuzzy → FAILED with '=' suggestions visible
                                 last_failed_id += 1
                                 failed_row = fuzzy_multi_to_failed_row(
-                                    last_failed_id, posting_date, 'CRDB', details,
+                                    last_failed_id, posting_date, BANK, details,
                                     credit_amount, ref_number, fuzzy_cands
                                 )
                                 failed_data.append(failed_row)
@@ -2686,7 +2697,7 @@ def process_crdb_transactions(filepath):
                                 passed_data.append([
                                     last_passed_id,
                                     posting_date,
-                                    'CRDB',
+                                    BANK,
                                     details,
                                     credit_amount,
                                     dep_plate,
@@ -2698,7 +2709,7 @@ def process_crdb_transactions(filepath):
                                 print(f"✅ PASSED (via depositor {dep_name!r}): {dep_customer} - {dep_plate} - {credit_amount}")
                             else:
                                 last_failed_id += 1
-                                failed_data.append([last_failed_id, posting_date, 'CRDB', details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
+                                failed_data.append([last_failed_id, posting_date, BANK, details, credit_amount, 'No phone/plate', 'No identifier', ref_number or ''])
                                 stats['failed'] += 1
                                 print(f"❌ FAILED: No phone/plate found in: {details[:80]} (REF: {ref_number})")
         
@@ -2737,7 +2748,7 @@ def process_crdb_transactions(filepath):
                 failed_data.append([
                     last_failed_id,
                     rev.get('posting_date', ''),
-                    'CRDB',
+                    BANK,
                     rev.get('details', ''),
                     rev.get('credit_amount', 0),
                     candidates_str,
@@ -3860,19 +3871,19 @@ def confirm_reviews():
                         candidate = next((c for c in review_item['candidates'] if c['plate'] == chosen_plate), None)
                         if candidate and candidate['target_sheet'] == 'PASSED':
                             last_ids['passed'] += 1
-                            passed_data.append([last_ids['passed'], review_item['posting_date'], 'CRDB', review_item['details'], review_item['credit_amount'], chosen_plate, candidate['customer_name'], review_item['ref_number'], ''])
+                            passed_data.append([last_ids['passed'], review_item['posting_date'], bank, review_item['details'], review_item['credit_amount'], chosen_plate, candidate['customer_name'], review_item['ref_number'], ''])
                             stats['passed'] += 1
                         elif candidate and candidate['target_sheet'] == 'PASSED_SAV':
                             last_ids['passed_sav'] += 1
-                            passed_sav_data.append([last_ids['passed_sav'], review_item['posting_date'], 'CRDB', review_item['details'], review_item['credit_amount'], chosen_plate, candidate['customer_name'], review_item['ref_number'], candidate.get('customer_id', '')])
+                            passed_sav_data.append([last_ids['passed_sav'], review_item['posting_date'], bank, review_item['details'], review_item['credit_amount'], chosen_plate, candidate['customer_name'], review_item['ref_number'], candidate.get('customer_id', '')])
                             stats['passed_sav'] += 1
                         else:
                             last_ids['failed'] += 1
-                            failed_data.append([last_ids['failed'], review_item['posting_date'], 'CRDB', review_item['details'], review_item['credit_amount'], chosen_plate or 'No plate', 'Not found in records', review_item['ref_number']])
+                            failed_data.append([last_ids['failed'], review_item['posting_date'], bank, review_item['details'], review_item['credit_amount'], chosen_plate or 'No plate', 'Not found in records', review_item['ref_number']])
                             stats['failed'] += 1
                     else:
                         last_ids['failed'] += 1
-                        failed_data.append([last_ids['failed'], review_item['posting_date'], 'CRDB', review_item['details'], review_item['credit_amount'], 'No plate chosen', 'Skipped by user', review_item['ref_number']])
+                        failed_data.append([last_ids['failed'], review_item['posting_date'], bank, review_item['details'], review_item['credit_amount'], 'No plate chosen', 'Skipped by user', review_item['ref_number']])
                         stats['failed'] += 1
                     continue
 
@@ -3882,7 +3893,7 @@ def confirm_reviews():
                         row = [
                             last_ids['passed'],
                             review_item['posting_date'],
-                            'CRDB',
+                            bank,
                             review_item['details'],
                             review_item['credit_amount'],
                             review_item['suggested_plate'],
@@ -3897,7 +3908,7 @@ def confirm_reviews():
                         row = [
                             last_ids['passed_sav'],
                             review_item['posting_date'],
-                            'CRDB',
+                            bank,
                             review_item['details'],
                             review_item['credit_amount'],
                             review_item['suggested_plate'],
@@ -3912,7 +3923,7 @@ def confirm_reviews():
                     row = [
                         last_ids['failed'],
                         review_item['posting_date'],
-                        'CRDB',
+                        bank,
                         review_item['details'],
                         review_item['credit_amount'],
                         review_item['suggested_plate'],
