@@ -1255,20 +1255,22 @@ def lookup_iphone_customer(details, iphone_lookup):
 
 
 _DEPOSITOR_RX = re.compile(
-    # `FROM <NAME> TO (FRANK|ELEGANSKY)` — allows spaces, dots,
-    # apostrophes in the name; stops greedy match at the beneficiary
-    # keyword. Case-insensitive because descriptions are inconsistent
-    # about case.
+    # `FROM <NAME> <terminator>` — allows spaces, dots, apostrophes in
+    # the name; stops greedy match at the FIRST terminator that follows.
+    # Case-insensitive because descriptions are inconsistent about case.
     #
     # Trailing `\b` was intentionally dropped: CRDB's SIMUSSD path emits
     # variants like `TO FRANKN/A` and `TO ELEGANSKYN/A` (no space before
     # the N/A), and the word boundary refused to match K→N or Y→N.
     # Non-greedy `{2,80}?` still bounds the capture cleanly.
     #
-    # Beneficiary is BOTH names because the same customer can pay into
-    # either Frank Mlaki's personal or the Elegansky business account;
-    # both should route to the same depositor lookup. Frank 2026-07-27.
-    r'\bFROM\s+([A-Z][A-Z\s.\'"-]{2,80}?)\s+TO\s+(?:FRANK|ELEGANSKY)',
+    # Terminators accepted, all in one alternation group:
+    #   TO FRANK       — beneficiary is Frank Mlaki's personal account
+    #   TO ELEGANSKY   — beneficiary is the Elegansky business account
+    #   CHQ            — cheque-deposit format, e.g. "Funds Transfer From
+    #                    NAME                  CHQ. NO. …" (2026-07-29,
+    #                    row 27728 MWANAHAMISI OMARI KARATA)
+    r'\bFROM\s+([A-Z][A-Z\s.\'"-]{2,80}?)\s+(?:TO\s+(?:FRANK|ELEGANSKY)|CHQ)',
     re.IGNORECASE,
 )
 
