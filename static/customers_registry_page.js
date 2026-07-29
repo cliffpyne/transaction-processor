@@ -88,10 +88,18 @@
     const t = TYPE_BADGE[r.customer_type] || { label: r.customer_type || '—', cls: 'kt-badge-secondary' };
     const actionsCell = canEdit
       ? `<td>
-           <button type="button" class="kt-btn kt-btn-sm kt-btn-outline kt-btn-icon reg-edit-btn"
-                   data-row-id="${r.id}" title="Edit customer">
-             <i class="ki-filled ki-pencil"></i>
-           </button>
+           <div class="flex gap-1">
+             <button type="button" class="kt-btn kt-btn-sm kt-btn-outline kt-btn-icon reg-edit-btn"
+                     data-row-id="${r.id}" title="Edit customer">
+               <i class="ki-filled ki-pencil"></i>
+             </button>
+             <button type="button" class="kt-btn kt-btn-sm kt-btn-outline kt-btn-icon reg-delete-btn text-destructive"
+                     data-row-id="${r.id}"
+                     data-row-name="${esc(r.customer_name || '')}"
+                     title="Delete customer">
+               <i class="ki-filled ki-trash"></i>
+             </button>
+           </div>
          </td>`
       : '';
     return `
@@ -331,19 +339,61 @@
     });
   }
 
-  // ── Delegate Edit clicks from the table: stage the row, then fire
-  //    the same Metronic trigger so the modal opens with our populated
-  //    form. Metronic handles show/hide; our click handler above sees
-  //    pendingEditRow and switches modes without a race. ──
+  // ── Delegate Edit / Delete clicks from the table.
+  //   • Edit: stage the row, then fire the same Metronic trigger so the
+  //     modal opens with our populated form. Metronic handles show/hide;
+  //     our click handler above sees pendingEditRow and switches modes
+  //     without a race.
+  //   • Delete: browser confirm() → DELETE /api/customer_registry/<id>
+  //     → remove the row from DOM + rowCache, refresh stats. The row
+  //     count in `state.total` is decremented so pagination stays sane;
+  //     if the deleted row was the last on this page we snap page back
+  //     to 1 and reload from the server (simpler than trying to hold
+  //     partial pages).
   if ($tbody) {
-    $tbody.addEventListener('click', (e) => {
-      const btn = e.target.closest('.reg-edit-btn');
-      if (!btn) return;
-      const id = Number(btn.dataset.rowId);
-      const row = rowCache.get(id);
-      if (!row) return;
-      pendingEditRow = row;
-      if ($addTrigger) $addTrigger.click();
+    $tbody.addEventListener('click', async (e) => {
+      const editBtn = e.target.closest('.reg-edit-btn');
+      if (editBtn) {
+        const id = Number(editBtn.dataset.rowId);
+        const row = rowCache.get(id);
+        if (!row) return;
+        pendingEditRow = row;
+        if ($addTrigger) $addTrigger.click();
+        return;
+      }
+      const delBtn = e.target.closest('.reg-delete-btn');
+      if (delBtn) {
+        const id = Number(delBtn.dataset.rowId);
+        const name = delBtn.dataset.rowName || `#${id}`;
+        if (!window.confirm(
+          `Delete "${name}" (id ${id}) from the customer registry?\n\n` +
+          `This cannot be undone. Historical transactions already resolved ` +
+          `against this customer are NOT affected — but new transactions ` +
+          `carrying this plate / phone / bank_account_name will no longer ` +
+          `match a customer.`
+        )) return;
+        delBtn.disabled = true;
+        try {
+          const r = await fetch(`/api/customer_registry/${id}`, {
+            method: 'DELETE',
+            credentials: 'same-origin',
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || r.statusText);
+          const tr = $tbody.querySelector(`tr[data-id="${id}"]`);
+          if (tr) tr.remove();
+          rowCache.delete(id);
+          state.total = Math.max(0, state.total - 1);
+          if ($tbody.querySelector('tr[data-id]') == null) {
+            state.page = 1;
+            await load();
+          }
+          loadStats();
+        } catch (err) {
+          delBtn.disabled = false;
+          window.alert('Delete failed: ' + err.message);
+        }
+      }
     });
   }
 

@@ -743,6 +743,25 @@ def customer_registry_update(row_id):
     return jsonify(after)
 
 
+@ui.route('/api/customer_registry/<int:row_id>', methods=['DELETE'])
+@require_role('admin', 'editor')
+def customer_registry_delete(row_id):
+    try:
+        r = requests.delete(
+            f'{SUPABASE_URL_REGISTRY}/rest/v1/customer_registry?id=eq.{row_id}',
+            headers={**_H_REGISTRY, 'Prefer': 'return=representation'},
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        return jsonify({'error': f'registry unreachable: {e}'}), 502
+    if not r.ok:
+        return jsonify({'error': r.text[:400]}), r.status_code
+    rows = r.json() if r.content else []
+    if not rows:
+        return jsonify({'error': f'no row with id {row_id}'}), 404
+    return jsonify({'deleted': True, 'id': row_id})
+
+
 @ui.route('/api/customer_registry/summary', methods=['GET'])
 @login_required
 def customer_registry_summary():
