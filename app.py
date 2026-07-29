@@ -1095,25 +1095,40 @@ def extract_ref_number(text):
 
 
 def _synthetic_ref(txn_date, details, credit_amount):
-    """Stable hash-based ref for rows the bank sent WITHOUT a `REF:` prefix
+    """Stable name-based ref for rows the bank sent WITHOUT a `REF:` prefix
     (CHQ-format cheque deposits, some SIMUSSD variants). The pipeline's
     duplicate guard dedups by ref_number; a null ref bypasses the check
-    so re-processing the same statement re-appended those rows. A stable
-    hash of the row's own data (date + description + amount) fills that
-    gap — same row → same hash → dedup catches it.
+    so re-processing the same statement re-appended those rows.
 
-    Format: `syn:<12 hex chars>` (17 chars total). The `syn:` prefix is
-    illegal in real bank refs (which are pure hex) so there's no collision
-    risk, and the tag is obvious at a glance in column H of the sheet.
+    New format (Frank 2026-07-29, replaces the earlier `syn:<hex>` shape
+    because operators wanted an at-a-glance readable ref):
+        <FULLNAME_NO_SPACES><TIMESTAMP_DIGITS>
+    e.g. `ABDALLAHSAIDIJIKA29072026115800` — name uppercased, all non-
+    alphanumeric chars stripped; timestamp is transaction_date with
+    every non-digit removed (DDMMYYYYHHMMSS = 14 digits).
 
-    Whitespace on details is collapsed and amount is rendered with a
-    consistent numeric form so a re-read of the same sheet cell can't
-    produce a different hash. Frank 2026-07-29."""
+    Fallback: if no depositor name can be extracted (blank / UNKNOWN
+    descriptions), fall back to a hashed `syn:<12hex>` so the ref column
+    still has SOMETHING for dedup — those rows are the minority and the
+    hash is still stable across re-reads.
+
+    Both forms are STABLE (same input → same ref), which is what the
+    pipeline's dedup relies on. Whitespace on details is collapsed and
+    amount is rendered with a consistent numeric form so a re-read of
+    the same sheet cell can't produce a different value."""
+    # Try name extraction first — same regex the pipeline uses to route
+    # by depositor, so extraction rules stay in one place.
+    m = _DEPOSITOR_RX.search(str(details or ''))
+    if m:
+        name = re.sub(r'[^A-Za-z0-9]', '', m.group(1)).upper()
+        if name:
+            ts = re.sub(r'\D', '', str(txn_date or ''))
+            return f'{name}{ts}'
+
+    # Fallback for rows we can't get a name out of. Kept for safety —
+    # otherwise the ref would be empty and dedup would break again.
     import hashlib
     d = re.sub(r'\s+', ' ', str(details or '')).strip()
-    # Amount: whole numbers as int; fractions as 2-decimal. Consistent
-    # regardless of whether the value came in as int, float, str, or
-    # Decimal from PostgREST.
     try:
         a = float(credit_amount if credit_amount is not None else 0)
         a_str = str(int(a)) if a.is_integer() else f'{a:.2f}'
