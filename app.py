@@ -1082,7 +1082,7 @@ def extract_ref_number(text):
     """Extract reference number from message (format: REF:XXXXX or REF XXXXX)"""
     if not text or pd.isna(text):
         return None
-    
+
     text = str(text)
     # 🔥 FIXED: match both REF: and REF (with or without colon)
     # Ref numbers are hex strings of 10+ chars
@@ -1090,8 +1090,37 @@ def extract_ref_number(text):
     match = re.search(pattern, text, re.IGNORECASE)
     if match:
         return match.group(1)
-    
+
     return None
+
+
+def _synthetic_ref(txn_date, details, credit_amount):
+    """Stable hash-based ref for rows the bank sent WITHOUT a `REF:` prefix
+    (CHQ-format cheque deposits, some SIMUSSD variants). The pipeline's
+    duplicate guard dedups by ref_number; a null ref bypasses the check
+    so re-processing the same statement re-appended those rows. A stable
+    hash of the row's own data (date + description + amount) fills that
+    gap — same row → same hash → dedup catches it.
+
+    Format: `syn:<12 hex chars>` (17 chars total). The `syn:` prefix is
+    illegal in real bank refs (which are pure hex) so there's no collision
+    risk, and the tag is obvious at a glance in column H of the sheet.
+
+    Whitespace on details is collapsed and amount is rendered with a
+    consistent numeric form so a re-read of the same sheet cell can't
+    produce a different hash. Frank 2026-07-29."""
+    import hashlib
+    d = re.sub(r'\s+', ' ', str(details or '')).strip()
+    # Amount: whole numbers as int; fractions as 2-decimal. Consistent
+    # regardless of whether the value came in as int, float, str, or
+    # Decimal from PostgREST.
+    try:
+        a = float(credit_amount if credit_amount is not None else 0)
+        a_str = str(int(a)) if a.is_integer() else f'{a:.2f}'
+    except (ValueError, TypeError):
+        a_str = str(credit_amount or '')
+    key = f'{txn_date}|{d}|{a_str}'.encode('utf-8')
+    return 'syn:' + hashlib.sha256(key).hexdigest()[:12]
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 🔥 NEW: iPhone Channel Functions
@@ -2182,6 +2211,13 @@ def process_crdb_transactions(filepath):
             details       = str(row.get('Details', ''))
             credit_amount = row.get('Credit', 0)
             ref_number    = extract_ref_number(details)
+            # Fallback: rows the bank sent without `REF:` (CHQ format,
+            # some SIMUSSDs) get a stable synthetic ref derived from
+            # (date | description | amount). Guarantees the ref-based
+            # dedup guard has a key to work with — no more re-appending
+            # the same cheque row every time the statement is reprocessed.
+            if not ref_number:
+                ref_number = _synthetic_ref(posting_date, details, credit_amount)
 
             # ══════════════════════════════════════════════════════════════════
             # 🔥 NEW: iPhone Channel — intercept BEFORE normal processing
