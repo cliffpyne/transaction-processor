@@ -257,33 +257,44 @@
     if (btn) btn.click();
   };
 
-  // ── Reset the modal to Add-mode whenever the Add-Customer button opens
-  //    it. Without this a click after an Edit session would still be in
-  //    Edit-mode and PATCH the last-edited row instead of POSTing.
+  // ── Modal open, in Add-mode OR Edit-mode ──
+  // The Add-Customer BUTTON in the header is the only Metronic-native
+  // trigger for the modal (data-kt-modal-toggle="#reg_add_modal"). We
+  // hook its click to decide which mode we're opening in:
+  //   - if `pendingEditRow` was set by an Edit click just before,
+  //     populate the form with that row's values and switch to
+  //     Edit-mode (title = "Edit customer #<id>", button = "Save
+  //     changes", submit → PATCH).
+  //   - otherwise reset to a clean Add-mode form (title = "Add
+  //     Customer", button = "Save customer", submit → POST).
+  //
+  // The pending-row flag closes the race we had before: the previous
+  // implementation set editModeRegId in openEditRow() THEN clicked the
+  // trigger, which fired an unconditional reset handler that
+  // immediately blew editModeRegId back to null. Result: every
+  // "Save changes" submit was actually a POST that created a
+  // duplicate row instead of editing.
   const $addTrigger = document.querySelector('[data-kt-modal-toggle="#reg_add_modal"]');
-  if ($addTrigger) {
-    $addTrigger.addEventListener('click', () => {
-      editModeRegId = null;
-      const t = $('reg_modal_title');
-      if (t) t.textContent = 'Add Customer';
-      if ($addSubmit) $addSubmit.textContent = 'Save customer';
-      if ($addForm)   $addForm.reset();
-      if ($addErr)    $addErr.textContent = '';
-      if ($addType)   applyTypeVisibility($addType.value || 'boda');
-    });
-  }
+  let pendingEditRow = null;
 
-  // ── Edit-row: open the modal pre-populated with a row's data ──
-  const openEditRow = (row) => {
-    if (!row || !$addForm) return;
+  const applyAddMode = () => {
+    editModeRegId = null;
+    const t = $('reg_modal_title');
+    if (t) t.textContent = 'Add Customer';
+    if ($addSubmit) $addSubmit.textContent = 'Save customer';
+    if ($addForm)   $addForm.reset();
+    if ($addErr)    $addErr.textContent = '';
+    if ($addType)   applyTypeVisibility($addType.value || 'boda');
+  };
+
+  const applyEditMode = (row) => {
     editModeRegId = row.id;
-    $addForm.reset();
-    if ($addErr) $addErr.textContent = '';
-    // Populate each named input from the row
+    if ($addForm) $addForm.reset();
+    if ($addErr)  $addErr.textContent = '';
     const setField = (name, value) => {
-      const el = $addForm.querySelector(`[name="${name}"]`);
+      const el = $addForm && $addForm.querySelector(`[name="${name}"]`);
       if (!el) return;
-      el.disabled = false;              // may be disabled from previous type
+      el.disabled = false;                      // may be disabled from previous type
       el.value = value == null ? '' : String(value);
     };
     setField('customer_name',     row.customer_name);
@@ -300,27 +311,39 @@
       .filter(p => p && p !== row.phone)
       .join(', ');
     setField('phones_extra', extras);
-
-    // Apply visibility rules for whichever type we're now on
+    // Apply type-visibility for the row's own customer_type
     applyTypeVisibility(row.customer_type || 'boda');
-
-    // Rewrite modal title + submit-button label
+    // Title + submit label
     const title = $('reg_modal_title');
     if (title) title.textContent = `Edit customer #${row.id}`;
     if ($addSubmit) $addSubmit.textContent = 'Save changes';
-
-    // Open the Metronic modal by triggering its toggle button
-    if ($addTrigger) $addTrigger.click();
   };
 
-  // Delegate Edit clicks from the table
+  if ($addTrigger) {
+    $addTrigger.addEventListener('click', () => {
+      if (pendingEditRow) {
+        const row = pendingEditRow;
+        pendingEditRow = null;
+        applyEditMode(row);
+      } else {
+        applyAddMode();
+      }
+    });
+  }
+
+  // ── Delegate Edit clicks from the table: stage the row, then fire
+  //    the same Metronic trigger so the modal opens with our populated
+  //    form. Metronic handles show/hide; our click handler above sees
+  //    pendingEditRow and switches modes without a race. ──
   if ($tbody) {
     $tbody.addEventListener('click', (e) => {
       const btn = e.target.closest('.reg-edit-btn');
       if (!btn) return;
       const id = Number(btn.dataset.rowId);
       const row = rowCache.get(id);
-      if (row) openEditRow(row);
+      if (!row) return;
+      pendingEditRow = row;
+      if ($addTrigger) $addTrigger.click();
     });
   }
 
