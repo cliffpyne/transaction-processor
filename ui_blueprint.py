@@ -558,7 +558,7 @@ def dedup_alerts_list():
 # hard-wired to the main SUPABASE_URL, and adding a project arg to it just
 # for one table would ripple through every existing endpoint.
 _REGISTRY_EDITABLE_COLS = [
-    'customer_name', 'plate', 'phone', 'bank_account_name',
+    'customer_name', 'plate', 'phone', 'phones', 'bank_account_name',
     'start_date', 'loan_amount_tsh', 'customer_type',
     'sav_customer_id', 'notes',
 ]

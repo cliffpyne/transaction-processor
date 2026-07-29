@@ -13,6 +13,16 @@
   const urlParams = new URLSearchParams(window.location.search);
   const initialType = urlParams.get('customer_type') || '';
 
+  // Row cache — every row that comes back from /api/customer_registry gets
+  // stored here keyed by id, so Edit clicks open the modal without a fresh
+  // fetch. Cleared each time load() re-runs (a new page / filter / search
+  // discards stale rows).
+  const rowCache = new Map();
+  // Edit mode: null → Add-mode (POSTs to /api/customer_registry);
+  //            number → Edit-mode for that registry id (PATCHes to
+  //            /api/customer_registry/<id>).
+  let editModeRegId = null;
+
   const state = {
     page: 1,
     size: 25,
@@ -72,8 +82,18 @@
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
+  const canEdit = ($tbody && $tbody.dataset.canEdit === 'true');
+
   const renderRow = (r) => {
     const t = TYPE_BADGE[r.customer_type] || { label: r.customer_type || '—', cls: 'kt-badge-secondary' };
+    const actionsCell = canEdit
+      ? `<td>
+           <button type="button" class="kt-btn kt-btn-sm kt-btn-outline kt-btn-icon reg-edit-btn"
+                   data-row-id="${r.id}" title="Edit customer">
+             <i class="ki-filled ki-pencil"></i>
+           </button>
+         </td>`
+      : '';
     return `
       <tr data-id="${r.id}">
         <td class="text-secondary-foreground text-xs">${r.id}</td>
@@ -86,6 +106,7 @@
         <td class="text-foreground text-sm">${fmtTZS(r.loan_amount_tsh)}</td>
         <td class="text-secondary-foreground text-xs">${esc(r.sav_customer_id || '—')}</td>
         <td class="text-secondary-foreground text-xs">${fmtCreated(r.created_at)}</td>
+        ${actionsCell}
       </tr>
     `;
   };
@@ -146,9 +167,13 @@
     return p;
   };
 
+  // Column span for empty/loading rows depends on whether the Actions
+  // column is present (only for admin/editor).
+  const COLSPAN = canEdit ? 11 : 10;
+
   const load = async () => {
     const params = buildQuery();
-    $tbody.innerHTML = '<tr><td class="text-center text-secondary-foreground py-6" colspan="10">Loading…</td></tr>';
+    $tbody.innerHTML = `<tr><td class="text-center text-secondary-foreground py-6" colspan="${COLSPAN}">Loading…</td></tr>`;
     // Show/hide Clear button based on whether any advanced filter is set
     if ($btnClear) $btnClear.classList.toggle('hidden', !anyFilterActive());
 
@@ -158,15 +183,18 @@
       json = await r.json();
       if (!r.ok) throw new Error(json.error || r.statusText);
     } catch (e) {
-      $tbody.innerHTML = `<tr><td class="text-center text-destructive py-6" colspan="10">Failed to load: ${esc(e.message)}</td></tr>`;
+      $tbody.innerHTML = `<tr><td class="text-center text-destructive py-6" colspan="${COLSPAN}">Failed to load: ${esc(e.message)}</td></tr>`;
       return;
     }
     const rows = json.data || [];
+    // Cache rows for the Edit modal to open without a fresh fetch.
+    rowCache.clear();
+    for (const r of rows) rowCache.set(r.id, r);
     state.total = json.total || 0;
     const lastPage = json.last_page || 1;
     $tbody.innerHTML = rows.length
       ? rows.map(renderRow).join('')
-      : '<tr><td class="text-center text-secondary-foreground py-6" colspan="10">No customers match.</td></tr>';
+      : `<tr><td class="text-center text-secondary-foreground py-6" colspan="${COLSPAN}">No customers match.</td></tr>`;
     const from = state.total ? (state.page - 1) * state.size + 1 : 0;
     const to   = Math.min(state.page * state.size, state.total);
     $showing.textContent = state.total
@@ -229,6 +257,73 @@
     if (btn) btn.click();
   };
 
+  // ── Reset the modal to Add-mode whenever the Add-Customer button opens
+  //    it. Without this a click after an Edit session would still be in
+  //    Edit-mode and PATCH the last-edited row instead of POSTing.
+  const $addTrigger = document.querySelector('[data-kt-modal-toggle="#reg_add_modal"]');
+  if ($addTrigger) {
+    $addTrigger.addEventListener('click', () => {
+      editModeRegId = null;
+      const t = $('reg_modal_title');
+      if (t) t.textContent = 'Add Customer';
+      if ($addSubmit) $addSubmit.textContent = 'Save customer';
+      if ($addForm)   $addForm.reset();
+      if ($addErr)    $addErr.textContent = '';
+      if ($addType)   applyTypeVisibility($addType.value || 'boda');
+    });
+  }
+
+  // ── Edit-row: open the modal pre-populated with a row's data ──
+  const openEditRow = (row) => {
+    if (!row || !$addForm) return;
+    editModeRegId = row.id;
+    $addForm.reset();
+    if ($addErr) $addErr.textContent = '';
+    // Populate each named input from the row
+    const setField = (name, value) => {
+      const el = $addForm.querySelector(`[name="${name}"]`);
+      if (!el) return;
+      el.disabled = false;              // may be disabled from previous type
+      el.value = value == null ? '' : String(value);
+    };
+    setField('customer_name',     row.customer_name);
+    setField('customer_type',     row.customer_type || 'boda');
+    setField('plate',             row.plate);
+    setField('phone',             row.phone);
+    setField('sav_customer_id',   row.sav_customer_id);
+    setField('bank_account_name', row.bank_account_name);
+    setField('start_date',        row.start_date);
+    setField('loan_amount_tsh',   row.loan_amount_tsh);
+    setField('notes',             row.notes);
+    // phones_extra = every phone in phones[] EXCEPT the primary phone
+    const extras = (row.phones || [])
+      .filter(p => p && p !== row.phone)
+      .join(', ');
+    setField('phones_extra', extras);
+
+    // Apply visibility rules for whichever type we're now on
+    applyTypeVisibility(row.customer_type || 'boda');
+
+    // Rewrite modal title + submit-button label
+    const title = $('reg_modal_title');
+    if (title) title.textContent = `Edit customer #${row.id}`;
+    if ($addSubmit) $addSubmit.textContent = 'Save changes';
+
+    // Open the Metronic modal by triggering its toggle button
+    if ($addTrigger) $addTrigger.click();
+  };
+
+  // Delegate Edit clicks from the table
+  if ($tbody) {
+    $tbody.addEventListener('click', (e) => {
+      const btn = e.target.closest('.reg-edit-btn');
+      if (!btn) return;
+      const id = Number(btn.dataset.rowId);
+      const row = rowCache.get(id);
+      if (row) openEditRow(row);
+    });
+  }
+
   if ($addForm) $addForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if ($addErr) $addErr.textContent = '';
@@ -251,12 +346,21 @@
         if (t && !seen.has(t)) { phones.push(t); seen.add(t); }
       }
     }
-    if (phones.length) payload.phones = phones;
+    // Always send phones[] on both add and edit — an edit that clears the
+    // phones field should persist as an empty array (not skip the column).
+    payload.phones = phones;
     delete payload.phones_extra;
 
+    // Add-mode → POST /api/customer_registry
+    // Edit-mode → PATCH /api/customer_registry/<id>
+    const url    = editModeRegId
+      ? `/api/customer_registry/${editModeRegId}`
+      : '/api/customer_registry';
+    const method = editModeRegId ? 'PATCH' : 'POST';
+
     try {
-      const r = await fetch('/api/customer_registry', {
-        method: 'POST',
+      const r = await fetch(url, {
+        method,
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

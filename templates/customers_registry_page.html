@@ -145,10 +145,14 @@
           <th class="w-[130px]"><span class="kt-table-col"><span class="kt-table-col-label">Loan (TZS)</span></span></th>
           <th class="w-[130px]"><span class="kt-table-col"><span class="kt-table-col-label">SAV ID</span></span></th>
           <th class="w-[160px]"><span class="kt-table-col"><span class="kt-table-col-label">Created</span></span></th>
+          {% if role in ('admin', 'editor') %}
+          <th class="w-[80px]"><span class="kt-table-col"><span class="kt-table-col-label">Actions</span></span></th>
+          {% endif %}
          </tr>
         </thead>
-        <tbody id="reg_tbody">
-         <tr><td class="text-center text-secondary-foreground py-6" colspan="10">Loading…</td></tr>
+        <tbody id="reg_tbody"
+               data-can-edit="{{ 'true' if role in ('admin', 'editor') else 'false' }}">
+         <tr><td class="text-center text-secondary-foreground py-6" colspan="{{ 11 if role in ('admin', 'editor') else 10 }}">Loading…</td></tr>
         </tbody>
        </table>
       </div>
@@ -195,7 +199,7 @@
   <div class="kt-modal-content mx-auto top-5 lg:top-[10%]"
        style="width: 92vw; max-width: 420px;">
    <div class="kt-modal-header">
-    <h3 class="kt-modal-title">Add Customer</h3>
+    <h3 class="kt-modal-title" id="reg_modal_title">Add Customer</h3>
     <button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost shrink-0"
             data-kt-modal-dismiss="true">
      <i class="ki-filled ki-cross"></i>
@@ -304,5 +308,5 @@
 
  <!-- Cache-buster query string bumped whenever the JS changes so stale
       browser caches never mask a deploy. Bump the number by hand next edit. -->
- <script src="/static/customers_registry_page.js?v=20260727-14" defer></script>
+ <script src="/static/customers_registry_page.js?v=20260727-15" defer></script>
 {% endblock %}
