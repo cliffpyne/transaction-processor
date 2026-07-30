@@ -717,6 +717,23 @@ def _rescue_find_plates(text):
 
     original = str(text)
 
+    # 🔥 Strip the CRDB REF hex BEFORE anything else — same reason as
+    # _clean_nmb_message(): a 16-char hex ref is near-guaranteed to contain a
+    # \d{3}[A-F]{3} run that the bare-3+3 fallback below mints into a fake
+    # plate. Commit 99959b5 (2026-07-27) fixed this for extract_plate_number()
+    # but MISSED this function — the two extractors keep separate copies of
+    # the noise list. Result: extract_plate_number() correctly returned None
+    # for `REF:19fa80918c722bbd SIMUSSD FT FROM DOTO JACKOBO EMANUEL TO
+    # ELEGANSKY`, the row fell through to rescue, and rescue coined MC722BBD
+    # out of `...8c722bbd`. One fake candidate is within
+    # MAX_REVIEW_CANDIDATES, so the row went choose_plate → auto-FAILED and
+    # the depositor-name fallback in the else-branch never ran. Frank flagged
+    # it 2026-07-29 (sheet row 27477, 37,500 TZS).
+    #
+    # Applied to `original` so BOTH the Description-scoped and full-text
+    # branches below are covered.
+    original = re.sub(r'\bREF\s*:?\s*[A-Fa-f0-9]{8,}', '', original)
+
     # ── Respect Description boundary ─────────────────────────────────────────
     desc_m = re.search(r'\bDESCRIPTION\b\s+(.+?)(?:\s+FROM\b|!!|$)',
                        original, re.IGNORECASE | re.DOTALL)
