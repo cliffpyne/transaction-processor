@@ -2116,13 +2116,43 @@ def process_crdb_transactions(filepath, bank_label='CRDB'):
         
         elif filepath.endswith('.xlsx') or filepath.endswith('.xls'):
             print("📊 Processing CRDB Excel file...")
-            # Read Excel file - CRDB format has headers at row 12
-            df = pd.read_excel(filepath, header=12)
-            df.columns = df.iloc[0]
-            df = df[1:].reset_index(drop=True)
-            
+            # ── Auto-detect header row ─────────────────────────────────────
+            # This used to be `pd.read_excel(filepath, header=12)` followed by
+            # promoting df.iloc[0] — i.e. 'Posting Date' hardcoded at 0-based
+            # row 13. CRDB changed the export on 2026-07-30: the metadata block
+            # gained one line, pushing the header to row 14. Every statement
+            # exported that day parsed as `Columns found: [nan x 6]` and the
+            # endpoint 400'd on missing required columns — Frank hit it on
+            # `accountTransactionHistory - 2026-07-30T172941.779.xlsx`.
+            #
+            # Same approach the NMB reader already uses below: scan for the
+            # header row instead of trusting a fixed offset, so the next
+            # metadata line CRDB adds doesn't take the pipeline down again.
+            CRDB_HEADER_ROW = None
+            raw = pd.read_excel(filepath, header=None)
+            for idx in range(min(60, len(raw))):
+                row_vals = [str(v).strip() for v in raw.iloc[idx].tolist()]
+                if 'Posting Date' in row_vals and 'Details' in row_vals:
+                    CRDB_HEADER_ROW = idx
+                    print(f"✅ CRDB header row auto-detected at row {idx} (0-based)")
+                    break
+
+            if CRDB_HEADER_ROW is None:
+                del raw
+                gc.collect()
+                return jsonify({
+                    'error': "Could not find the CRDB header row ('Posting Date' + "
+                             "'Details') in the first 60 rows. Is this a CRDB "
+                             "account statement export?"
+                }), 400
+
+            df = raw.iloc[CRDB_HEADER_ROW + 1:].reset_index(drop=True)
+            df.columns = [str(v).strip() for v in raw.iloc[CRDB_HEADER_ROW].tolist()]
+            del raw
+            gc.collect()
+
             print(f"Columns found: {list(df.columns)}")
-            
+
             required_columns = ['Posting Date', 'Details', 'Credit']
             missing = [col for col in required_columns if col not in df.columns]
             
