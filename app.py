@@ -3084,8 +3084,18 @@ def read_nmb_csv(filepath):
 
     # ── Auto-detect the header row (metadata rows precede the table) ──────
     try:
+        # names=range(40) forces a fixed width so the ragged metadata block
+        # above the table pads instead of raising. Without it the C parser
+        # infers the column count from the first line and dies on the next
+        # wider one — "Expected 2 fields in line 4, saw 6" — which sent the
+        # scan into the except branch and silently fell back to row 3. That
+        # fallback is what actually broke the 2026-08 NMB export, not the
+        # header vocabulary. python engine + on_bad_lines='skip' covers rows
+        # wider than 40 fields.
         scan_df = pd.read_csv(filepath, header=None, dtype=str,
-                              nrows=60, keep_default_na=False)
+                              nrows=60, keep_default_na=False,
+                              names=range(40), engine='python',
+                              on_bad_lines='skip')
         HEADER_ROW = None
         for idx, row in scan_df.iterrows():
             joined = ' '.join(str(v).strip().lower() for v in row.tolist())
@@ -3111,22 +3121,61 @@ def read_nmb_csv(filepath):
 
     # ── Normalize column names (strip stray spaces) and map to canonical ──
     df.columns = [str(c).strip() for c in df.columns]
+    # Aliases are cumulative — NMB has now shipped three header vocabularies and
+    # old exports still get re-uploaded, so every spelling stays mapped.
+    #
+    #   legacy : Value Date | Narration/Description | Transaction Reference | Credit Amount
+    #   2026-08: Book Date, Value Date | Narration | Trn Ref No | Credit
+    #
+    # The 2026-08 layout reached us on 05.08 and 400'd with
+    # "Missing required columns: ['Description']" — the header row itself was
+    # detected fine (the scan already accepts 'narration'), but 'Narration'
+    # alone was never in the rename map, only 'Narration/Description'.
     df = df.rename(columns={
         'Value Date': 'Date',
+        'Book Date': 'Date',                    # 2026-08; only used if Value Date absent
         'Narration/Description': 'Description',
+        'Narration': 'Description',             # 2026-08
         'Transaction Reference': 'Reference Number',
+        'Trn Ref No': 'Reference Number',       # 2026-08
         'Credit Amount': 'Credit',
         'Debit Amount': 'Debit',
     })
+    # A rename that maps two source columns onto one name yields duplicates
+    # (Book Date + Value Date both -> Date). Keep the first, drop the rest,
+    # otherwise df['Date'] returns a DataFrame and every downstream .str call
+    # explodes.
+    if len(df.columns) != len(set(df.columns)):
+        dupes = [c for c in set(df.columns) if list(df.columns).count(c) > 1]
+        print(f"  ℹ️ collapsing duplicate columns after rename: {dupes}")
+        df = df.loc[:, ~df.columns.duplicated()]
     print(f"NMB CSV columns found: {list(df.columns)}")
 
     # ── Normalize the Date to a 4-digit year (e.g. 18-May-26 → 18-May-2026) ──
     # NMB CSV uses a 2-digit year, but the shared extract_nmb_datetime() reads
     # the year via a 20\d{2} regex and would otherwise miss it. Rows that don't
     # parse keep their original value untouched.
+    # Formats seen so far, tried in order. The 2026-08 export switched to
+    # M/D/YY ("8/5/26"), which %d-%b-%y cannot read — it fell through
+    # untouched and then extract_nmb_datetime()'s 20\d{2} year regex found
+    # nothing, so the row carried no usable date.
+    #
+    # M/D/YY vs D/M/YY is genuinely ambiguous for a value like 8/5/26. This
+    # file's own metadata settles it: "From Date: 8/1/26 ... To Date: 8/5/26"
+    # over 302 credit transactions — a 5-day window at their volume, not a
+    # 4-month one. So month-first.
     if 'Date' in df.columns:
-        parsed = pd.to_datetime(df['Date'], format='%d-%b-%y', errors='coerce')
-        df.loc[:, 'Date'] = parsed.dt.strftime('%d-%b-%Y').where(parsed.notna(), df['Date'])
+        orig = df['Date'].astype(str)
+        parsed = pd.to_datetime(orig, format='%d-%b-%y', errors='coerce')
+        still = parsed.isna()
+        if still.any():
+            alt = pd.to_datetime(orig.where(still), format='%m/%d/%y', errors='coerce')
+            parsed = parsed.fillna(alt)
+            if alt.notna().any():
+                print(f"  ℹ️ NMB CSV: {int(alt.notna().sum())} date(s) read as M/D/YY (2026-08 format)")
+        df.loc[:, 'Date'] = parsed.dt.strftime('%d-%b-%Y').where(parsed.notna(), orig)
+        if parsed.isna().any():
+            print(f"  ⚠️ NMB CSV: {int(parsed.isna().sum())} date(s) unparsed, left as-is")
 
     required_columns = ['Date', 'Description', 'Credit']
     missing = [col for col in required_columns if col not in df.columns]
