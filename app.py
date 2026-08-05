@@ -1611,9 +1611,11 @@ def load_customers_from_registry():
             )
         except requests.RequestException as e:
             print(f"❌ registry: fetch failed at offset {lower}: {e}")
+            _REGISTRY_LOAD_TRUNCATED.append(f'fetch failed at offset {lower}: {e}')
             break
         if r.status_code not in (200, 206):
             print(f"❌ registry: HTTP {r.status_code}: {r.text[:200]}")
+            _REGISTRY_LOAD_TRUNCATED.append(f'HTTP {r.status_code} at offset {lower}')
             break
         rows = r.json() or []
         for row in rows:
@@ -1626,14 +1628,99 @@ def load_customers_from_registry():
             break
         lower += step
 
-    print(f"✅ registry: {total} rows → "
+    ok = not _REGISTRY_LOAD_TRUNCATED
+    print(f"{'✅' if ok else '❌'} registry: {total} rows → "
           f"boda(plate={len(plate_lookup)}, phone={len(phone_lookup)}, "
           f"dep={len(depositor_lookup)}), "
           f"sav(plate={len(plate_lookup_sav)}, phone={len(phone_lookup_sav)}), "
-          f"iphone(phone={len(iphone_lookup)})")
+          f"iphone(phone={len(iphone_lookup)})"
+          f"{'' if ok else '  ← TRUNCATED, run will abort'}")
     return (phone_lookup, plate_lookup, depositor_lookup,
             phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
             iphone_lookup)
+
+
+# ── Customer-load sanity guard ──────────────────────────────────────────────
+# 2026-08-05, after Frank traced a batch of "Customer not found" failures on
+# 03.08. The registry fetch had timed out:
+#
+#   ❌ registry: fetch failed at offset 0: ... Read timed out. (read timeout=30)
+#   ✅ registry: 0 rows → boda(plate=0, phone=0, dep=0), ...
+#
+# Zero rows was printed with a GREEN CHECK and the run carried straight on,
+# matching every plate against an empty cache. Every transaction in that batch
+# landed in FAILED with a technically-true, completely misleading reason
+# ("Customer not found for MC666FGQ") — while MC666FGQ had been sitting in the
+# registry, correct and untouched, since 24 July. Loan officers then hand-typed
+# names the system already knew.
+#
+# A run that cannot see its customers must not be allowed to write to FAILED.
+# Abort instead: the uploaded file stays put and the next puller cycle
+# reprocesses it, which is exactly what the flock + ref dedup already handle.
+#
+# Two independent trip-wires:
+#   1. TRUNCATED  — any fetch error / bad status mid-pagination. A timeout at
+#      offset 6000 of 6277 yields 95% of the rows and would sail past a
+#      percentage floor, so partial loads are fatal regardless of count.
+#   2. FLOOR      — total < MIN_LOAD_RATIO of the last known good count.
+#      Catches silent shrinkage (bad filter, wrong project, half-empty table)
+#      that no exception would report.
+_REGISTRY_LOAD_TRUNCATED = []
+
+MIN_LOAD_RATIO = float(os.environ.get('CUSTOMER_MIN_LOAD_RATIO', '0.8'))
+_HIGHWATER_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '.customer_load_highwater.json')
+
+
+class CustomerLoadError(RuntimeError):
+    """Customer cache came back empty, truncated or implausibly small."""
+
+
+def _read_highwater():
+    try:
+        with open(_HIGHWATER_PATH) as f:
+            return int(json.load(f).get('customers', 0))
+    except Exception:
+        return 0
+
+
+def _write_highwater(n):
+    try:
+        with open(_HIGHWATER_PATH, 'w') as f:
+            json.dump({'customers': int(n)}, f)
+    except Exception as e:
+        print(f"⚠️ could not persist customer high-water mark: {e}")
+
+
+def _assert_customer_load_sane(lookups):
+    """Raise CustomerLoadError unless the cache looks usable.
+
+    `total` is the count of distinct lookup keys actually built, not the row
+    count — a load can return rows whose plates/phones all fail to index, and
+    that is just as unusable as returning nothing.
+    """
+    phone_l, plate_l, dep_l, phone_s, plate_s, _ids, iphone_l = lookups
+    total = (len(phone_l) + len(plate_l) + len(phone_s)
+             + len(plate_s) + len(iphone_l))
+
+    if _REGISTRY_LOAD_TRUNCATED:
+        why = '; '.join(_REGISTRY_LOAD_TRUNCATED)
+        raise CustomerLoadError(f'customer load was truncated ({why})')
+
+    if total == 0:
+        raise CustomerLoadError(
+            'customer load produced 0 usable lookup keys — refusing to run')
+
+    hw = _read_highwater()
+    if hw and total < hw * MIN_LOAD_RATIO:
+        raise CustomerLoadError(
+            f'customer load returned {total} lookup keys, under '
+            f'{MIN_LOAD_RATIO:.0%} of the last good load ({hw}) — refusing to run')
+
+    if total > hw:
+        _write_highwater(total)
+    print(f"🛡️ customer-load guard OK: {total} lookup keys "
+          f"(last good {hw or 'n/a'}, floor {MIN_LOAD_RATIO:.0%})")
 
 
 def load_customers_dispatch(service):
@@ -1645,8 +1732,14 @@ def load_customers_dispatch(service):
     - registry : DB only
     - both     : DB primary, sheets merged in as fallback (DB wins on collision)
     """
+    # Reset the truncation flag for this run — the loader appends to it and
+    # _assert_customer_load_sane() reads it below.
+    del _REGISTRY_LOAD_TRUNCATED[:]
+
     if CUSTOMER_SOURCE == 'registry':
-        return load_customers_from_registry()
+        out = load_customers_from_registry()
+        _assert_customer_load_sane(out)
+        return out
 
     if CUSTOMER_SOURCE == 'both':
         r = load_customers_from_registry()
@@ -1654,7 +1747,7 @@ def load_customers_dispatch(service):
         s_ps, s_pls, s_id = load_all_customers_sav(service)
         s_ip = load_iphone_customers(service)
         # {**sheet, **registry} → registry wins on key collision
-        return (
+        out = (
             {**s_p,   **r[0]},
             {**s_pl,  **r[1]},
             {**s_d,   **r[2]},
@@ -1663,12 +1756,16 @@ def load_customers_dispatch(service):
             {**s_id,  **r[5]},
             {**s_ip,  **r[6]},
         )
+        _assert_customer_load_sane(out)
+        return out
 
     # Default: sheet
     p,  pl,  d   = load_all_customers(service)
     ps, pls, ids = load_all_customers_sav(service)
     ip = load_iphone_customers(service)
-    return p, pl, d, ps, pls, ids, ip
+    out = (p, pl, d, ps, pls, ids, ip)
+    _assert_customer_load_sane(out)
+    return out
 
 
 def lookup_customer_from_cache(identifier, lookup_type, phone_lookup, plate_lookup):
@@ -2190,9 +2287,21 @@ def process_crdb_transactions(filepath, bank_label='CRDB'):
         # Source is controlled by CUSTOMER_SOURCE (sheet | registry | both).
         # See load_customers_dispatch() for the routing.
         print(f"Loading customer database (source={CUSTOMER_SOURCE})...")
-        (phone_lookup, plate_lookup, depositor_lookup,
-         phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
-         iphone_lookup) = load_customers_dispatch(service)
+        try:
+            (phone_lookup, plate_lookup, depositor_lookup,
+             phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
+             iphone_lookup) = load_customers_dispatch(service)
+        except CustomerLoadError as e:
+            # Abort BEFORE any row is classified. The uploaded file is left in
+            # place, nothing is appended to PASSED/FAILED, and the next puller
+            # cycle reprocesses it against a healthy cache. 503 so the caller
+            # treats it as retryable rather than a bad request.
+            print(f"🛑 ABORTING RUN — {e}")
+            return jsonify({
+                'error': 'customer database unavailable — run aborted, nothing written',
+                'detail': str(e),
+                'retryable': True,
+            }), 503
 
         # ── Load existing refs (duplicate guard) ──────────────────────────────
         print("Loading existing references from PASSED sheet...")
@@ -3198,9 +3307,21 @@ def process_nmb_transactions(filepath):
         # Source is controlled by CUSTOMER_SOURCE (sheet | registry | both).
         # See load_customers_dispatch() for the routing.
         print(f"Loading customer database (source={CUSTOMER_SOURCE})...")
-        (phone_lookup, plate_lookup, depositor_lookup,
-         phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
-         iphone_lookup) = load_customers_dispatch(service)
+        try:
+            (phone_lookup, plate_lookup, depositor_lookup,
+             phone_lookup_sav, plate_lookup_sav, id_lookup_sav,
+             iphone_lookup) = load_customers_dispatch(service)
+        except CustomerLoadError as e:
+            # Abort BEFORE any row is classified. The uploaded file is left in
+            # place, nothing is appended to PASSED/FAILED, and the next puller
+            # cycle reprocesses it against a healthy cache. 503 so the caller
+            # treats it as retryable rather than a bad request.
+            print(f"🛑 ABORTING RUN — {e}")
+            return jsonify({
+                'error': 'customer database unavailable — run aborted, nothing written',
+                'detail': str(e),
+                'retryable': True,
+            }), 503
 
         # ── Duplicate-check refs across ALL relevant tabs ──────────────────────
         # Check BOTH old sheet (PASSED_SHEET_ID) AND new NMB sheet to cover
