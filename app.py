@@ -1133,6 +1133,17 @@ def _noref_fingerprint(txn_date, details, credit_amount):
     return hashlib.sha256(key).hexdigest()[:16]
 
 
+def is_iphone_transaction(details):
+    """
+    Detect whether a transaction description contains the word 'iphone'
+    in any capitalisation: iphone, iPhone, IPHONE, Iphone, etc.
+    Returns True if it's an iPhone transaction (should bypass normal flow).
+    """
+    if not details or pd.isna(details):
+        return False
+    return bool(re.search(r'\biphone\b', str(details), re.IGNORECASE))
+
+
 def normalize_phone_iphone(phone):
     """
     Normalize any phone number variant to a bare 9-digit suffix
