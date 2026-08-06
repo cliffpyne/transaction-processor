@@ -1111,62 +1111,26 @@ def extract_ref_number(text):
     return None
 
 
-def _synthetic_ref(txn_date, details, credit_amount):
-    """Stable name-based ref for rows the bank sent WITHOUT a `REF:` prefix
-    (CHQ-format cheque deposits, some SIMUSSD variants). The pipeline's
-    duplicate guard dedups by ref_number; a null ref bypasses the check
-    so re-processing the same statement re-appended those rows.
+def _noref_fingerprint(txn_date, details, credit_amount):
+    """Content fingerprint for a row the bank sent WITHOUT a REF.
 
-    New format (Frank 2026-07-29, replaces the earlier `syn:<hex>` shape
-    because operators wanted an at-a-glance readable ref):
-        <FULLNAME_NO_SPACES><TIMESTAMP_DIGITS>
-    e.g. `ABDALLAHSAIDIJIKA29072026115800` — name uppercased, all non-
-    alphanumeric chars stripped; timestamp is transaction_date with
-    every non-digit removed (DDMMYYYYHHMMSS = 14 digits).
+    INTERNAL ONLY. This value must never be written to the ref column, never
+    reach Frappe/QB, and never be treated as a payment identity — that is
+    exactly what the old _synthetic_ref() did, and it duplicated real money
+    when the bank later resent the same transaction carrying its real REF.
 
-    Fallback: if no depositor name can be extracted (blank / UNKNOWN
-    descriptions), fall back to a hashed `syn:<12hex>` so the ref column
-    still has SOMETHING for dedup — those rows are the minority and the
-    hash is still stable across re-reads.
-
-    Both forms are STABLE (same input → same ref), which is what the
-    pipeline's dedup relies on. Whitespace on details is collapsed and
-    amount is rendered with a consistent numeric form so a re-read of
-    the same sheet cell can't produce a different value."""
-    # Try name extraction first — same regex the pipeline uses to route
-    # by depositor, so extraction rules stay in one place.
-    m = _DEPOSITOR_RX.search(str(details or ''))
-    if m:
-        name = re.sub(r'[^A-Za-z0-9]', '', m.group(1)).upper()
-        if name:
-            ts = re.sub(r'\D', '', str(txn_date or ''))
-            return f'{name}{ts}'
-
-    # Fallback for rows we can't get a name out of. Kept for safety —
-    # otherwise the ref would be empty and dedup would break again.
+    Its only job is to stop the same un-referenced row being re-appended to
+    FAILED on every cycle.
+    """
     import hashlib
-    d = re.sub(r'\s+', ' ', str(details or '')).strip()
+    d = re.sub(r'\s+', ' ', str(details or '')).strip().upper()
     try:
         a = float(credit_amount if credit_amount is not None else 0)
         a_str = str(int(a)) if a.is_integer() else f'{a:.2f}'
     except (ValueError, TypeError):
         a_str = str(credit_amount or '')
     key = f'{txn_date}|{d}|{a_str}'.encode('utf-8')
-    return 'syn:' + hashlib.sha256(key).hexdigest()[:12]
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🔥 NEW: iPhone Channel Functions
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def is_iphone_transaction(details):
-    """
-    Detect whether a transaction description contains the word 'iphone'
-    in any capitalisation: iphone, iPhone, IPHONE, Iphone, etc.
-    Returns True if it's an iPhone transaction (should bypass normal flow).
-    """
-    if not details or pd.isna(details):
-        return False
-    return bool(re.search(r'\biphone\b', str(details), re.IGNORECASE))
+    return hashlib.sha256(key).hexdigest()[:16]
 
 
 def normalize_phone_iphone(phone):
@@ -2391,19 +2355,51 @@ def process_crdb_transactions(filepath, bank_label='CRDB'):
             # 🔥 NEW: Fuzzy stats
             'fuzzy_rescued': 0,
         }
+        noref_seen = set()   # in-run dedup for rows the bank sent with no REF
         
         for row in transactions_list:
             posting_date  = str(row.get('Posting Date', ''))
             details       = str(row.get('Details', ''))
             credit_amount = row.get('Credit', 0)
             ref_number    = extract_ref_number(details)
-            # Fallback: rows the bank sent without `REF:` (CHQ format,
-            # some SIMUSSDs) get a stable synthetic ref derived from
-            # (date | description | amount). Guarantees the ref-based
-            # dedup guard has a key to work with — no more re-appending
-            # the same cheque row every time the statement is reprocessed.
+
+            # ── No bank REF → never becomes a payment ────────────────────────
+            # This used to mint a synthetic ref (NAME+TIMESTAMP, previously
+            # syn:<hash>) so the ref-based dedup had a key. That was wrong and
+            # it duplicated real money: the bank re-sends the same transaction
+            # later WITH its real REF, the two rows carry different refs, dedup
+            # sees two payments and Frappe/QB gets both. Confirmed on
+            # 31.07 22:13 MC461FXX 12,500 — pushed once as
+            # DENISRAYMONDTESHA31072026221300 and again as 19fb9983d24b3a42.
+            # Systematic 29.07 → 05.08.
+            #
+            # Frank 2026-08-06: "i dont want transactions without ref anymore."
+            # A row the bank sent without a REF is now HELD in FAILED. It is
+            # never routed to PASSED, never pushed, and is never given an
+            # invented identity that could later collide with the real one.
+            # When the bank resends it with its REF it resolves normally.
+            #
+            # It is deduped by content fingerprint instead of a ref, so it does
+            # not re-append every cycle — the fingerprint stays internal to
+            # FAILED and never travels as a payment key.
             if not ref_number:
-                ref_number = _synthetic_ref(posting_date, details, credit_amount)
+                fp = _noref_fingerprint(posting_date, details, credit_amount)
+                # already held on a previous run (message set covers FAILED),
+                # or already seen earlier in THIS batch
+                msg_key = re.sub(r'\s+', ' ', str(details or '')).strip()
+                if fp in noref_seen or (msg_key and msg_key in all_existing_messages):
+                    stats['skipped'] += 1
+                    print(f"⏭️ SKIP (no REF, already held): {details[:70]}")
+                    continue
+                noref_seen.add(fp)
+                last_failed_id += 1
+                failed_data.append([
+                    last_failed_id, posting_date, BANK, details, credit_amount,
+                    'No REF', 'Bank sent no REF — held, not pushed', '',
+                ])
+                stats['failed'] += 1
+                print(f"🚫 HELD (no bank REF): {details[:70]} — {credit_amount}")
+                continue
 
             # ══════════════════════════════════════════════════════════════════
             # 🔥 NEW: iPhone Channel — intercept BEFORE normal processing
