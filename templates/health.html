@@ -1,0 +1,74 @@
+{% extends "home.html" %}
+{% block content %}
+<div class="kt-container-fixed" id="contentContainer">
+
+ <!-- Header: title + window selector + live indicator -->
+ <div class="flex items-center flex-wrap justify-between gap-3 mb-5">
+  <div>
+   <h1 class="text-xl font-semibold text-mono">App Health</h1>
+   <span class="text-sm text-secondary-foreground">Mobile backend — live traffic, errors & dependencies</span>
+  </div>
+  <div class="flex items-center gap-2">
+   <span id="hlt_live" class="kt-badge kt-badge-outline kt-badge-success">● live</span>
+   <select id="hlt_window" class="kt-select" style="width:150px">
+    <option value="5min">Last 5 min</option>
+    <option value="hour" selected>Last hour</option>
+    <option value="today">Today</option>
+   </select>
+   <button class="kt-btn kt-btn-outline" id="hlt_refresh"><i class="ki-filled ki-arrows-circle"></i> Refresh</button>
+  </div>
+ </div>
+
+ <!-- KPI tiles (kt-card) -->
+ <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-5 mb-5" id="hlt_kpis">
+  <div class="kt-card"><div class="kt-card-content p-5">
+   <div class="text-2sm text-secondary-foreground mb-1">Requests</div>
+   <div class="text-2xl font-semibold text-mono" id="kpi_requests">—</div></div></div>
+  <div class="kt-card"><div class="kt-card-content p-5">
+   <div class="text-2sm text-secondary-foreground mb-1">Error rate (5xx)</div>
+   <div class="text-2xl font-semibold" id="kpi_errrate">—</div></div></div>
+  <div class="kt-card"><div class="kt-card-content p-5">
+   <div class="text-2sm text-secondary-foreground mb-1">Client errors (4xx)</div>
+   <div class="text-2xl font-semibold text-mono" id="kpi_cerrrate">—</div></div></div>
+  <div class="kt-card"><div class="kt-card-content p-5">
+   <div class="text-2sm text-secondary-foreground mb-1">p95 latency</div>
+   <div class="text-2xl font-semibold text-mono" id="kpi_p95">—</div></div></div>
+  <div class="kt-card"><div class="kt-card-content p-5">
+   <div class="text-2sm text-secondary-foreground mb-1">p99 latency</div>
+   <div class="text-2xl font-semibold text-mono" id="kpi_p99">—</div></div></div>
+ </div>
+
+ <!-- Charts: traffic over time + status split -->
+ <div class="grid grid-cols-1 xl:grid-cols-3 gap-5 mb-5">
+  <div class="kt-card xl:col-span-2"><div class="kt-card-header"><h3 class="kt-card-title">Traffic & errors</h3></div>
+   <div class="kt-card-content p-5"><div id="hlt_chart_time" style="min-height:280px"></div></div></div>
+  <div class="kt-card"><div class="kt-card-header"><h3 class="kt-card-title">Status split</h3></div>
+   <div class="kt-card-content p-5"><div id="hlt_chart_status" style="min-height:280px"></div></div></div>
+ </div>
+
+ <!-- Dependency heartbeats -->
+ <div class="kt-card mb-5"><div class="kt-card-header"><h3 class="kt-card-title">Dependencies</h3></div>
+  <div class="kt-card-content p-5"><div class="flex flex-wrap gap-2" id="hlt_heartbeats">
+   <span class="text-sm text-secondary-foreground">loading…</span></div></div></div>
+
+ <!-- Per-endpoint table -->
+ <div class="kt-card mb-5"><div class="kt-card-header"><h3 class="kt-card-title">Per-endpoint</h3></div>
+  <div class="kt-card-content p-0"><div class="kt-scrollable-x-auto">
+   <table class="kt-table kt-table-border align-middle text-sm w-full">
+    <thead><tr class="text-secondary-foreground">
+     <th class="text-start py-2.5 ps-5">Endpoint</th><th>Method</th><th class="text-end">Count</th>
+     <th class="text-end">Err %</th><th class="text-end">p95</th><th class="text-end pe-5">Max</th>
+    </tr></thead><tbody id="hlt_endpoints"><tr><td colspan="6" class="text-center p-4 text-secondary-foreground">loading…</td></tr></tbody>
+   </table></div></div></div>
+
+ <!-- Recent failures -->
+ <div class="kt-card"><div class="kt-card-header"><h3 class="kt-card-title">Recent failures</h3></div>
+  <div class="kt-card-content p-0"><div class="kt-scrollable-x-auto" style="max-height:340px;overflow-y:auto">
+   <table class="kt-table align-middle text-sm w-full">
+    <thead><tr class="text-secondary-foreground"><th class="text-start py-2.5 ps-5">Time</th><th>Status</th><th>Endpoint</th><th class="pe-5">Agent</th></tr></thead>
+    <tbody id="hlt_errors"><tr><td colspan="4" class="text-center p-4 text-secondary-foreground">loading…</td></tr></tbody>
+   </table></div></div></div>
+
+</div>
+<script src="/static/health_page.js" defer></script>
+{% endblock %}

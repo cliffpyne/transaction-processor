@@ -150,8 +150,18 @@ _HOME_SUBPAGES = {
     'transactions':       'transactions_page.html',
     'sms':                'sms_events_page.html',
     'customers-registry': 'customers_registry_page.html',
+    'health':             'health.html',
     # dedup_alerts, users, record_edits — added as pages ship
 }
+
+# App-health metrics: the mobile backend (m6pm on Render) exposes /api/admin/metrics;
+# we proxy it server-side so the Metronic health page can render it. X-Metrics-Token
+# authenticates server-to-server; browser-UA dodges Cloudflare's bot rule (1010).
+M6PM_METRICS_URL   = os.environ.get('M6PM_METRICS_URL',
+                                    'https://www.eleganskyboda.com/api/admin/metrics')
+M6PM_METRICS_TOKEN = os.environ.get('METRICS_TOKEN', '')
+_M6PM_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36')
 
 
 @ui.route('/home')
@@ -163,6 +173,24 @@ def home_page(sub=None):
                            username=current_user.username,
                            full_name=current_user.full_name,
                            role=current_user.role)
+
+
+@ui.route('/api/admin/metrics', methods=['GET'])
+@login_required
+@require_role('admin', 'editor')
+def admin_metrics():
+    """Proxy the mobile backend's app-health metrics into the portal so the
+    health dashboard (health.html) can render them with ApexCharts + tables."""
+    window = request.args.get('window', 'hour')
+    try:
+        r = requests.get(M6PM_METRICS_URL, params={'window': window},
+                         headers={'X-Metrics-Token': M6PM_METRICS_TOKEN,
+                                  'User-Agent': _M6PM_UA,
+                                  'Accept': 'application/json'},
+                         timeout=20)
+        return (r.text, r.status_code, {'Content-Type': 'application/json'})
+    except Exception as e:
+        return jsonify({'error': f'mobile backend metrics unreachable: {e}'}), 502
 
 
 # ── REST API — generic list endpoint ────────────────────────────────────────
