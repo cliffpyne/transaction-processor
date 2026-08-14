@@ -10,7 +10,8 @@
   var modalTarget = null;
 
   function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
-  function badge(t, k) { return '<span class="kt-badge kt-badge-sm kt-badge-' + k + '">' + esc(t) + '</span>'; }
+  var _PILL = { success: 'success', warning: 'warning', destructive: 'danger', info: 'info', secondary: 'muted', primary: 'info' };
+  function badge(t, k) { return '<span class="epill epill-' + (_PILL[k] || 'muted') + '">' + esc(t) + '</span>'; }
   function status(kind, html) { var b = $('ofc-status'); b.className = 'mb-4 kt-alert kt-alert-' + kind; b.innerHTML = html; b.classList.remove('hidden'); }
 
   function get(path) { return fetch('/api/m6pm' + path, { credentials: 'same-origin' }).then(function (r) { return r.json(); }); }

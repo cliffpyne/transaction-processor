@@ -10,7 +10,8 @@
 
   function todayISO() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
-  function badge(t, k) { return '<span class="kt-badge kt-badge-sm kt-badge-' + k + '">' + esc(t) + '</span>'; }
+  var _PILL = { success: 'success', warning: 'warning', destructive: 'danger', info: 'info', secondary: 'muted', primary: 'info' };
+  function badge(t, k) { return '<span class="epill epill-' + (_PILL[k] || 'muted') + '">' + esc(t) + '</span>'; }
   function fmt(n) { return (n == null) ? '—' : Number(n).toLocaleString(); }
   function num(v) { return parseInt(v, 10) || 0; }
 

@@ -1,0 +1,30 @@
+/* Soft status pills for the field-ops pages — replaces the harsh solid
+   kt-badge colors (white-on-yellow was unreadable). Tinted background + a
+   strong, legible text color + a hairline border = the clean SaaS look.
+   Named .epill so it never collides with Metronic's own kt-badge styles. */
+.epill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: 0.2px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.epill-success { background: #e7f7ef; color: #0e9f6e; border-color: #c6efd8; }
+.epill-warning { background: #fdf3e2; color: #c98a04; border-color: #f7e3b8; }
+.epill-danger  { background: #fdecec; color: #e02424; border-color: #f7cbcb; }
+.epill-info    { background: #eef1fe; color: #5850ec; border-color: #dbdefc; }
+.epill-muted   { background: #f3f4f6; color: #4b5563; border-color: #e5e7eb; }
+
+/* Dark-mode friendly: translucent tint over the semantic color so it still
+   reads on Metronic's dark theme (activated via the .dark class on <html>). */
+.dark .epill-success { background: rgba(20,201,130,0.14); color: #3ddc97; border-color: rgba(20,201,130,0.30); }
+.dark .epill-warning { background: rgba(240,180,0,0.15);  color: #f5c451; border-color: rgba(240,180,0,0.30); }
+.dark .epill-danger  { background: rgba(224,36,36,0.15);  color: #f87171; border-color: rgba(224,36,36,0.32); }
+.dark .epill-info    { background: rgba(88,80,236,0.18);  color: #a5b4fc; border-color: rgba(88,80,236,0.35); }
+.dark .epill-muted   { background: rgba(148,163,184,0.15);color: #cbd5e1; border-color: rgba(148,163,184,0.28); }

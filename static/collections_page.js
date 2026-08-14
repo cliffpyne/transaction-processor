@@ -8,7 +8,8 @@
 
   function pctColor(p) { return p >= 80 ? 'var(--color-success)' : p >= 50 ? 'var(--color-warning)' : 'var(--color-destructive)'; }
   function fmt(n) { return (n == null) ? '—' : Number(n).toLocaleString(); }
-  function badge(txt, kind) { return '<span class="kt-badge kt-badge-sm kt-badge-' + kind + '">' + txt + '</span>'; }
+  var _PILL = { success: 'success', warning: 'warning', destructive: 'danger', info: 'info', secondary: 'muted', primary: 'info' };
+  function badge(txt, kind) { return '<span class="epill epill-' + (_PILL[kind] || 'muted') + '">' + txt + '</span>'; }
 
   function render() {
     var s = data.summary || {};
