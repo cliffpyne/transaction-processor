@@ -1,0 +1,62 @@
+{% extends "home.html" %}
+{% block content %}
+<div class="kt-container-fixed" id="contentContainer">
+
+ <div class="flex items-center flex-wrap justify-between gap-3 mb-5">
+  <div><h1 class="text-xl font-semibold text-mono">SMS Template</h1>
+   <span class="text-sm text-secondary-foreground">The message each customer receives. Max 480 characters per template.</span></div>
+  <button class="kt-btn kt-btn-outline" id="tpl-reload"><i class="ki-filled ki-arrows-circle"></i> Reload</button>
+ </div>
+
+ <div id="tpl-status" class="hidden mb-4"></div>
+
+ <!-- Placeholder chips -->
+ <div class="kt-card mb-4"><div class="kt-card-content p-4">
+  <div class="text-xs text-secondary-foreground mb-2">Click to insert a placeholder into the focused template:</div>
+  <div class="flex flex-wrap gap-2" id="tpl-vars"></div>
+ </div></div>
+
+ <div class="grid md:grid-cols-2 gap-4">
+  <!-- Full template -->
+  <div class="kt-card"><div class="kt-card-content p-4">
+   <div class="flex items-center justify-between mb-2">
+    <h3 class="text-sm font-semibold text-mono">Full debt template</h3>
+    <span class="text-xs font-mono text-secondary-foreground"><span id="tpl-full-count">0</span>/480</span>
+   </div>
+   <textarea id="tpl-full" class="kt-textarea w-full" rows="7" maxlength="480" placeholder="Loading…"></textarea>
+   <button class="kt-btn kt-btn-sm kt-btn-ghost mt-2" id="tpl-full-default"><i class="ki-filled ki-arrow-circle-left"></i> Reset to default</button>
+  </div></div>
+
+  <!-- Partial template -->
+  <div class="kt-card"><div class="kt-card-content p-4">
+   <div class="flex items-center justify-between mb-2">
+    <h3 class="text-sm font-semibold text-mono">Partial-payment template</h3>
+    <span class="text-xs font-mono text-secondary-foreground"><span id="tpl-part-count">0</span>/480</span>
+   </div>
+   <textarea id="tpl-part" class="kt-textarea w-full" rows="7" maxlength="480" placeholder="Loading…"></textarea>
+   <button class="kt-btn kt-btn-sm kt-btn-ghost mt-2" id="tpl-part-default"><i class="ki-filled ki-arrow-circle-left"></i> Reset to default</button>
+  </div></div>
+ </div>
+
+ <div class="flex items-center gap-3 mt-4">
+  <button class="kt-btn kt-btn-primary" id="tpl-save"><i class="ki-filled ki-check"></i> Save templates</button>
+  <span class="text-xs text-secondary-foreground">Daily invoice amount: <span id="tpl-invoice" class="font-mono">—</span></span>
+ </div>
+
+ <!-- Live preview -->
+ <div class="kt-card mt-5"><div class="kt-card-content p-4">
+  <div class="flex items-center justify-between mb-3">
+   <h3 class="text-sm font-semibold text-mono">Live preview (real customers)</h3>
+   <div class="flex items-center gap-2">
+    <select id="tpl-prev-mode" class="kt-select" style="width:160px">
+     <option value="comparison">Comparison</option><option value="debt">Debt</option><option value="frappe">Frappe (ERP)</option>
+    </select>
+    <button class="kt-btn kt-btn-sm kt-btn-outline" id="tpl-prev-run"><i class="ki-filled ki-eye"></i> Preview</button>
+   </div>
+  </div>
+  <div id="tpl-prev-body" class="text-sm text-secondary-foreground">Pick a mode and hit Preview to see the message rendered for up to 8 real customers.</div>
+ </div></div>
+
+</div>
+<script src="/static/sms_template_page.js" defer></script>
+{% endblock %}
