@@ -157,7 +157,7 @@ _HOME_SUBPAGES = {
     'sessions':           'sessions_page.html',        # agents → sessions → customers → history
     'reports':            'reports_page.html',          # daily Excel reports: list/download/generate
     'sms-template':       'sms_template_page.html',     # edit full/partial SMS templates + preview
-    # officers — added as pages ship
+    'officers':           'officers_page.html',         # team: roles/passwords/hide + big-customer routing
 }
 
 # App-health metrics: the mobile backend (m6pm on Render) exposes /api/admin/metrics;

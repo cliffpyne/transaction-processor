@@ -1,0 +1,79 @@
+{% extends "home.html" %}
+{% block content %}
+<div class="kt-container-fixed" id="contentContainer">
+
+ <div class="flex items-center flex-wrap justify-between gap-3 mb-5">
+  <div><h1 class="text-xl font-semibold text-mono">Team &amp; Officers</h1>
+   <span class="text-sm text-secondary-foreground">Agents, officers, passwords, roles, and big-customer routing</span></div>
+  <div class="flex items-center gap-2">
+   <button class="kt-btn kt-btn-outline" id="ofc-reload"><i class="ki-filled ki-arrows-circle"></i> Reload</button>
+   <button class="kt-btn kt-btn-primary" id="ofc-create"><i class="ki-filled ki-user-tick"></i> New officer</button>
+  </div>
+ </div>
+
+ <div id="ofc-status" class="hidden mb-4"></div>
+
+ <!-- Team members -->
+ <div class="kt-card mb-5"><div class="kt-card-header"><h3 class="kt-card-title">Team members</h3>
+   <div class="flex items-center gap-2">
+    <select id="ofc-role-filter" class="kt-select" style="width:150px"><option value="all">All roles</option><option value="agent">Agents</option><option value="officer">Officers</option></select>
+    <input type="text" id="ofc-search" class="kt-input" style="width:200px" placeholder="Search name…">
+   </div>
+  </div>
+  <div class="kt-card-content p-0"><div class="kt-scrollable-x-auto">
+   <table class="kt-table kt-table-border align-middle text-sm w-full">
+    <thead><tr class="text-secondary-foreground">
+     <th class="text-start py-2.5 ps-5">Name</th><th>Role</th><th>Phone</th><th>Status</th><th class="pe-5 text-end">Actions</th>
+    </tr></thead>
+    <tbody id="ofc-body"><tr><td colspan="5" class="text-center p-4 text-secondary-foreground"><span class="kt-spinner"></span> loading…</td></tr></tbody>
+   </table>
+  </div></div>
+ </div>
+
+ <!-- Big-customer routing -->
+ <div class="kt-card"><div class="kt-card-header"><h3 class="kt-card-title">Big-customer routing</h3>
+   <span class="text-xs text-secondary-foreground">Each agent's biggest customers are handled by the officer chosen here</span>
+  </div>
+  <div class="kt-card-content p-4">
+   <div class="flex items-end flex-wrap gap-2 mb-4">
+    <div><label class="text-xs text-secondary-foreground">Agent</label>
+     <select id="asg-agent" class="kt-select" style="width:220px"></select></div>
+    <div><label class="text-xs text-secondary-foreground">→ Officer</label>
+     <select id="asg-officer" class="kt-select" style="width:220px"></select></div>
+    <button class="kt-btn kt-btn-primary" id="asg-add"><i class="ki-filled ki-plus"></i> Set routing</button>
+   </div>
+   <div class="kt-scrollable-x-auto">
+    <table class="kt-table kt-table-border align-middle text-sm w-full">
+     <thead><tr class="text-secondary-foreground"><th class="text-start py-2.5 ps-5">Agent</th><th>Routes big customers to</th><th class="pe-5 text-end">Remove</th></tr></thead>
+     <tbody id="asg-body"><tr><td colspan="3" class="text-center p-4 text-secondary-foreground">—</td></tr></tbody>
+    </table>
+   </div>
+  </div>
+ </div>
+
+</div>
+
+<!-- Password / create modal -->
+<div class="kt-modal" data-kt-modal="true" id="ofc-modal">
+ <div class="kt-modal-content max-w-[420px] top-[15%]">
+  <div class="kt-modal-header"><h3 class="kt-modal-title" id="ofc-modal-title">Set password</h3>
+   <button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost" data-kt-modal-dismiss="true"><i class="ki-filled ki-cross"></i></button>
+  </div>
+  <div class="kt-modal-body">
+   <div id="ofc-modal-namewrap" class="mb-3 hidden">
+    <label class="text-xs text-secondary-foreground">Officer name</label>
+    <input type="text" id="ofc-modal-name" class="kt-input w-full" placeholder="FULL NAME">
+   </div>
+   <div class="mb-1"><label class="text-xs text-secondary-foreground" id="ofc-modal-forlbl"></label></div>
+   <input type="text" id="ofc-modal-pass" class="kt-input w-full" placeholder="New password (min 4 chars)">
+   <div id="ofc-modal-err" class="text-destructive text-xs mt-2 hidden"></div>
+  </div>
+  <div class="kt-modal-footer justify-end gap-2">
+   <button type="button" class="kt-btn kt-btn-outline" data-kt-modal-dismiss="true">Cancel</button>
+   <button type="button" class="kt-btn kt-btn-primary" id="ofc-modal-save">Save</button>
+  </div>
+ </div>
+</div>
+
+<script src="/static/officers_page.js" defer></script>
+{% endblock %}
