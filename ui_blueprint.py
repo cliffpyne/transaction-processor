@@ -324,12 +324,24 @@ def admin_metrics():
     """Proxy the mobile backend's app-health metrics into the portal so the
     health dashboard (health.html) can render them with ApexCharts + tables."""
     window = request.args.get('window', 'hour')
+    # m6pm's metrics endpoint accepts EITHER the X-Metrics-Token OR a boss JWT.
+    # METRICS_TOKEN isn't set on the Render side, so the token path 401s — but
+    # the portal already logs in as boss for every other page, so we send that
+    # JWT (refreshing on 401). Token is kept as a belt-and-braces fallback.
+    def _fetch(tok):
+        headers = {'User-Agent': _M6PM_UA, 'Accept': 'application/json'}
+        if M6PM_METRICS_TOKEN:
+            headers['X-Metrics-Token'] = M6PM_METRICS_TOKEN
+        if tok:
+            headers['Authorization'] = f'Bearer {tok}'
+        return requests.get(M6PM_METRICS_URL, params={'window': window},
+                            headers=headers, timeout=20)
     try:
-        r = requests.get(M6PM_METRICS_URL, params={'window': window},
-                         headers={'X-Metrics-Token': M6PM_METRICS_TOKEN,
-                                  'User-Agent': _M6PM_UA,
-                                  'Accept': 'application/json'},
-                         timeout=20)
+        tok = _m6pm_token()
+        r = _fetch(tok)
+        if r.status_code == 401:                      # expired/invalid JWT → refresh once
+            tok = _m6pm_token(force=True)
+            r = _fetch(tok)
         return (r.text, r.status_code, {'Content-Type': 'application/json'})
     except Exception as e:
         return jsonify({'error': f'mobile backend metrics unreachable: {e}'}), 502

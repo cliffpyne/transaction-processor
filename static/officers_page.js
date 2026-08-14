@@ -139,7 +139,10 @@
 
   // ── Loaders ────────────────────────────────────────────────────────────────
   function loadAgents() {
-    get('/admin/list-agents').then(function (rows) { agents = Array.isArray(rows) ? rows : []; renderAgents(); })
+    // Use boss/agents (agent+officer, SQL-excluded) — /admin/list-agents 500s on
+    // the backend (it selects a non-existent phone column). This shape has no
+    // phone/excluded fields; renderAgents handles their absence gracefully.
+    get('/mobile/boss/agents').then(function (rows) { agents = Array.isArray(rows) ? rows : []; renderAgents(); })
       .catch(function (e) { $('ofc-body').innerHTML = '<tr><td colspan="5" class="text-center p-4 text-destructive">' + esc(e.message || 'error') + '</td></tr>'; });
   }
   function loadAssignments() {
