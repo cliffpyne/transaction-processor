@@ -155,7 +155,8 @@ _HOME_SUBPAGES = {
     'collections':        'collections_page.html',   # agents/officers dashboard
     'recordings':         'recordings_page.html',     # call recordings
     'sessions':           'sessions_page.html',        # agents → sessions → customers → history
-    # reports, sms-template, officers — added as pages ship
+    'reports':            'reports_page.html',          # daily Excel reports: list/download/generate
+    # sms-template, officers — added as pages ship
 }
 
 # App-health metrics: the mobile backend (m6pm on Render) exposes /api/admin/metrics;

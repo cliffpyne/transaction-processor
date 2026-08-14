@@ -1,0 +1,41 @@
+{% extends "home.html" %}
+{% block content %}
+<div class="kt-container-fixed" id="contentContainer">
+
+ <div class="flex items-center flex-wrap justify-between gap-3 mb-5">
+  <div><h1 class="text-xl font-semibold text-mono">Daily Reports</h1>
+   <span class="text-sm text-secondary-foreground">Per-agent Excel sheets generated each evening — download or re-run for any date</span></div>
+  <div class="flex items-center flex-wrap gap-2">
+   <input type="date" id="rep-date" class="kt-input" style="width:160px">
+   <button class="kt-btn kt-btn-outline" id="rep-refresh"><i class="ki-filled ki-arrows-circle"></i> Refresh</button>
+   <button class="kt-btn kt-btn-primary" id="rep-generate"><i class="ki-filled ki-file-added"></i> Generate now</button>
+  </div>
+ </div>
+
+ <div id="rep-status" class="hidden mb-4"></div>
+
+ <!-- Master workbook -->
+ <div id="rep-master-wrap" class="kt-card mb-4 hidden">
+  <div class="kt-card-content flex items-center justify-between gap-3 p-4">
+   <div class="flex items-center gap-3">
+    <i class="ki-filled ki-cheque text-2xl text-primary"></i>
+    <div><div class="font-semibold text-mono" id="rep-master-name">—</div>
+     <div class="text-xs text-secondary-foreground" id="rep-master-size">—</div></div>
+   </div>
+   <a class="kt-btn kt-btn-sm kt-btn-primary" id="rep-master-dl" download><i class="ki-filled ki-exit-down"></i> Download master</a>
+  </div>
+ </div>
+
+ <!-- Per-agent files -->
+ <div class="kt-card"><div class="kt-card-content p-0"><div class="kt-scrollable-x-auto">
+  <table class="kt-table kt-table-border align-middle text-sm w-full">
+   <thead><tr class="text-secondary-foreground">
+    <th class="text-start py-2.5 ps-5">Report file</th><th class="text-end">Size</th><th class="pe-5 text-end">Download</th>
+   </tr></thead>
+   <tbody id="rep-body"><tr><td colspan="3" class="text-center p-4 text-secondary-foreground"><span class="kt-spinner"></span> loading…</td></tr></tbody>
+  </table>
+ </div></div></div>
+
+</div>
+<script src="/static/reports_page.js" defer></script>
+{% endblock %}
