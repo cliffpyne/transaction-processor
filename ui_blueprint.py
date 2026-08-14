@@ -151,7 +151,10 @@ _HOME_SUBPAGES = {
     'sms':                'sms_events_page.html',
     'customers-registry': 'customers_registry_page.html',
     'health':             'health.html',
-    # dedup_alerts, users, record_edits — added as pages ship
+    # ── Field Collections (migrated from eleganskyboda.com/admin) ──
+    'collections':        'collections_page.html',   # agents/officers dashboard
+    'recordings':         'recordings_page.html',     # call recordings
+    # sessions drill-down, reports, sms-template, officers — added as pages ship
 }
 
 # App-health metrics: the mobile backend (m6pm on Render) exposes /api/admin/metrics;
@@ -162,6 +165,58 @@ M6PM_METRICS_URL   = os.environ.get('M6PM_METRICS_URL',
 M6PM_METRICS_TOKEN = os.environ.get('METRICS_TOKEN', '')
 _M6PM_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
             '(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36')
+
+# ── Mobile-backend (m6pm) admin API proxy ────────────────────────────────────
+# The mobile admin data (agents, sessions, recordings, reports, officers) lives
+# in the eleganskyboda.com backend. We migrate the *UI* into this portal as
+# Metronic pages; the pages call these APIs through one server-side proxy that
+# logs into m6pm as boss once and caches the JWT (refreshes on 401). Browser-UA
+# dodges Cloudflare's 1010. Gated to admin/editor so only portal admins pass through.
+M6PM_BASE      = os.environ.get('M6PM_BASE', 'https://www.eleganskyboda.com').rstrip('/')
+M6PM_BOSS_USER = os.environ.get('M6PM_BOSS_USER', '')
+M6PM_BOSS_PASS = os.environ.get('M6PM_BOSS_PASS', '')
+_m6pm_tok = {'v': None}
+
+def _m6pm_token(force=False):
+    if _m6pm_tok['v'] and not force:
+        return _m6pm_tok['v']
+    try:
+        r = requests.post(f'{M6PM_BASE}/api/mobile/login',
+                          json={'username': M6PM_BOSS_USER, 'password': M6PM_BOSS_PASS},
+                          headers={'User-Agent': _M6PM_UA, 'Content-Type': 'application/json'},
+                          timeout=20)
+        _m6pm_tok['v'] = r.json().get('token') if r.ok else None
+    except Exception:
+        _m6pm_tok['v'] = None
+    return _m6pm_tok['v']
+
+@ui.route('/api/m6pm/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@login_required
+@require_role('admin', 'editor')
+def m6pm_proxy(subpath):
+    """Forward /api/m6pm/<x> → eleganskyboda.com/api/<x> with a cached boss JWT."""
+    def _do(tok):
+        body = request.get_json(silent=True) if request.method in ('POST', 'PUT') else None
+        return requests.request(
+            request.method, f'{M6PM_BASE}/api/{subpath}',
+            params=request.args, json=body,
+            headers={'Authorization': f'Bearer {tok}', 'User-Agent': _M6PM_UA,
+                     'Accept': 'application/json'},
+            timeout=30)
+    tok = _m6pm_token()
+    if not tok:
+        return jsonify({'error': 'mobile backend auth failed (set M6PM_BOSS_USER/PASS)'}), 502
+    try:
+        r = _do(tok)
+        if r.status_code == 401:                     # expired → refresh once
+            tok = _m6pm_token(force=True)
+            if tok:
+                r = _do(tok)
+        # r.content (bytes) not r.text — so audio recordings stream intact too.
+        return (r.content, r.status_code,
+                {'Content-Type': r.headers.get('Content-Type', 'application/json')})
+    except Exception as e:
+        return jsonify({'error': f'mobile backend unreachable: {e}'}), 502
 
 
 @ui.route('/home')

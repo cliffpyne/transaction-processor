@@ -1,0 +1,35 @@
+{% extends "home.html" %}
+{% block content %}
+<div class="kt-container-fixed" id="contentContainer">
+
+ <div class="flex items-center flex-wrap justify-between gap-3 mb-5">
+  <div><h1 class="text-xl font-semibold text-mono">Call Recordings</h1>
+   <span class="text-sm text-secondary-foreground">Filtered by the actual call date (Tanzania time)</span></div>
+  <div class="flex items-center flex-wrap gap-2">
+   <input type="date" id="rec-date" class="kt-input" style="width:160px">
+   <select id="rec-role" class="kt-select" style="width:150px">
+    <option value="all">All roles</option><option value="agent">Agents</option><option value="officer">Officers</option>
+   </select>
+   <select id="rec-person" class="kt-select" style="width:180px"><option value="">Any caller</option></select>
+   <input type="text" id="rec-search" class="kt-input" style="width:200px" placeholder="Search customer / plate…">
+   <select id="rec-pagesize" class="kt-select" style="width:120px">
+    <option value="20">Show 20</option><option value="50">Show 50</option><option value="100">Show 100</option>
+    <option value="250">Show 250</option><option value="999999">Show all</option>
+   </select>
+   <button class="kt-btn kt-btn-outline" id="rec-refresh"><i class="ki-filled ki-arrows-circle"></i> Refresh</button>
+  </div>
+ </div>
+
+ <div class="kt-card"><div class="kt-card-content p-0"><div class="kt-scrollable-x-auto">
+  <table class="kt-table kt-table-border align-middle text-sm w-full">
+   <thead><tr class="text-secondary-foreground">
+    <th class="text-start py-2.5 ps-5">Time</th><th>Caller</th><th>Customer · Plate</th>
+    <th class="text-end">Attempt</th><th>Status</th><th class="text-end">Duration</th><th class="pe-5">Play</th>
+   </tr></thead>
+   <tbody id="rec-body"><tr><td colspan="7" class="text-center p-4 text-secondary-foreground"><span class="kt-spinner"></span> loading…</td></tr></tbody>
+  </table>
+ </div></div></div>
+
+</div>
+<script src="/static/recordings_page.js" defer></script>
+{% endblock %}
