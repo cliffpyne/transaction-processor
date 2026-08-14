@@ -1,0 +1,45 @@
+{% extends "home.html" %}
+{% block content %}
+<div class="kt-container-fixed" id="contentContainer">
+
+ <!-- Header + breadcrumb + date -->
+ <div class="flex items-center flex-wrap justify-between gap-3 mb-5">
+  <div>
+   <h1 class="text-xl font-semibold text-mono">Field Sessions</h1>
+   <nav class="flex items-center gap-1.5 text-sm text-secondary-foreground mt-0.5" id="ses-crumb">
+    <a href="#" class="hover:text-primary" data-level="agents">All agents</a>
+   </nav>
+  </div>
+  <div class="flex items-center flex-wrap gap-2">
+   <input type="date" id="ses-date" class="kt-input" style="width:160px">
+   <input type="text" id="ses-search" class="kt-input" style="width:200px" placeholder="Search…">
+   <button class="kt-btn kt-btn-outline" id="ses-refresh"><i class="ki-filled ki-arrows-circle"></i> Refresh</button>
+  </div>
+ </div>
+
+ <div class="kt-card"><div class="kt-card-content p-0"><div class="kt-scrollable-x-auto">
+  <table class="kt-table kt-table-border align-middle text-sm w-full">
+   <thead id="ses-head"></thead>
+   <tbody id="ses-body">
+    <tr><td class="text-center p-4 text-secondary-foreground"><span class="kt-spinner"></span> loading…</td></tr>
+   </tbody>
+  </table>
+ </div></div></div>
+
+</div>
+
+<!-- Customer call-history modal (reuses KTUI modal markup) -->
+<div class="kt-modal" data-kt-modal="true" id="ses-hist-modal">
+ <div class="kt-modal-content max-w-[640px] top-[8%]">
+  <div class="kt-modal-header">
+   <h3 class="kt-modal-title" id="ses-hist-title">Customer history</h3>
+   <button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-ghost" data-kt-modal-dismiss="true">
+    <i class="ki-filled ki-cross"></i>
+   </button>
+  </div>
+  <div class="kt-modal-body" id="ses-hist-body" style="max-height:70vh;overflow:auto"></div>
+ </div>
+</div>
+
+<script src="/static/sessions_page.js" defer></script>
+{% endblock %}

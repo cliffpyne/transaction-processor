@@ -154,7 +154,8 @@ _HOME_SUBPAGES = {
     # ── Field Collections (migrated from eleganskyboda.com/admin) ──
     'collections':        'collections_page.html',   # agents/officers dashboard
     'recordings':         'recordings_page.html',     # call recordings
-    # sessions drill-down, reports, sms-template, officers — added as pages ship
+    'sessions':           'sessions_page.html',        # agents → sessions → customers → history
+    # reports, sms-template, officers — added as pages ship
 }
 
 # App-health metrics: the mobile backend (m6pm on Render) exposes /api/admin/metrics;
