@@ -51,11 +51,14 @@
   function loadAgents() {
     state.level = 'agents'; crumb();
     $('ses-head').innerHTML = '<tr class="text-secondary-foreground"><th class="text-start py-2.5 ps-5">Name</th><th>Role</th><th>Status</th><th class="pe-5"></th></tr>';
+    var apply = function (rows) { cache.agents = Array.isArray(rows) ? rows : []; renderAgents(); };
+    if (window.PortalSWR) {
+      PortalSWR.load('sessions:agents', '/api/m6pm/mobile/boss/agents', apply,
+        function (e) { if (!cache.agents.length) errRow(e, 4); });
+      return;
+    }
     spinner();
-    get('/mobile/boss/agents').then(function (rows) {
-      cache.agents = Array.isArray(rows) ? rows : [];
-      renderAgents();
-    }).catch(function (e) { errRow(e, 4); });
+    get('/mobile/boss/agents').then(apply).catch(function (e) { errRow(e, 4); });
   }
   function renderAgents() {
     var q = ($('ses-search').value || '').trim().toLowerCase();

@@ -41,10 +41,28 @@
     var mb = $('rec-more'); if (mb) mb.addEventListener('click', function () { shown += step; render(); });
   }
 
+  // Set cache, rebuild the caller dropdown, and render. Shared by the instant
+  // cached view and the fresh fetch.
+  function applyData(all) {
+    cache = all || [];
+    var callers = Array.from(new Set(cache.map(function (r) { return r.agent_name; }).filter(Boolean))).sort();
+    var prev = $('rec-person').value;
+    $('rec-person').innerHTML = '<option value="">Any caller</option>' + callers.map(function (a) { return '<option value="' + esc(a) + '"' + (a === prev ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('');
+    var pre = new URLSearchParams(location.search).get('caller'); if (pre && callers.indexOf(pre) > -1) $('rec-person').value = pre;
+    render();
+  }
+
   function load() {
     var day = $('rec-date').value || todayISO();
     shown = parseInt($('rec-pagesize').value, 10) || 20;
-    $('rec-body').innerHTML = '<tr><td colspan="7" class="text-center p-4"><span class="kt-spinner"></span></td></tr>';
+    var ckey = 'recordings:' + day;
+    // Instant paint from the last-saved copy of this day (if any).
+    var served = false;
+    if (window.PortalSWR) {
+      var cached = PortalSWR.read(ckey);
+      if (cached && Array.isArray(cached.data)) { served = true; applyData(cached.data); }
+    }
+    if (!served) $('rec-body').innerHTML = '<tr><td colspan="7" class="text-center p-4"><span class="kt-spinner"></span></td></tr>';
     var all = [], offset = 0;
     (function next() {
       fetch('/api/m6pm/mobile/boss/recordings?date=' + encodeURIComponent(day) + '&limit=1000&offset=' + offset, { credentials: 'same-origin' })
@@ -54,14 +72,10 @@
             all = all.concat(page); offset += 1000;
             if (page.length === 1000 && offset < 50000) return next();
           }
-          cache = all;
-          var callers = Array.from(new Set(cache.map(function (r) { return r.agent_name; }).filter(Boolean))).sort();
-          var prev = $('rec-person').value;
-          $('rec-person').innerHTML = '<option value="">Any caller</option>' + callers.map(function (a) { return '<option value="' + esc(a) + '"' + (a === prev ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('');
-          var pre = new URLSearchParams(location.search).get('caller'); if (pre && callers.indexOf(pre) > -1) $('rec-person').value = pre;
-          render();
+          if (window.PortalSWR) PortalSWR.write(ckey, all);
+          applyData(all);
         })
-        .catch(function (e) { $('rec-body').innerHTML = '<tr><td colspan="7" class="text-center p-4 text-destructive">' + esc(e.message || 'error') + '</td></tr>'; });
+        .catch(function (e) { if (!served) $('rec-body').innerHTML = '<tr><td colspan="7" class="text-center p-4 text-destructive">' + esc(e.message || 'error') + '</td></tr>'; });
     })();
   }
 

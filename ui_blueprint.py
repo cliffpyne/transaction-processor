@@ -15,6 +15,8 @@ Table access matrix:
 
 import json
 import os
+import threading
+import time
 from datetime import datetime, timedelta
 
 import bcrypt
@@ -193,31 +195,113 @@ def _m6pm_token(force=False):
         _m6pm_tok['v'] = None
     return _m6pm_tok['v']
 
-@ui.route('/api/m6pm/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
-@login_required
-@require_role('admin', 'editor')
-def m6pm_proxy(subpath):
-    """Forward /api/m6pm/<x> → eleganskyboda.com/api/<x> with a cached boss JWT."""
+# ── Stale-while-revalidate cache for dashboard GETs ───────────────────────────
+# The portal→Cloudflare→Render→Postgres round-trip is ~1s of pure latency on
+# every call. Instagram never makes you wait for that: it shows the last-known
+# data instantly and refreshes behind your back. We do the same here.
+#
+#   • fresh  (age < _SWR_FRESH):  serve cache, no backend hit at all.
+#   • stale  (age < _SWR_MAX):    serve cache INSTANTLY, refresh in a background
+#                                 thread so the next load is fresh.
+#   • miss / too old:             fetch synchronously (the only slow path — the
+#                                 first visit of the day).
+#
+# Only GETs are cached, and only ones that returned 200. Everything the boss
+# mutates (POST/PUT/DELETE — passwords, roles, generate, assignments) always
+# hits the backend live. Audio (recording/<id>) is skipped — it's big + streamed.
+_SWR_FRESH = 12      # seconds a cached body is served with no backend call
+_SWR_MAX   = 600     # seconds we'll serve stale (while revalidating) before forcing a live fetch
+_m6pm_cache = {}     # key -> {'ts': epoch, 'content': bytes, 'ctype': str, 'refreshing': bool}
+_m6pm_cache_lock = threading.Lock()
+
+def _swr_cacheable(subpath):
+    if request.method != 'GET':
+        return False
+    # Don't cache binary audio streams — large and per-id.
+    if subpath.startswith('mobile/boss/recording/'):
+        return False
+    return True
+
+def _m6pm_fetch(subpath, args, method='GET', body=None):
+    """One authenticated call to the mobile backend, refreshing the JWT on 401."""
     def _do(tok):
-        body = request.get_json(silent=True) if request.method in ('POST', 'PUT') else None
         return requests.request(
-            request.method, f'{M6PM_BASE}/api/{subpath}',
-            params=request.args, json=body,
+            method, f'{M6PM_BASE}/api/{subpath}',
+            params=args, json=body,
             headers={'Authorization': f'Bearer {tok}', 'User-Agent': _M6PM_UA,
                      'Accept': 'application/json'},
             timeout=30)
     tok = _m6pm_token()
     if not tok:
+        return None
+    r = _do(tok)
+    if r.status_code == 401:                          # expired → refresh once
+        tok = _m6pm_token(force=True)
+        if tok:
+            r = _do(tok)
+    return r
+
+def _swr_refresh(key, subpath, args):
+    """Background revalidation — updates the cache so the next reader is fresh."""
+    try:
+        r = _m6pm_fetch(subpath, args)
+        if r is not None and r.status_code == 200:
+            with _m6pm_cache_lock:
+                _m6pm_cache[key] = {
+                    'ts': time.time(), 'content': r.content,
+                    'ctype': r.headers.get('Content-Type', 'application/json'),
+                    'refreshing': False}
+            return
+    except Exception:
+        pass
+    with _m6pm_cache_lock:                             # refresh failed — let others retry
+        if key in _m6pm_cache:
+            _m6pm_cache[key]['refreshing'] = False
+
+@ui.route('/api/m6pm/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@login_required
+@require_role('admin', 'editor')
+def m6pm_proxy(subpath):
+    """Forward /api/m6pm/<x> → eleganskyboda.com/api/<x> with a cached boss JWT
+    and stale-while-revalidate caching so the dashboard never waits on the ~1s
+    Render round-trip twice for the same data."""
+    cacheable = _swr_cacheable(subpath)
+    key = None
+    if cacheable:
+        key = subpath + '?' + '&'.join(f'{k}={v}' for k, v in sorted(request.args.items()))
+        with _m6pm_cache_lock:
+            hit = _m6pm_cache.get(key)
+        if hit:
+            age = time.time() - hit['ts']
+            if age < _SWR_MAX:
+                # Serve instantly. If it's getting stale, kick a background refresh.
+                if age >= _SWR_FRESH and not hit.get('refreshing'):
+                    with _m6pm_cache_lock:
+                        hit['refreshing'] = True
+                    threading.Thread(target=_swr_refresh,
+                                     args=(key, subpath, dict(request.args)),
+                                     daemon=True).start()
+                return (hit['content'], 200,
+                        {'Content-Type': hit['ctype'], 'X-Portal-Cache': f'HIT;age={int(age)}s'})
+
+    # Cache miss / non-cacheable / too-old → live fetch (mutations included).
+    if not _m6pm_token():
         return jsonify({'error': 'mobile backend auth failed (set M6PM_BOSS_USER/PASS)'}), 502
     try:
-        r = _do(tok)
-        if r.status_code == 401:                     # expired → refresh once
-            tok = _m6pm_token(force=True)
-            if tok:
-                r = _do(tok)
+        body = request.get_json(silent=True) if request.method in ('POST', 'PUT') else None
+        r = _m6pm_fetch(subpath, request.args, method=request.method, body=body)
+        if r is None:
+            return jsonify({'error': 'mobile backend auth failed'}), 502
+        if cacheable and r.status_code == 200:
+            with _m6pm_cache_lock:
+                _m6pm_cache[key] = {
+                    'ts': time.time(), 'content': r.content,
+                    'ctype': r.headers.get('Content-Type', 'application/json'),
+                    'refreshing': False}
         # r.content (bytes) not r.text — so audio recordings stream intact too.
         return (r.content, r.status_code,
-                {'Content-Type': r.headers.get('Content-Type', 'application/json')})
+                {'Content-Type': r.headers.get('Content-Type', 'application/json'),
+                 'X-Portal-Cache': 'MISS'})
     except Exception as e:
         return jsonify({'error': f'mobile backend unreachable: {e}'}), 502
 

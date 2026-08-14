@@ -49,13 +49,23 @@
 
   function load() {
     $('col_refresh').disabled = true;
+    // Instant render from the browser's last-saved copy, then swap in fresh
+    // data the moment it lands. PortalSWR falls back to a plain fetch if the
+    // helper isn't present. Keeps the dashboard from ever waiting ~1s twice.
+    var apply = function (d) {
+      data.agents = d.agents || (Array.isArray(d) ? d : []);
+      data.summary = d.summary || {};
+      render();
+    };
+    if (window.PortalSWR) {
+      PortalSWR.load('collections:today', '/api/m6pm/mobile/boss/today', apply,
+        function (e) { if (!data.agents.length) $('col_body').innerHTML = '<tr><td colspan="5" class="text-center p-4 text-destructive">' + (e.message || 'error') + '</td></tr>'; }
+      ).finally(function () { $('col_refresh').disabled = false; });
+      return;
+    }
     fetch('/api/m6pm/mobile/boss/today', { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
-      .then(function (d) {
-        data.agents = d.agents || (Array.isArray(d) ? d : []);
-        data.summary = d.summary || {};
-        render();
-      })
+      .then(apply)
       .catch(function (e) { $('col_body').innerHTML = '<tr><td colspan="5" class="text-center p-4 text-destructive">' + (e.message || 'error') + '</td></tr>'; })
       .finally(function () { $('col_refresh').disabled = false; });
   }
