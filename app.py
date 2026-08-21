@@ -3329,6 +3329,50 @@ def read_nmb_pdf(filepath):
     return transactions_list
 
 
+# ── NMB stable-transaction guard (added 2026-08-21) ───────────────────────────
+# NMB rewrote its exported reference format (…EC/…GWX → 101CSHD…/…AGPS/…FTIT/…
+# TPFT). That slipped a whole already-ingested month past the ref-based dedup and
+# re-posted it (double-billing). The per-transaction agency Trx ID ("PS…") is
+# INVARIANT across that rewrite, so we ALSO dedup on it — a row is a duplicate if
+# its ref OR its Trx ID was seen before. This makes any future NMB ref-format
+# change a non-event.
+_TRX_ID_RX = re.compile(r'Trx\s*ID\s*(PS\d+)', re.IGNORECASE)
+
+
+def extract_trx_id(text):
+    """Stable 'PS…' agency Trx ID from an NMB description, or None (transfers/
+    TIPS carry none — those keep deduping on ref + description as before)."""
+    if not text or pd.isna(text):
+        return None
+    m = _TRX_ID_RX.search(str(text))
+    return m.group(1).upper() if m else None
+
+
+def load_nmb_existing_trx_ids(service):
+    """Trx IDs already present in the NMB money tabs, read from the description
+    column (D). These tabs are NMB-only (NOT the 30k-row CRDB PASSED), so this is
+    cheap. On a read error we print and skip that tab, leaving the ref-based
+    dedup as the floor — we never silently drop the guard."""
+    tabs = ['PASSED_NMB', 'PASSED_SAV_NMB', 'FAILED_NMB',
+            'PASSED_SAV_NMB_OLD', 'FAILED_NMB_OLD', 'BANK_PASSED', 'BANK_FAILED']
+    trx = set()
+    for logical in tabs:
+        try:
+            sid, tab = _resolve_sheet(logical)
+            res = service.spreadsheets().values().get(
+                spreadsheetId=sid, range=f'{tab}!D:D',
+                valueRenderOption='UNFORMATTED_VALUE').execute()
+            for r in res.get('values', [])[1:]:
+                if r:
+                    t = extract_trx_id(r[0])
+                    if t:
+                        trx.add(t)
+        except Exception as e:
+            print(f"⚠️ NMB trx-id load {logical}: {e}")
+    print(f"NMB stable Trx IDs loaded for dedup: {len(trx)}")
+    return trx
+
+
 def process_nmb_transactions(filepath):
     """
     🔥 UPDATED: Process NMB bank statement with 3-tier routing:
@@ -3431,6 +3475,8 @@ def process_nmb_transactions(filepath):
             .union(existing_failed_nmb_messages)
             .union(all_iphone_existing_messages)   # 🔥 iPhone sheets included
         )
+        # 🔥 Stable Trx-ID guard — format-proof dedup (2026-08-21 NMB ref rewrite)
+        all_existing_trx_ids = load_nmb_existing_trx_ids(service)
         print(f"Total unique NMB refs in system (old+new): {len(all_existing_refs)}")
 
         # 🔥 Free individual sets — keep all_iphone_existing_messages (still needed in loop)
@@ -3494,6 +3540,9 @@ def process_nmb_transactions(filepath):
                 else ''
             )
 
+            # 🔥 Stable Trx ID — invariant across NMB ref-format changes.
+            trx_id = extract_trx_id(description)
+
             # ── Duplicate check ────────────────────────────────────────────────
             # description-based dedup only runs when description is non-empty,
             # otherwise every no-description row would collide on the empty
@@ -3501,6 +3550,10 @@ def process_nmb_transactions(filepath):
             # dropped. Ref-based dedup still guards those rows.
             is_duplicate = False
             if ref_number and ref_number in all_existing_refs:
+                is_duplicate = True
+                stats['skipped'] += 1
+            elif trx_id and trx_id in all_existing_trx_ids:
+                # Same agency transaction under a re-formatted reference — skip.
                 is_duplicate = True
                 stats['skipped'] += 1
             elif description and description in all_existing_messages:
